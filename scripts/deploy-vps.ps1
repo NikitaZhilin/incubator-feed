@@ -10,7 +10,11 @@ param(
 
     [string]$Branch = "main",
 
-    [string]$EnvFile = ".env.prod"
+    [string]$EnvFile = ".env.prod",
+
+    [string]$ImageName = "incubator-feed:latest",
+
+    [string]$ContainerName = "incubator-feed-bot"
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,10 +53,6 @@ if ! command -v docker >/dev/null 2>&1; then
   echo "Docker is required on the VPS." >&2
   exit 1
 fi
-if ! docker compose version >/dev/null 2>&1; then
-  echo "Docker Compose v2 is required on the VPS." >&2
-  exit 1
-fi
 if [ -d "`$DEPLOY_PATH/.git" ]; then
   git -C "`$DEPLOY_PATH" fetch origin "`$BRANCH"
   git -C "`$DEPLOY_PATH" checkout "`$BRANCH"
@@ -67,14 +67,29 @@ mkdir -p "`$DEPLOY_PATH/data" "`$DEPLOY_PATH/logs" "`$DEPLOY_PATH/backups"
 ssh -p $Port $SshTarget $prepareCommand
 scp -P $Port $EnvFile "$SshTarget`:$DeployPath/.env.prod"
 
+$quotedImageName = ConvertTo-ShellSingleQuoted $ImageName
+$quotedContainerName = ConvertTo-ShellSingleQuoted $ContainerName
+
 $runCommand = @"
 set -e
 cd $quotedDeployPath
-docker compose build
-docker compose run --rm bot python -B scripts/migrate.py
-docker compose up -d bot
-docker compose ps
-docker compose logs --tail=80 bot
+IMAGE_NAME=$quotedImageName
+CONTAINER_NAME=$quotedContainerName
+docker build -t "`$IMAGE_NAME" .
+docker run --rm --env-file .env.prod \
+  -v "$DeployPath/data:/app/data" \
+  -v "$DeployPath/logs:/app/logs" \
+  -v "$DeployPath/backups:/app/backups" \
+  "`$IMAGE_NAME" python -B scripts/migrate.py
+docker rm -f "`$CONTAINER_NAME" >/dev/null 2>&1 || true
+docker run -d --name "`$CONTAINER_NAME" --restart unless-stopped \
+  --env-file "$DeployPath/.env.prod" \
+  -v "$DeployPath/data:/app/data" \
+  -v "$DeployPath/logs:/app/logs" \
+  -v "$DeployPath/backups:/app/backups" \
+  "`$IMAGE_NAME" python main.py
+docker ps --filter "name=`$CONTAINER_NAME"
+docker logs --tail=80 "`$CONTAINER_NAME"
 "@
 
 ssh -p $Port $SshTarget $runCommand

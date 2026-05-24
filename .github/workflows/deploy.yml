@@ -35,12 +35,30 @@ jobs:
     env:
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/incubator-feed' }}
       VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+      IMAGE_NAME: incubator-feed:latest
+      CONTAINER_NAME: incubator-feed-bot
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Check deployment secrets
+        id: deploy-secrets
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          if [ -n "$BOT_TOKEN" ] && [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_SSH_KEY" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Deployment skipped: configure BOT_TOKEN, VPS_HOST, VPS_USER, and VPS_SSH_KEY secrets."
+          fi
+
       - name: Configure SSH
+        if: steps.deploy-secrets.outputs.ready == 'true'
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
@@ -53,28 +71,34 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p "$VPS_PORT" "$VPS_HOST" >> ~/.ssh/known_hosts
 
-      - name: Upload project
+      - name: Update project on VPS
+        if: steps.deploy-secrets.outputs.ready == 'true'
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
         run: |
-          test -n "$VPS_USER"
-          ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "mkdir -p '$DEPLOY_PATH'"
-          rsync -az --delete \
-            -e "ssh -i ~/.ssh/deploy_key -p $VPS_PORT" \
-            --exclude '.git/' \
-            --exclude '.env' \
-            --exclude '.env.dev' \
-            --exclude '.env.prod' \
-            --exclude '.venv/' \
-            --exclude '__pycache__/' \
-            --exclude '.pytest_cache/' \
-            --exclude 'data/' \
-            --exclude 'logs/' \
-            --exclude 'backups/' \
-            ./ "$VPS_USER@$VPS_HOST:$DEPLOY_PATH/"
+          ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "
+            set -e
+            DEPLOY_PATH='$DEPLOY_PATH'
+            REPO_URL='https://github.com/NikitaZhilin/incubator-feed.git'
+            BRANCH='main'
+            if ! command -v docker >/dev/null 2>&1; then
+              echo 'Docker is required on the VPS.' >&2
+              exit 1
+            fi
+            if [ -d \"\$DEPLOY_PATH/.git\" ]; then
+              git -C \"\$DEPLOY_PATH\" fetch origin \"\$BRANCH\"
+              git -C \"\$DEPLOY_PATH\" checkout \"\$BRANCH\"
+              git -C \"\$DEPLOY_PATH\" reset --hard \"origin/\$BRANCH\"
+            else
+              mkdir -p \"\$(dirname \"\$DEPLOY_PATH\")\"
+              git clone --branch \"\$BRANCH\" \"\$REPO_URL\" \"\$DEPLOY_PATH\"
+            fi
+            mkdir -p \"\$DEPLOY_PATH/data\" \"\$DEPLOY_PATH/logs\" \"\$DEPLOY_PATH/backups\"
+          "
 
       - name: Write production environment
+        if: steps.deploy-secrets.outputs.ready == 'true'
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
@@ -100,6 +124,7 @@ jobs:
           rm -f .env.prod.deploy
 
       - name: Start bot
+        if: steps.deploy-secrets.outputs.ready == 'true'
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
@@ -108,9 +133,19 @@ jobs:
             set -e
             cd '$DEPLOY_PATH'
             mkdir -p data logs backups
-            docker compose build
-            docker compose run --rm bot python -B scripts/migrate.py
-            docker compose up -d bot
-            docker compose ps
-            docker compose logs --tail=80 bot
+            docker build -t '$IMAGE_NAME' .
+            docker run --rm --env-file .env.prod \
+              -v '$DEPLOY_PATH/data:/app/data' \
+              -v '$DEPLOY_PATH/logs:/app/logs' \
+              -v '$DEPLOY_PATH/backups:/app/backups' \
+              '$IMAGE_NAME' python -B scripts/migrate.py
+            docker rm -f '$CONTAINER_NAME' >/dev/null 2>&1 || true
+            docker run -d --name '$CONTAINER_NAME' --restart unless-stopped \
+              --env-file '$DEPLOY_PATH/.env.prod' \
+              -v '$DEPLOY_PATH/data:/app/data' \
+              -v '$DEPLOY_PATH/logs:/app/logs' \
+              -v '$DEPLOY_PATH/backups:/app/backups' \
+              '$IMAGE_NAME' python main.py
+            docker ps --filter name='$CONTAINER_NAME'
+            docker logs --tail=80 '$CONTAINER_NAME'
           "

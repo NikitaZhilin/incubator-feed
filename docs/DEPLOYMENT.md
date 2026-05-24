@@ -37,9 +37,9 @@ Optional repository variable:
 DEPLOY_PATH=/opt/incubator-feed
 ```
 
-The workflow uploads the checked-out project to the VPS, writes `.env.prod`
-from GitHub Secrets, runs migrations, rebuilds the Docker image, and starts the
-bot with Docker Compose.
+The workflow updates the project on the VPS, writes `.env.prod` from GitHub
+Secrets, runs migrations, rebuilds the Docker image, and starts the bot as a
+Docker container with `--restart unless-stopped`.
 
 ## Manual VPS deploy
 
@@ -67,7 +67,6 @@ The VPS must have:
 
 - SSH access from GitHub Actions or this workstation;
 - Git;
-- Docker;
-- Docker Compose v2.
+- Docker.
 
 Runtime state is stored on the VPS in `data/`, `logs/`, and `backups/`.
