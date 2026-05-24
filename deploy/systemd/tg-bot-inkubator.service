@@ -1,0 +1,18 @@
+[Unit]
+Description=Telegram incubator and feed accounting bot
+After=network-online.target
+Wants=network-online.target
+OnFailure=tg-bot-inkubator-failure@%n.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/tg_bot_inkubator
+EnvironmentFile=/opt/tg_bot_inkubator/.env.prod
+ExecStart=/opt/tg_bot_inkubator/.venv/bin/python /opt/tg_bot_inkubator/main.py
+Restart=always
+RestartSec=10
+User=tg-bot
+Group=tg-bot
+
+[Install]
+WantedBy=multi-user.target

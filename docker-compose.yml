@@ -1,0 +1,27 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+    command: ["python", "main.py"]
+    healthcheck:
+      test: ["CMD", "python", "scripts/check_disk.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  backup:
+    build: .
+    profiles: ["manual"]
+    env_file:
+      - .env.prod
+    volumes:
+      - ./data:/app/data
+      - ./backups:/app/backups
+    command: ["python", "scripts/backup.py"]

@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Local secrets
+.env
+id
+id.txt
+
+# Runtime state
+bot.pid
+bot.lock
+bot.log
+last_restart_notice.txt
+data/*.db
+data/*.db-*
+data/*.lock
+logs/*.log
+logs/*.log.*
+backups/
+*.backup
+
+# Local environment overrides
+.env.*
+!.env.example
+!.env.dev.example
+!.env.prod.example
+
+# Docker runtime
+.docker/
+
+# OS / editor
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini

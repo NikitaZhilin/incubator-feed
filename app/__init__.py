@@ -1,0 +1,1 @@
+"""Egg incubation Telegram bot."""

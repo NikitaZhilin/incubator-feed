@@ -1,0 +1,10 @@
+[Unit]
+Description=Backup Telegram incubator bot SQLite database
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/tg_bot_inkubator
+EnvironmentFile=/opt/tg_bot_inkubator/.env.prod
+ExecStart=/opt/tg_bot_inkubator/.venv/bin/python /opt/tg_bot_inkubator/scripts/backup.py
+User=tg-bot
+Group=tg-bot

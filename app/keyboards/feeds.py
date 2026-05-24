@@ -1,0 +1,108 @@
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+
+def feeds_menu_keyboard(feed_buttons: list[tuple[int, str]] | None = None) -> InlineKeyboardMarkup:
+    rows = []
+    for feed_id, name in feed_buttons or []:
+        rows.append([InlineKeyboardButton(text=f"🌾 {name[:28]}", callback_data=f"feeds:view:{feed_id}")])
+    rows.append(
+        [
+            InlineKeyboardButton(text="➕ Добавить корм", callback_data="feeds:add"),
+            InlineKeyboardButton(text="🧮 Смесь", callback_data="feeds:mix"),
+        ]
+    )
+    rows.append([InlineKeyboardButton(text="🐔 Группы птицы", callback_data="feeds:groups")])
+    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def feed_rate_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="80 г", callback_data="feed_rate:80"),
+                InlineKeyboardButton(text="110 г", callback_data="feed_rate:110"),
+                InlineKeyboardButton(text="120 г", callback_data="feed_rate:120"),
+            ],
+            [
+                InlineKeyboardButton(text="150 г", callback_data="feed_rate:150"),
+                InlineKeyboardButton(text="Ввести вручную", callback_data="feed_rate:manual"),
+            ],
+            [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")],
+        ]
+    )
+
+
+def feed_cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")],
+        ]
+    )
+
+
+def feed_actions_keyboard(feed_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="➕ Пополнить", callback_data=f"feeds:add_amount:{feed_id}"),
+                InlineKeyboardButton(text="➖ Списать", callback_data=f"feeds:write_off:{feed_id}"),
+            ],
+            [
+                InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"feeds:edit:{feed_id}"),
+                InlineKeyboardButton(text="📜 История", callback_data=f"feeds:history:{feed_id}"),
+            ],
+            [InlineKeyboardButton(text="🔄 Задать остаток", callback_data=f"feeds:restock:{feed_id}")],
+            [InlineKeyboardButton(text="🗑 Архивировать", callback_data=f"feeds:delete:{feed_id}")],
+            [InlineKeyboardButton(text="🌾 К кормам", callback_data="feeds:menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
+        ]
+    )
+
+
+def feed_delete_confirm_keyboard(feed_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Да, удалить", callback_data=f"feeds:delete_confirm:{feed_id}")],
+            [InlineKeyboardButton(text="Отмена", callback_data=f"feeds:view:{feed_id}")],
+        ]
+    )
+
+
+def feed_edit_keyboard(feed_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Название", callback_data=f"feeds:edit_field:{feed_id}:name"),
+                InlineKeyboardButton(text="Птицы", callback_data=f"feeds:edit_field:{feed_id}:birds"),
+            ],
+            [
+                InlineKeyboardButton(text="Расход", callback_data=f"feeds:edit_field:{feed_id}:rate"),
+                InlineKeyboardButton(text="Порог", callback_data=f"feeds:edit_field:{feed_id}:threshold"),
+            ],
+            [InlineKeyboardButton(text="Группа птицы", callback_data=f"feeds:edit_field:{feed_id}:group")],
+            [InlineKeyboardButton(text="Отмена", callback_data=f"feeds:view:{feed_id}")],
+        ]
+    )
+
+
+def bird_group_select_keyboard(groups, *, allow_skip: bool = True, prefix: str = "feeds:select_group") -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"{group.name} ({group.bird_count})", callback_data=f"{prefix}:{group.id}")]
+        for group in groups
+    ]
+    if allow_skip:
+        rows.append([InlineKeyboardButton(text="Без группы", callback_data=f"{prefix}:none")])
+    rows.append([InlineKeyboardButton(text="Создать группу", callback_data="feeds:group_add")])
+    rows.append([InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def bird_groups_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Создать группу", callback_data="feeds:group_add")],
+            [InlineKeyboardButton(text="🌾 К кормам", callback_data="feeds:menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
+        ]
+    )

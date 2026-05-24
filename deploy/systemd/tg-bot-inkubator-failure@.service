@@ -1,0 +1,10 @@
+[Unit]
+Description=Notify admins about failed Telegram incubator bot unit %i
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/tg_bot_inkubator
+EnvironmentFile=/opt/tg_bot_inkubator/.env.prod
+ExecStart=/opt/tg_bot_inkubator/.venv/bin/python /opt/tg_bot_inkubator/scripts/notify_admin_failure.py %i
+User=tg-bot
+Group=tg-bot
