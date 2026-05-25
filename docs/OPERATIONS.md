@@ -27,8 +27,9 @@ journalctl -u tg-bot-inkubator.service -f
 7. Перезапустить сервис.
 8. Проверить статус сервиса.
 9. Проверить последние логи.
-10. Отправить `/start` боту.
-11. Проверить свежий бэкап.
+10. Отправить или проверить release notice: `python -B scripts/notify_release.py --version VERSION --notes "Кратко об изменениях"`.
+11. Отправить `/start` боту.
+12. Проверить свежий бэкап.
 
 ## Disk monitoring
 

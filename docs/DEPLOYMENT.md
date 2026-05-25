@@ -41,6 +41,21 @@ The workflow updates the project on the VPS, writes `.env.prod` from GitHub
 Secrets, runs migrations, rebuilds the Docker image, and starts the bot as a
 Docker container with `--restart unless-stopped`.
 
+After a successful deploy the workflow sends a release notice to active users
+who have service notifications enabled. The notice is deduplicated in
+`notification_log` by release version, so re-running the same deploy does not
+send the same update twice.
+
+For a manual GitHub Actions run you can fill:
+
+```text
+release_version=2026.05.25-web-menu
+release_notes=Добавлена ссылка на web-версию; Web-ключ теперь удобно копируется
+```
+
+The message opens the main bot menu with a reply keyboard and includes the MVP
+testing warning.
+
 ## Manual VPS deploy
 
 Create local `.env.prod` from `.env.prod.example` and fill in production values.
@@ -59,6 +74,34 @@ Use a non-default port or path if needed:
   -SshTarget deploy@YOUR_SERVER_IP `
   -Port 2222 `
   -DeployPath /opt/incubator-feed
+```
+
+Pass release text when the deploy should explicitly announce a user-visible
+change:
+
+```powershell
+.\scripts\deploy-vps.ps1 `
+  -SshTarget deploy@YOUR_SERVER_IP `
+  -ReleaseVersion 2026.05.25-web-menu `
+  -ReleaseNotes "Добавлена ссылка на web-версию; Web-ключ теперь удобно копируется"
+```
+
+Use `-SkipReleaseNotice` only for purely technical redeploys that should stay
+silent.
+
+You can also send or retry the notice from the VPS. The same version will not
+be duplicated for users who already received it:
+
+```bash
+cd /opt/incubator-feed
+docker run --rm --env-file .env.prod \
+  -v /opt/incubator-feed/data:/app/data \
+  -v /opt/incubator-feed/logs:/app/logs \
+  -v /opt/incubator-feed/backups:/app/backups \
+  incubator-feed:latest \
+  python -B scripts/notify_release.py \
+    --version 2026.05.25-web-menu \
+    --notes "Добавлена ссылка на web-версию; Web-ключ теперь удобно копируется"
 ```
 
 ## Server requirements

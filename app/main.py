@@ -1,7 +1,6 @@
 import asyncio
 import logging
 from logging.handlers import RotatingFileHandler
-from datetime import datetime, timedelta, timezone
 import traceback
 
 from aiogram import Bot, Dispatcher
@@ -11,7 +10,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.config import load_config
 from app.handlers import register_handlers
-from app.keyboards.menu import main_menu_keyboard
 from app.middlewares.callbacks import StaleCallbackMiddleware
 from app.middlewares.users import UserTrackingMiddleware
 from app.services.incubation import IncubationService
@@ -121,11 +119,6 @@ async def main() -> None:
             interval_seconds=config.reminder_interval_seconds,
         )
         reminder_runner.start()
-        await notify_known_users_about_restart(
-            bot,
-            incubation_service,
-            marker_file=runtime_root / "last_restart_notice.txt",
-        )
         try:
             try:
                 await dispatcher.start_polling(bot)
@@ -138,35 +131,6 @@ async def main() -> None:
             await bot.session.close()
     finally:
         lock.__exit__(None, None, None)
-
-
-async def notify_known_users_about_restart(
-    bot: Bot,
-    incubation_service: IncubationService,
-    *,
-    marker_file,
-    min_interval: timedelta = timedelta(minutes=30),
-) -> None:
-    now = datetime.now(timezone.utc)
-    if marker_file.exists():
-        try:
-            last_sent = datetime.fromisoformat(marker_file.read_text(encoding="utf-8").strip())
-        except ValueError:
-            last_sent = None
-        if last_sent is not None and now - last_sent < min_interval:
-            logging.info("Restart notification skipped by throttle")
-            return
-
-    for user_id in incubation_service.list_known_users():
-        try:
-            await bot.send_message(
-                user_id,
-                "Бот перезапущен и снова готов к работе. Открываю меню:",
-                reply_markup=main_menu_keyboard(),
-            )
-        except Exception:
-            logging.exception("Failed to send restart notification to user %s", user_id)
-    marker_file.write_text(now.isoformat(), encoding="utf-8")
 
 
 async def notify_admins_about_failure(bot: Bot, admin_ids: frozenset[int], exc: BaseException) -> None:

@@ -14,7 +14,13 @@ param(
 
     [string]$ImageName = "incubator-feed:latest",
 
-    [string]$ContainerName = "incubator-feed-bot"
+    [string]$ContainerName = "incubator-feed-bot",
+
+    [string]$ReleaseVersion = "",
+
+    [string]$ReleaseNotes = "",
+
+    [switch]$SkipReleaseNotice
 )
 
 $ErrorActionPreference = "Stop"
@@ -70,6 +76,29 @@ scp -P $Port $EnvFile "$SshTarget`:$DeployPath/.env.prod"
 $quotedImageName = ConvertTo-ShellSingleQuoted $ImageName
 $quotedContainerName = ConvertTo-ShellSingleQuoted $ContainerName
 
+if (-not $SkipReleaseNotice) {
+    if ([string]::IsNullOrWhiteSpace($ReleaseVersion)) {
+        $shortSha = ""
+        try {
+            $shortSha = (git rev-parse --short HEAD 2>$null).Trim()
+        } catch {
+            $shortSha = ""
+        }
+        if ([string]::IsNullOrWhiteSpace($shortSha)) {
+            $shortSha = "manual"
+        }
+        $ReleaseVersion = "$(Get-Date -Format 'yyyy.MM.dd')-$shortSha"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ReleaseNotes)) {
+        try {
+            $ReleaseNotes = (git log -1 --pretty=%s 2>$null).Trim()
+        } catch {
+            $ReleaseNotes = ""
+        }
+    }
+}
+
 $runCommand = @"
 set -e
 cd $quotedDeployPath
@@ -93,3 +122,24 @@ docker logs --tail=80 "`$CONTAINER_NAME"
 "@
 
 ssh -p $Port $SshTarget $runCommand
+
+if (-not $SkipReleaseNotice) {
+    $quotedReleaseVersion = ConvertTo-ShellSingleQuoted $ReleaseVersion
+    $quotedReleaseNotes = ConvertTo-ShellSingleQuoted $ReleaseNotes
+    $notifyCommand = @"
+set -e
+cd $quotedDeployPath
+IMAGE_NAME=$quotedImageName
+RELEASE_VERSION=$quotedReleaseVersion
+RELEASE_NOTES=$quotedReleaseNotes
+docker run --rm --env-file .env.prod \
+  -e RELEASE_VERSION="`$RELEASE_VERSION" \
+  -e RELEASE_NOTES="`$RELEASE_NOTES" \
+  -v "$DeployPath/data:/app/data" \
+  -v "$DeployPath/logs:/app/logs" \
+  -v "$DeployPath/backups:/app/backups" \
+  "`$IMAGE_NAME" python -B scripts/notify_release.py
+"@
+
+    ssh -p $Port $SshTarget $notifyCommand
+}

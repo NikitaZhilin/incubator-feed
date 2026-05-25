@@ -100,6 +100,8 @@ docker compose up -d --build
 
 Альтернатива без Docker: systemd-шаблоны в `deploy/systemd`.
 
+После production-деплоя пользователям отправляется сервисное уведомление о новой версии с открытием главного меню. Уведомление не дублируется для одной и той же версии, потому что фиксируется в `notification_log`.
+
 Подробно: [docs/SERVER_SETUP.md](D:\проекты qwen\tg_bot_inkubator\docs\SERVER_SETUP.md) и [docs/OPERATIONS.md](D:\проекты qwen\tg_bot_inkubator\docs\OPERATIONS.md).
 
 ## Тесты

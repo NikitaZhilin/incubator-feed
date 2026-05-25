@@ -5,6 +5,20 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Version shown to users, for example 2026.05.25-web-menu"
+        required: false
+        type: string
+      release_notes:
+        description: "Short release notes. Use semicolons for several items."
+        required: false
+        type: string
+      skip_release_notice:
+        description: "Do not notify bot users after deploy"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   test:
@@ -148,4 +162,38 @@ jobs:
               '$IMAGE_NAME' python main.py
             docker ps --filter name='$CONTAINER_NAME'
             docker logs --tail=80 '$CONTAINER_NAME'
+          "
+
+      - name: Notify users about release
+        if: steps.deploy-secrets.outputs.ready == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.skip_release_notice)
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          RELEASE_VERSION_INPUT: ${{ inputs.release_version || '' }}
+          RELEASE_NOTES_INPUT: ${{ inputs.release_notes || '' }}
+        run: |
+          set -e
+          RELEASE_VERSION="$RELEASE_VERSION_INPUT"
+          RELEASE_NOTES="$RELEASE_NOTES_INPUT"
+          if [ -z "$RELEASE_VERSION" ]; then
+            RELEASE_VERSION="$(date -u +'%Y.%m.%d')-${GITHUB_SHA::7}"
+          fi
+          if [ -z "$RELEASE_NOTES" ]; then
+            RELEASE_NOTES="$(git log -1 --pretty=%s)"
+          fi
+          shell_quote() {
+            printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+          }
+          Q_RELEASE_VERSION="$(shell_quote "$RELEASE_VERSION")"
+          Q_RELEASE_NOTES="$(shell_quote "$RELEASE_NOTES")"
+          ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "
+            set -e
+            cd '$DEPLOY_PATH'
+            docker run --rm --env-file .env.prod \
+              -e RELEASE_VERSION=$Q_RELEASE_VERSION \
+              -e RELEASE_NOTES=$Q_RELEASE_NOTES \
+              -v '$DEPLOY_PATH/data:/app/data' \
+              -v '$DEPLOY_PATH/logs:/app/logs' \
+              -v '$DEPLOY_PATH/backups:/app/backups' \
+              '$IMAGE_NAME' python -B scripts/notify_release.py
           "
