@@ -51,11 +51,11 @@ class FeedService:
         if bird_group_id is not None:
             group = self.feeds.get_bird_group(bird_group_id, user_id)
             if group is None:
-                raise ValueError("Группа птицы не найдена.")
+                raise ValueError("Поголовье не найдено.")
             if bird_count != group.bird_count:
                 raise ValueError(
-                    f"В выбранной группе {group.bird_count} птиц. "
-                    "Сумма кур и петухов должна совпадать с группой."
+                    f"В выбранном поголовье {group.bird_count} птиц. "
+                    "Сумма кур и петухов должна совпадать с поголовьем."
                 )
         feed = self.feeds.create(
             user_id=user_id,
@@ -155,7 +155,7 @@ class FeedService:
         if bird_group_id is not None:
             group = self.feeds.get_bird_group(bird_group_id, user_id)
             if group is None:
-                raise ValueError("Группа птицы не найдена.")
+                raise ValueError("Поголовье не найдено.")
             if next_hen_count + next_rooster_count != group.bird_count:
                 next_hen_count = group.bird_count
                 next_rooster_count = 0
@@ -264,17 +264,33 @@ class FeedService:
         name: str,
         bird_count: int,
         species: str | None = None,
+        group_kind: str = "adult",
+        hatched_at=None,
+        joined_at=None,
+        reserve_percent: float = 0.0,
     ) -> BirdGroup:
         clean_name = name.strip()[:255]
         if not clean_name:
-            raise ValueError("Название группы не может быть пустым.")
+            raise ValueError("Название поголовья не может быть пустым.")
         if bird_count <= 0:
             raise ValueError("Количество птиц должно быть больше нуля.")
+        if group_kind not in {"adult", "chicks"}:
+            raise ValueError("Неизвестный тип поголовья.")
+        if group_kind == "chicks" and hatched_at is None:
+            raise ValueError("Для цыплят нужна дата вывода.")
+        if joined_at is not None and hatched_at is not None and joined_at < hatched_at:
+            raise ValueError("Дата подсадки не может быть раньше даты вывода.")
+        if reserve_percent < 0:
+            raise ValueError("Запас не может быть отрицательным.")
         return self.feeds.create_bird_group(
             user_id=user_id,
             name=clean_name,
             bird_count=bird_count,
             species=species,
+            group_kind=group_kind,
+            hatched_at=hatched_at,
+            joined_at=joined_at,
+            reserve_percent=reserve_percent,
         )
 
     def list_bird_groups(self, user_id: int) -> list[BirdGroup]:
@@ -315,6 +331,36 @@ class FeedService:
         current = now or datetime.now(timezone.utc)
         baseline = feed.updated_at or feed.created_at
         current, baseline = FeedService._align_datetimes(current, baseline)
+        chick_daily_usage_kg = FeedService._chick_daily_usage_kg(feed, current)
+        if chick_daily_usage_kg is not None:
+            elapsed_until = current
+            if feed.bird_group_joined_at is not None and current.date() >= feed.bird_group_joined_at:
+                elapsed_until = datetime.combine(feed.bird_group_joined_at, time.min)
+                elapsed_until, baseline = FeedService._align_datetimes(elapsed_until, baseline)
+            elapsed_days = max((elapsed_until - baseline).total_seconds() / 86400, 0)
+            remaining_kg = max(feed.amount_kg - elapsed_days * chick_daily_usage_kg, 0)
+            if feed.bird_group_joined_at is not None and current.date() >= feed.bird_group_joined_at:
+                return FeedEstimate(feed, remaining_kg, 0, None, None, None)
+            days_left = floor(remaining_kg / chick_daily_usage_kg) if chick_daily_usage_kg > 0 else None
+            threshold_days_left = (
+                floor(max(remaining_kg - feed.low_threshold_kg, 0) / chick_daily_usage_kg)
+                if chick_daily_usage_kg > 0
+                else None
+            )
+            buy_remind_at = None
+            if reminder_time is not None and threshold_days_left is not None:
+                buy_date = current.date() + timedelta(days=threshold_days_left)
+                buy_remind_at = datetime.combine(buy_date, reminder_time)
+                if buy_remind_at <= current:
+                    buy_remind_at = current + timedelta(minutes=5)
+            return FeedEstimate(
+                feed=feed,
+                remaining_kg=remaining_kg,
+                daily_usage_kg=chick_daily_usage_kg,
+                days_left=days_left,
+                threshold_days_left=threshold_days_left,
+                buy_remind_at=buy_remind_at,
+            )
         elapsed_days = max((current - baseline).total_seconds() / 86400, 0)
         hen_count = feed.hen_count if feed.hen_count or feed.rooster_count else feed.bird_count
         rooster_count = feed.rooster_count
@@ -353,3 +399,25 @@ class FeedService:
         elif current.tzinfo is not None and created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=current.tzinfo)
         return current, created_at
+
+    @staticmethod
+    def _chick_daily_usage_kg(feed: FeedStock, current: datetime) -> float | None:
+        if feed.bird_group_kind != "chicks" or feed.bird_group_hatched_at is None:
+            return None
+        age_days = max((current.date() - feed.bird_group_hatched_at).days, 0)
+        reserve_multiplier = 1 + max(feed.bird_group_reserve_percent, 0) / 100
+        return feed.bird_count * FeedService.chick_daily_g(age_days) * reserve_multiplier / 1000
+
+    @staticmethod
+    def chick_daily_g(age_days: int) -> float:
+        if age_days <= 7:
+            return 15
+        if age_days <= 14:
+            return 25
+        if age_days <= 28:
+            return 45
+        if age_days <= 56:
+            return 70
+        if age_days <= 84:
+            return 90
+        return 110

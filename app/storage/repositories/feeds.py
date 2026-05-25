@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import sqlite3
 
 from app.domain import BirdGroup, FeedStock, FeedTransaction
@@ -76,6 +76,9 @@ class FeedRepository:
                        fs.rooster_count, fs.hen_daily_g, fs.rooster_daily_g,
                        fs.purchase_reminded_at,
                        fs.created_at, fs.updated_at, fs.bird_group_id, bg.name AS bird_group_name,
+                       bg.group_kind AS bird_group_kind, bg.hatched_at AS bird_group_hatched_at,
+                       bg.joined_at AS bird_group_joined_at,
+                       bg.reserve_percent AS bird_group_reserve_percent,
                        fs.is_archived
                 FROM feed_stocks
                 AS fs
@@ -95,6 +98,9 @@ class FeedRepository:
                        fs.rooster_count, fs.hen_daily_g, fs.rooster_daily_g,
                        fs.purchase_reminded_at,
                        fs.created_at, fs.updated_at, fs.bird_group_id, bg.name AS bird_group_name,
+                       bg.group_kind AS bird_group_kind, bg.hatched_at AS bird_group_hatched_at,
+                       bg.joined_at AS bird_group_joined_at,
+                       bg.reserve_percent AS bird_group_reserve_percent,
                        fs.is_archived
                 FROM feed_stocks AS fs
                 LEFT JOIN bird_groups AS bg ON bg.id = fs.bird_group_id
@@ -114,6 +120,9 @@ class FeedRepository:
                        fs.rooster_count, fs.hen_daily_g, fs.rooster_daily_g,
                        fs.purchase_reminded_at,
                        fs.created_at, fs.updated_at, fs.bird_group_id, bg.name AS bird_group_name,
+                       bg.group_kind AS bird_group_kind, bg.hatched_at AS bird_group_hatched_at,
+                       bg.joined_at AS bird_group_joined_at,
+                       bg.reserve_percent AS bird_group_reserve_percent,
                        fs.is_archived
                 FROM feed_stocks AS fs
                 LEFT JOIN bird_groups AS bg ON bg.id = fs.bird_group_id
@@ -296,15 +305,33 @@ class FeedRepository:
         name: str,
         bird_count: int,
         species: str | None = None,
+        group_kind: str = "adult",
+        hatched_at: date | None = None,
+        joined_at: date | None = None,
+        reserve_percent: float = 0.0,
     ) -> BirdGroup:
         now = datetime.now(timezone.utc).isoformat()
         with self.database.connect() as connection:
             cursor = connection.execute(
                 """
-                INSERT INTO bird_groups (user_id, name, bird_count, species, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO bird_groups (
+                    user_id, name, bird_count, species, group_kind, hatched_at,
+                    joined_at, reserve_percent, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (user_id, name, bird_count, species, now, now),
+                (
+                    user_id,
+                    name,
+                    bird_count,
+                    species,
+                    group_kind,
+                    hatched_at.isoformat() if hatched_at else None,
+                    joined_at.isoformat() if joined_at else None,
+                    reserve_percent,
+                    now,
+                    now,
+                ),
             )
             group_id = int(cursor.lastrowid)
         return self.get_bird_group(group_id, user_id)
@@ -313,7 +340,8 @@ class FeedRepository:
         with self.database.connect() as connection:
             row = connection.execute(
                 """
-                SELECT id, user_id, name, bird_count, species, is_active, created_at, updated_at
+                SELECT id, user_id, name, bird_count, species, group_kind, hatched_at,
+                       joined_at, reserve_percent, is_active, created_at, updated_at
                 FROM bird_groups
                 WHERE id = ? AND user_id = ?
                 """,
@@ -325,7 +353,8 @@ class FeedRepository:
         with self.database.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, user_id, name, bird_count, species, is_active, created_at, updated_at
+                SELECT id, user_id, name, bird_count, species, group_kind, hatched_at,
+                       joined_at, reserve_percent, is_active, created_at, updated_at
                 FROM bird_groups
                 WHERE user_id = ? AND is_active = 1
                 ORDER BY created_at DESC, id DESC
@@ -386,6 +415,29 @@ class FeedRepository:
                 if "bird_group_name" in row.keys() and row["bird_group_name"] is not None
                 else None
             ),
+            bird_group_kind=(
+                str(row["bird_group_kind"])
+                if "bird_group_kind" in row.keys() and row["bird_group_kind"] is not None
+                else None
+            ),
+            bird_group_hatched_at=(
+                date.fromisoformat(str(row["bird_group_hatched_at"]))
+                if "bird_group_hatched_at" in row.keys()
+                and row["bird_group_hatched_at"] is not None
+                else None
+            ),
+            bird_group_joined_at=(
+                date.fromisoformat(str(row["bird_group_joined_at"]))
+                if "bird_group_joined_at" in row.keys()
+                and row["bird_group_joined_at"] is not None
+                else None
+            ),
+            bird_group_reserve_percent=(
+                float(row["bird_group_reserve_percent"])
+                if "bird_group_reserve_percent" in row.keys()
+                and row["bird_group_reserve_percent"] is not None
+                else 0.0
+            ),
             is_archived=bool(row["is_archived"]) if "is_archived" in row.keys() else False,
         )
 
@@ -413,4 +465,24 @@ class FeedRepository:
             is_active=bool(row["is_active"]),
             created_at=datetime.fromisoformat(str(row["created_at"])),
             updated_at=datetime.fromisoformat(str(row["updated_at"])),
+            group_kind=(
+                str(row["group_kind"])
+                if "group_kind" in row.keys() and row["group_kind"] is not None
+                else "adult"
+            ),
+            hatched_at=(
+                date.fromisoformat(str(row["hatched_at"]))
+                if "hatched_at" in row.keys() and row["hatched_at"] is not None
+                else None
+            ),
+            joined_at=(
+                date.fromisoformat(str(row["joined_at"]))
+                if "joined_at" in row.keys() and row["joined_at"] is not None
+                else None
+            ),
+            reserve_percent=(
+                float(row["reserve_percent"])
+                if "reserve_percent" in row.keys() and row["reserve_percent"] is not None
+                else 0.0
+            ),
         )

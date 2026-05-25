@@ -25,6 +25,7 @@ from app.services.feed_recipes import (
     format_chicken_mix,
     parse_feed_amount,
 )
+from app.utils.dates import DATE_FORMAT_HINT, parse_user_date
 
 
 router = Router()
@@ -62,7 +63,10 @@ class EditFeed(StatesGroup):
 
 class BirdGroupFlow(StatesGroup):
     name = State()
+    kind = State()
     count = State()
+    hatched_date = State()
+    joined_date = State()
     species = State()
 
 
@@ -83,7 +87,10 @@ FEED_FLOW_STATES = (
     EditFeed.value,
     EditFeed.group,
     BirdGroupFlow.name,
+    BirdGroupFlow.kind,
     BirdGroupFlow.count,
+    BirdGroupFlow.hatched_date,
+    BirdGroupFlow.joined_date,
     BirdGroupFlow.species,
 )
 
@@ -114,7 +121,7 @@ async def feeds_menu(callback: CallbackQuery, state: FSMContext, feed_service: F
     estimates = feed_service.list_user_estimates(callback.from_user.id)
     if not estimates:
         await callback.message.answer(
-            "🌾 Корма\n\nЗапасов пока нет. Добавьте корм, количество птиц и расход на голову — я посчитаю остаток и напомню о покупке.",
+            "🌾 Корма\n\nЗапасов пока нет. Добавьте корм и поголовье для расчета — я посчитаю остаток и напомню о покупке.",
             reply_markup=feeds_menu_keyboard(),
         )
     else:
@@ -142,12 +149,27 @@ async def bird_groups_menu(callback: CallbackQuery, state: FSMContext, feed_serv
     await state.clear()
     groups = feed_service.list_bird_groups(callback.from_user.id)
     if not groups:
-        text = "Групп птицы пока нет. Создайте группу, чтобы привязывать к ней корма."
+        text = (
+            "Поголовье пока не задано.\n\n"
+            "Можно добавить основное стадо или цыплят. Потом корм привязывается к поголовью, "
+            "и расход считается понятнее."
+        )
     else:
-        lines = ["Группы птицы:"]
+        lines = ["Поголовье:"]
         for group in groups:
             species = f", {PROFILES[group.species].title}" if group.species in PROFILES else ""
-            lines.append(f"- #{group.id} {group.name}: {group.bird_count} птиц{species}")
+            if group.group_kind == "chicks":
+                hatched = group.hatched_at.isoformat() if group.hatched_at else "дата не указана"
+                joined = (
+                    f", подсадка {group.joined_at.isoformat()}"
+                    if group.joined_at
+                    else ", подсадка не задана"
+                )
+                lines.append(
+                    f"- #{group.id} {group.name}: {group.bird_count} цыплят, вывод {hatched}{joined}, запас {group.reserve_percent:g}%"
+                )
+            else:
+                lines.append(f"- #{group.id} {group.name}: {group.bird_count} птиц{species}")
         text = "\n".join(lines)
     await callback.message.answer(text, reply_markup=bird_groups_keyboard())
     await callback.answer()
@@ -157,7 +179,10 @@ async def bird_groups_menu(callback: CallbackQuery, state: FSMContext, feed_serv
 async def bird_group_add(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await state.set_state(BirdGroupFlow.name)
-    await callback.message.answer("Введите название группы, например Несушки.", reply_markup=feed_cancel_keyboard())
+    await callback.message.answer(
+        "Введите название поголовья, например Основное стадо или Цыплята май.",
+        reply_markup=feed_cancel_keyboard(),
+    )
     await callback.answer()
 
 
@@ -174,11 +199,35 @@ async def bird_group_name(
             scenario="bird_group_name",
             message="short_name",
         )
-        await message.answer("Введите название группы минимум из двух символов.")
+        await message.answer("Введите название поголовья минимум из двух символов.")
         return
     await state.update_data(name=name)
+    await state.set_state(BirdGroupFlow.kind)
+    await message.answer(
+        "Что это за поголовье?",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Куры и петухи", callback_data="feeds:group_kind:adult")],
+                [InlineKeyboardButton(text="Цыплята", callback_data="feeds:group_kind:chicks")],
+                [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")],
+            ]
+        ),
+    )
+
+
+@router.callback_query(BirdGroupFlow.kind, F.data.startswith("feeds:group_kind:"))
+async def bird_group_kind(callback: CallbackQuery, state: FSMContext) -> None:
+    group_kind = str(callback.data).split(":", 2)[2]
+    await state.update_data(group_kind=group_kind)
     await state.set_state(BirdGroupFlow.count)
-    await message.answer("Сколько птиц в группе? Введите число.", reply_markup=feed_cancel_keyboard())
+    if group_kind == "chicks":
+        await callback.message.answer("Сколько цыплят? Введите число.", reply_markup=feed_cancel_keyboard())
+    else:
+        await callback.message.answer(
+            "Сколько всего птиц в основном стаде? Куры и петухи считаются вместе.",
+            reply_markup=feed_cancel_keyboard(),
+        )
+    await callback.answer()
 
 
 @router.message(BirdGroupFlow.count)
@@ -196,6 +245,14 @@ async def bird_group_count(
         await message.answer("Введите количество птиц числом, например 25.")
         return
     await state.update_data(bird_count=int(message.text.strip()))
+    data = await state.get_data()
+    if data.get("group_kind") == "chicks":
+        await state.set_state(BirdGroupFlow.hatched_date)
+        await message.answer(
+            f"Введите дату вывода цыплят: {DATE_FORMAT_HINT}.",
+            reply_markup=feed_cancel_keyboard(),
+        )
+        return
     await state.set_state(BirdGroupFlow.species)
     rows = [
         [InlineKeyboardButton(text=profile.title, callback_data=f"feeds:group_species:{code}")]
@@ -204,8 +261,78 @@ async def bird_group_count(
     rows.append([InlineKeyboardButton(text="Без вида", callback_data="feeds:group_species:none")])
     rows.append([InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")])
     await message.answer(
-        "Выберите вид птицы для группы или оставьте без вида.",
+        "Выберите вид птицы для поголовья или оставьте без вида.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+@router.message(BirdGroupFlow.hatched_date)
+async def bird_group_hatched_date(
+    message: Message,
+    state: FSMContext,
+    incubation_service: IncubationService,
+) -> None:
+    try:
+        hatched_at = parse_user_date(message.text or "")
+    except ValueError as exc:
+        incubation_service.track_scenario_error(
+            user_id=message.from_user.id,
+            scenario="bird_group_hatched_date",
+            message="invalid_date",
+        )
+        await message.answer(str(exc))
+        return
+    await state.update_data(hatched_at=hatched_at)
+    await state.set_state(BirdGroupFlow.joined_date)
+    await message.answer(
+        "Введите примерную дату подсадки в основной курятник.\n"
+        "Если пока неизвестно, отправьте 0.",
+        reply_markup=feed_cancel_keyboard(),
+    )
+
+
+@router.message(BirdGroupFlow.joined_date)
+async def bird_group_joined_date(
+    message: Message,
+    state: FSMContext,
+    feed_service: FeedService,
+    incubation_service: IncubationService,
+) -> None:
+    text = (message.text or "").strip().lower()
+    joined_at = None
+    if text not in {"0", "-", "нет", "не знаю"}:
+        try:
+            joined_at = parse_user_date(text)
+        except ValueError as exc:
+            incubation_service.track_scenario_error(
+                user_id=message.from_user.id,
+                scenario="bird_group_joined_date",
+                message="invalid_date",
+            )
+            await message.answer(str(exc))
+            return
+    data = await state.get_data()
+    try:
+        group = feed_service.create_bird_group(
+            user_id=message.from_user.id,
+            name=str(data["name"]),
+            bird_count=int(data["bird_count"]),
+            species="chicken",
+            group_kind="chicks",
+            hatched_at=data["hatched_at"],
+            joined_at=joined_at,
+            reserve_percent=10,
+        )
+    except ValueError as exc:
+        await message.answer(str(exc))
+        return
+    await state.clear()
+    joined_text = joined_at.isoformat() if joined_at else "не задана"
+    await message.answer(
+        f"Поголовье создано: #{group.id} {group.name}, {group.bird_count} цыплят.\n"
+        f"Вывод: {group.hatched_at.isoformat() if group.hatched_at else '-'}, подсадка: {joined_text}.\n"
+        "Расход корма будет считаться по возрасту цыплят с запасом 10%.",
+        reply_markup=bird_groups_keyboard(),
     )
 
 
@@ -218,10 +345,11 @@ async def bird_group_species(callback: CallbackQuery, state: FSMContext, feed_se
         name=str(data["name"]),
         bird_count=int(data["bird_count"]),
         species=None if species == "none" else species,
+        group_kind="adult",
     )
     await state.clear()
     await callback.message.answer(
-        f"Группа создана: #{group.id} {group.name}, {group.bird_count} птиц.",
+        f"Поголовье создано: #{group.id} {group.name}, {group.bird_count} птиц.",
         reply_markup=bird_groups_keyboard(),
     )
     await callback.answer()
@@ -278,7 +406,7 @@ async def feed_name_with_service(
     if groups:
         await state.set_state(NewFeed.group)
         await message.answer(
-            "Выберите группу птицы для корма или оставьте без группы.",
+            "Выберите поголовье для расчета корма или оставьте без привязки.",
             reply_markup=bird_group_select_keyboard(groups, allow_skip=True),
         )
         return
@@ -294,14 +422,18 @@ async def feed_select_group(callback: CallbackQuery, state: FSMContext, feed_ser
     if value != "none":
         group = feed_service.get_bird_group(int(value), callback.from_user.id)
         if group is None:
-            await callback.message.answer("Группа не найдена. Выберите другую или оставьте без группы.")
+            await callback.message.answer("Поголовье не найдено. Выберите другое или оставьте корм без привязки.")
             await callback.answer()
             return
-        await state.update_data(bird_group_id=group.id, bird_count=group.bird_count)
-        group_note = f"Выбрана группа {group.name}: {group.bird_count} птиц.\n"
+        await state.update_data(
+            bird_group_id=group.id,
+            bird_count=group.bird_count,
+            group_kind=group.group_kind,
+        )
+        group_note = f"Выбрано поголовье {group.name}: {group.bird_count} птиц.\n"
     else:
         await state.update_data(bird_group_id=None)
-        group_note = "Корм будет без группы птицы.\n"
+        group_note = "Корм будет без привязки к поголовью.\n"
     await state.set_state(NewFeed.amount)
     await callback.message.answer(
         group_note + "Укажите начальный остаток корма в кг: например 40, 12.5 кг или 1 мешок.",
@@ -324,6 +456,21 @@ async def feed_amount(message: Message, state: FSMContext, incubation_service: I
         return
     await state.update_data(amount_kg=amount)
     data = await state.get_data()
+    if data.get("group_kind") == "chicks":
+        await state.update_data(
+            hen_count=int(data["bird_count"]),
+            rooster_count=0,
+            daily_per_bird_g=15,
+            hen_daily_g=15,
+            rooster_daily_g=15,
+        )
+        await state.set_state(NewFeed.threshold)
+        await message.answer(
+            "Это корм для цыплят. Расход буду считать автоматически по возрасту с запасом.\n"
+            "При каком остатке напомнить о покупке? Введите кг, например 5.",
+            reply_markup=feed_cancel_keyboard(),
+        )
+        return
     if data.get("bird_group_id") is not None:
         await state.set_state(NewFeed.hens)
         await message.answer(
@@ -795,13 +942,13 @@ async def feed_edit_field(callback: CallbackQuery, state: FSMContext, feed_servi
         "hen_rate": "Введите новый расход в граммах на курицу/несушку в день.",
         "rooster_rate": "Введите новый расход в граммах на петуха в день.",
         "threshold": "Введите новый порог предупреждения в кг.",
-        "group": "Выберите новую группу птицы или оставьте корм без группы.",
+        "group": "Выберите новое поголовье или оставьте корм без привязки.",
     }
     if field == "group":
         groups = feed_service.list_bird_groups(callback.from_user.id)
         await state.set_state(EditFeed.group)
         await callback.message.answer(
-            "Выберите новую группу птицы или оставьте корм без группы.",
+            "Выберите новое поголовье или оставьте корм без привязки.",
             reply_markup=bird_group_select_keyboard(groups, allow_skip=True, prefix="feeds:edit_group"),
         )
         await callback.answer()
@@ -824,7 +971,7 @@ async def feed_edit_group(callback: CallbackQuery, state: FSMContext, feed_servi
     else:
         group = feed_service.get_bird_group(int(value), callback.from_user.id)
         if group is None:
-            await callback.message.answer("Группа не найдена.")
+            await callback.message.answer("Поголовье не найдено.")
             await callback.answer()
             return
         feed = feed_service.update_feed(
@@ -838,7 +985,7 @@ async def feed_edit_group(callback: CallbackQuery, state: FSMContext, feed_servi
         await callback.message.answer("Корм не найден.", reply_markup=feeds_menu_keyboard())
     else:
         await callback.message.answer(
-            "Группа корма обновлена.\n\n" + _format_estimate(feed_service.estimate(feed)),
+            "Поголовье корма обновлено.\n\n" + _format_estimate(feed_service.estimate(feed)),
             reply_markup=feed_actions_keyboard(feed.id),
         )
     await callback.answer()
@@ -996,9 +1143,28 @@ def _format_estimate(estimate: FeedEstimate) -> str:
     rooster_daily_g = (
         feed.rooster_daily_g if feed.rooster_daily_g is not None else feed.daily_per_bird_g
     )
+    if feed.bird_group_kind == "chicks":
+        hatch_text = feed.bird_group_hatched_at.isoformat() if feed.bird_group_hatched_at else "не указана"
+        joined_text = feed.bird_group_joined_at.isoformat() if feed.bird_group_joined_at else "не задана"
+        status = (
+            "Цыплята уже подсажены, отдельный расход этого корма остановлен."
+            if estimate.daily_usage_kg == 0
+            else f"Расход цыплят с запасом {feed.bird_group_reserve_percent:g}%: {estimate.daily_usage_kg:.2f} кг/день"
+        )
+        return (
+            f"#{feed.id} {feed.name}\n"
+            f"Поголовье: {feed.bird_group_name or 'цыплята'}\n"
+            f"Цыплят: {feed.bird_count}\n"
+            f"Дата вывода: {hatch_text}\n"
+            f"Дата подсадки: {joined_text}\n"
+            f"Остаток расчетный: {estimate.remaining_kg:.1f} кг из {feed.amount_kg:g} кг\n"
+            f"{status}\n"
+            f"Хватит примерно: {days_left}\n"
+            f"Напомнить при остатке: {feed.low_threshold_kg:g} кг ({threshold})"
+        )
     return (
         f"#{feed.id} {feed.name}\n"
-        f"Группа: {feed.bird_group_name or 'не указана'}\n"
+        f"Поголовье: {feed.bird_group_name or 'не указано'}\n"
         f"Остаток расчетный: {estimate.remaining_kg:.1f} кг из {feed.amount_kg:g} кг\n"
         f"Птиц: {feed.bird_count} (кур/несушек: {feed.hen_count}, петухов: {feed.rooster_count})\n"
         f"Расход кур: {hen_daily_g:g} г/гол./день\n"

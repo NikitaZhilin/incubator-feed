@@ -13,6 +13,7 @@ MIGRATIONS = (
     "005_analytics",
     "006_sync_user_notification_settings",
     "007_feed_gender_counts",
+    "008_bird_group_lifecycle",
 )
 
 

@@ -20,12 +20,19 @@ class MigrationsAndContentTest(unittest.TestCase):
                         "SELECT name FROM sqlite_master WHERE type = 'table'"
                     ).fetchall()
                 }
+                bird_group_columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(bird_groups)").fetchall()
+                }
 
         self.assertIn("schema_migrations", tables)
         self.assertIn("notification_log", tables)
         self.assertIn("analytics_events", tables)
         self.assertIn("feed_transactions", tables)
         self.assertIn("bird_groups", tables)
+        self.assertIn("group_kind", bird_group_columns)
+        self.assertIn("hatched_at", bird_group_columns)
+        self.assertIn("joined_at", bird_group_columns)
 
     def test_existing_database_is_migrated_without_dropping_data(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

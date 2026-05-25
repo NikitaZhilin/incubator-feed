@@ -72,6 +72,10 @@ class FeedStock:
     purchase_reminded_at: datetime | None = None
     bird_group_id: int | None = None
     bird_group_name: str | None = None
+    bird_group_kind: str | None = None
+    bird_group_hatched_at: date | None = None
+    bird_group_joined_at: date | None = None
+    bird_group_reserve_percent: float = 0.0
     is_archived: bool = False
 
 
@@ -85,6 +89,10 @@ class BirdGroup:
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    group_kind: str = "adult"
+    hatched_at: date | None = None
+    joined_at: date | None = None
+    reserve_percent: float = 0.0
 
 
 @dataclass(frozen=True)

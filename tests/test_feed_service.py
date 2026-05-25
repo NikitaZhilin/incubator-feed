@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import unittest
@@ -181,6 +181,42 @@ class FeedServiceTest(unittest.TestCase):
         self.assertEqual(updated.bird_count, 30)
         self.assertEqual(updated.hen_count, 30)
         self.assertEqual(updated.rooster_count, 0)
+
+    def test_chick_group_uses_age_based_feed_rate_with_reserve(self) -> None:
+        group = self.service.create_bird_group(
+            user_id=1,
+            name="Цыплята май",
+            bird_count=10,
+            species="chicken",
+            group_kind="chicks",
+            hatched_at=date(2026, 5, 1),
+            joined_at=date(2026, 6, 1),
+            reserve_percent=10,
+        )
+        feed = self.service.create_feed(
+            user_id=1,
+            name="Старт для цыплят",
+            amount_kg=10,
+            bird_count=10,
+            daily_per_bird_g=15,
+            low_threshold_kg=2,
+            bird_group_id=group.id,
+            hen_count=10,
+            rooster_count=0,
+        )
+
+        estimate = self.service.estimate(
+            feed,
+            now=datetime(2026, 5, 11, tzinfo=timezone.utc),
+        )
+        joined_estimate = self.service.estimate(
+            feed,
+            now=datetime(2026, 6, 2, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(feed.bird_group_kind, "chicks")
+        self.assertEqual(round(estimate.daily_usage_kg, 3), 0.275)
+        self.assertEqual(joined_estimate.daily_usage_kg, 0)
 
     def test_invalid_non_finite_numbers_are_rejected(self) -> None:
         with self.assertRaises(ValueError):

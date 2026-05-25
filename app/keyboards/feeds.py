@@ -11,7 +11,7 @@ def feeds_menu_keyboard(feed_buttons: list[tuple[int, str]] | None = None) -> In
             InlineKeyboardButton(text="🧮 Смесь", callback_data="feeds:mix"),
         ]
     )
-    rows.append([InlineKeyboardButton(text="🐔 Группы птицы", callback_data="feeds:groups")])
+    rows.append([InlineKeyboardButton(text="🐔 Поголовье", callback_data="feeds:groups")])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -84,7 +84,7 @@ def feed_edit_keyboard(feed_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="Расход кур", callback_data=f"feeds:edit_field:{feed_id}:hen_rate"),
                 InlineKeyboardButton(text="Расход петухов", callback_data=f"feeds:edit_field:{feed_id}:rooster_rate"),
             ],
-            [InlineKeyboardButton(text="Группа птицы", callback_data=f"feeds:edit_field:{feed_id}:group")],
+            [InlineKeyboardButton(text="Поголовье", callback_data=f"feeds:edit_field:{feed_id}:group")],
             [InlineKeyboardButton(text="Отмена", callback_data=f"feeds:view:{feed_id}")],
         ]
     )
@@ -96,8 +96,8 @@ def bird_group_select_keyboard(groups, *, allow_skip: bool = True, prefix: str =
         for group in groups
     ]
     if allow_skip:
-        rows.append([InlineKeyboardButton(text="Без группы", callback_data=f"{prefix}:none")])
-    rows.append([InlineKeyboardButton(text="Создать группу", callback_data="feeds:group_add")])
+        rows.append([InlineKeyboardButton(text="Без привязки", callback_data=f"{prefix}:none")])
+    rows.append([InlineKeyboardButton(text="Создать поголовье", callback_data="feeds:group_add")])
     rows.append([InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -105,7 +105,7 @@ def bird_group_select_keyboard(groups, *, allow_skip: bool = True, prefix: str =
 def bird_groups_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Создать группу", callback_data="feeds:group_add")],
+            [InlineKeyboardButton(text="➕ Создать поголовье", callback_data="feeds:group_add")],
             [InlineKeyboardButton(text="🌾 К кормам", callback_data="feeds:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
