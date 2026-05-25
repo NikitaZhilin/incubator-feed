@@ -283,7 +283,7 @@ async def feed_name_with_service(
         )
         return
     await message.answer(
-        "Сколько корма есть сейчас? Введите кг, например 40 или 12.5.",
+        "Укажите начальный остаток корма в кг: например 40, 12.5 кг или 1 мешок.",
         reply_markup=feed_cancel_keyboard(),
     )
 
@@ -304,7 +304,7 @@ async def feed_select_group(callback: CallbackQuery, state: FSMContext, feed_ser
         group_note = "Корм будет без группы птицы.\n"
     await state.set_state(NewFeed.amount)
     await callback.message.answer(
-        group_note + "Сколько корма есть сейчас? Введите кг, например 40 или 12.5.",
+        group_note + "Укажите начальный остаток корма в кг: например 40, 12.5 кг или 1 мешок.",
         reply_markup=feed_cancel_keyboard(),
     )
     await callback.answer()
@@ -320,7 +320,7 @@ async def feed_amount(message: Message, state: FSMContext, incubation_service: I
             scenario="feed_amount",
             message="invalid_amount",
         )
-        await message.answer("Введите количество: 40, 12.5 кг, 1 мешок или 2 мешка по 25.")
+        await message.answer("Не понял начальный остаток. Напишите: 40, 12.5 кг, 1 мешок или 2 мешка по 25.")
         return
     await state.update_data(amount_kg=amount)
     data = await state.get_data()
@@ -328,12 +328,17 @@ async def feed_amount(message: Message, state: FSMContext, incubation_service: I
         await state.set_state(NewFeed.hens)
         await message.answer(
             f"В выбранной группе {data['bird_count']} птиц.\n"
-            "Сколько из них кур/несушек? Введите число, можно 0.",
+            "Для расчета расхода укажите, сколько из них кур/несушек. "
+            "Остальные будут считаться петухами.",
             reply_markup=feed_cancel_keyboard(),
         )
         return
     await state.set_state(NewFeed.hens)
-    await message.answer("Сколько кур/несушек будет есть этот корм? Введите число, можно 0.", reply_markup=feed_cancel_keyboard())
+    await message.answer(
+        "Для расчета расхода укажите поголовье.\n"
+        "Сколько кур/несушек учитывать для этого корма? Если корм общий для всех кур, укажите общее число кур.",
+        reply_markup=feed_cancel_keyboard(),
+    )
 
 
 @router.message(NewFeed.hens)
@@ -346,9 +351,56 @@ async def feed_hens(message: Message, state: FSMContext, incubation_service: Inc
         )
         await message.answer("Введите количество кур числом, например 25. Если кур нет, введите 0.")
         return
-    await state.update_data(hen_count=int(message.text.strip()))
+    hen_count = int(message.text.strip())
+    data = await state.get_data()
+    group_total = data.get("bird_count") if data.get("bird_group_id") is not None else None
+    if group_total is not None:
+        group_total = int(group_total)
+        if hen_count > group_total:
+            incubation_service.track_scenario_error(
+                user_id=message.from_user.id,
+                scenario="feed_hens",
+                message="group_hens_too_large",
+            )
+            await message.answer(
+                f"В выбранной группе всего {group_total} птиц. "
+                "Введите количество кур/несушек еще раз."
+            )
+            return
+        rooster_count = group_total - hen_count
+        await state.update_data(
+            hen_count=hen_count,
+            rooster_count=rooster_count,
+            bird_count=group_total,
+        )
+        if hen_count == 0:
+            await state.set_state(NewFeed.rooster_rate)
+            await message.answer(
+                f"Учту всю группу как петухов: {rooster_count}.\n"
+                "Укажите расход на одного петуха в день.",
+                reply_markup=feed_rate_keyboard(),
+            )
+        elif rooster_count:
+            await state.set_state(NewFeed.hen_rate)
+            await message.answer(
+                f"Учту: кур/несушек {hen_count}, петухов {rooster_count}.\n"
+                "Укажите расход на одну курицу/несушку в день.",
+                reply_markup=feed_rate_keyboard(),
+            )
+        else:
+            await state.set_state(NewFeed.hen_rate)
+            await message.answer(
+                "Учту всю группу как кур/несушек.\n"
+                "Укажите расход на одну курицу/несушку в день.",
+                reply_markup=feed_rate_keyboard(),
+            )
+        return
+    await state.update_data(hen_count=hen_count)
     await state.set_state(NewFeed.roosters)
-    await message.answer("Сколько петухов будет есть этот корм? Введите число, можно 0.", reply_markup=feed_cancel_keyboard())
+    await message.answer(
+        "Сколько петухов учитывать для этого корма? Если петухов нет или их не нужно учитывать, введите 0.",
+        reply_markup=feed_cancel_keyboard(),
+    )
 
 
 @router.message(NewFeed.roosters)
@@ -386,6 +438,13 @@ async def feed_roosters(message: Message, state: FSMContext, incubation_service:
         )
         return
     await state.update_data(rooster_count=rooster_count, bird_count=total)
+    if hen_count == 0:
+        await state.set_state(NewFeed.rooster_rate)
+        await message.answer(
+            "Кур/несушек нет. Укажите расход на одного петуха в день.",
+            reply_markup=feed_rate_keyboard(),
+        )
+        return
     await state.set_state(NewFeed.hen_rate)
     await message.answer("Укажите расход на одну курицу/несушку в день.", reply_markup=feed_rate_keyboard())
 
@@ -605,7 +664,7 @@ async def feed_restock_start(callback: CallbackQuery, state: FSMContext, feed_se
     await state.set_state(RestockFeed.amount)
     await callback.message.answer(
         f"Текущий расчетный остаток: {estimate.remaining_kg:.1f} кг.\n"
-        "Сколько корма теперь есть? Можно написать: 25 кг, 1 мешок, 2 мешка по 25.",
+        "Задайте фактический остаток на складе. Можно написать: 25 кг, 1 мешок, 2 мешка по 25.",
         reply_markup=feed_cancel_keyboard(),
     )
     await callback.answer()
@@ -624,7 +683,7 @@ async def feed_add_amount_start(callback: CallbackQuery, state: FSMContext, feed
     await state.set_state(ChangeFeed.amount)
     await callback.message.answer(
         f"Текущий расчетный остаток: {estimate.remaining_kg:.1f} кг.\n"
-        "Сколько кг добавить к остатку?",
+        "Сколько добавить к остатку? Например 10 кг или 1 мешок.",
         reply_markup=feed_cancel_keyboard(),
     )
     await callback.answer()
@@ -643,7 +702,7 @@ async def feed_write_off_start(callback: CallbackQuery, state: FSMContext, feed_
     await state.set_state(ChangeFeed.amount)
     await callback.message.answer(
         f"Текущий расчетный остаток: {estimate.remaining_kg:.1f} кг.\n"
-        "Сколько кг списать?",
+        "Сколько списать? Например 3 кг или 0.5.",
         reply_markup=feed_cancel_keyboard(),
     )
     await callback.answer()
@@ -729,9 +788,9 @@ async def feed_edit_field(callback: CallbackQuery, state: FSMContext, feed_servi
     await state.set_state(EditFeed.value)
     prompts = {
         "name": "Введите новое название корма.",
-        "birds": "Введите новое количество птиц.",
-        "hens": "Введите новое количество кур/несушек.",
-        "roosters": "Введите новое количество петухов.",
+        "birds": "Введите новое общее поголовье для расчета расхода.",
+        "hens": "Введите новое количество кур/несушек для расчета расхода.",
+        "roosters": "Введите новое количество петухов для расчета расхода.",
         "rate": "Введите новый расход в граммах на птицу в день.",
         "hen_rate": "Введите новый расход в граммах на курицу/несушку в день.",
         "rooster_rate": "Введите новый расход в граммах на петуха в день.",

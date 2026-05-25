@@ -145,6 +145,43 @@ class FeedServiceTest(unittest.TestCase):
 
         self.assertIsNone(updated.bird_group_id)
 
+    def test_changing_bird_group_syncs_feed_counts(self) -> None:
+        first_group = self.service.create_bird_group(
+            user_id=1,
+            name="Молодки",
+            bird_count=12,
+            species="chicken",
+        )
+        second_group = self.service.create_bird_group(
+            user_id=1,
+            name="Основное стадо",
+            bird_count=30,
+            species="chicken",
+        )
+        feed = self.service.create_feed(
+            user_id=1,
+            name="Зерносмесь",
+            amount_kg=50,
+            bird_count=12,
+            daily_per_bird_g=120,
+            low_threshold_kg=5,
+            bird_group_id=first_group.id,
+            hen_count=10,
+            rooster_count=2,
+        )
+
+        updated = self.service.update_feed(
+            feed_id=feed.id,
+            user_id=1,
+            bird_group_id=second_group.id,
+            bird_count=second_group.bird_count,
+        )
+
+        self.assertEqual(updated.bird_group_id, second_group.id)
+        self.assertEqual(updated.bird_count, 30)
+        self.assertEqual(updated.hen_count, 30)
+        self.assertEqual(updated.rooster_count, 0)
+
     def test_invalid_non_finite_numbers_are_rejected(self) -> None:
         with self.assertRaises(ValueError):
             self.service.create_feed(

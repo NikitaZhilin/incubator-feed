@@ -151,6 +151,7 @@ class FeedService:
             not isfinite(low_threshold_kg) or low_threshold_kg < 0
         ):
             raise ValueError("Порог покупки не может быть отрицательным.")
+        sync_gender_counts = False
         if bird_group_id is not None:
             group = self.feeds.get_bird_group(bird_group_id, user_id)
             if group is None:
@@ -158,6 +159,7 @@ class FeedService:
             if next_hen_count + next_rooster_count != group.bird_count:
                 next_hen_count = group.bird_count
                 next_rooster_count = 0
+                sync_gender_counts = True
             bird_count = next_hen_count + next_rooster_count
         elif hen_count is not None or rooster_count is not None:
             bird_count = next_hen_count + next_rooster_count
@@ -172,9 +174,15 @@ class FeedService:
             daily_per_bird_g=daily_per_bird_g,
             low_threshold_kg=low_threshold_kg,
             bird_group_id=bird_group_id,
-            hen_count=next_hen_count if hen_count is not None or rooster_count is not None else None,
+            hen_count=(
+                next_hen_count
+                if sync_gender_counts or hen_count is not None or rooster_count is not None
+                else None
+            ),
             rooster_count=(
-                next_rooster_count if hen_count is not None or rooster_count is not None else None
+                next_rooster_count
+                if sync_gender_counts or hen_count is not None or rooster_count is not None
+                else None
             ),
             hen_daily_g=hen_daily_g,
             rooster_daily_g=rooster_daily_g,

@@ -6,6 +6,7 @@ from app.services.feed_recipes import calculate_chicken_mix, parse_feed_amount
 class FeedRecipesTest(unittest.TestCase):
     def test_parse_kg_and_bags(self) -> None:
         self.assertEqual(parse_feed_amount("25 кг"), 25)
+        self.assertEqual(parse_feed_amount("30кг"), 30)
         self.assertEqual(parse_feed_amount("1 мешок"), 25)
         self.assertEqual(parse_feed_amount("2 мешка по 30"), 60)
 

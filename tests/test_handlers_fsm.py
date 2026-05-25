@@ -131,6 +131,44 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Корм добавлен", threshold_message.answers[-1][0])
         self.assertEqual(len(self.feed_service.list_user_estimates(1)), 1)
 
+    async def test_feed_creation_with_group_derives_roosters_from_group_total(self) -> None:
+        group = self.feed_service.create_bird_group(
+            user_id=1,
+            name="Несушки",
+            bird_count=20,
+            species="chicken",
+        )
+        state = FakeState()
+        await state.update_data(
+            name="Зерносмесь",
+            bird_group_id=group.id,
+            bird_count=group.bird_count,
+        )
+        await state.set_state(NewFeed.amount)
+
+        await feed_amount(FakeMessage("30кг"), state, self.incubation)
+        self.assertEqual(state.state, NewFeed.hens)
+
+        hens_message = FakeMessage("18")
+        await feed_hens(hens_message, state, self.incubation)
+
+        self.assertEqual(state.state, NewFeed.hen_rate)
+        self.assertEqual(state.data["hen_count"], 18)
+        self.assertEqual(state.data["rooster_count"], 2)
+        self.assertIn("Учту: кур/несушек 18, петухов 2", hens_message.answers[-1][0])
+
+    async def test_feed_creation_with_only_roosters_skips_hen_rate(self) -> None:
+        state = FakeState()
+        await state.update_data(name="Зерносмесь", amount_kg=30, hen_count=0)
+        await state.set_state(NewFeed.roosters)
+        roosters_message = FakeMessage("3")
+
+        await feed_roosters(roosters_message, state, self.incubation)
+
+        self.assertEqual(state.state, NewFeed.rooster_rate)
+        self.assertEqual(state.data["bird_count"], 3)
+        self.assertIn("Кур/несушек нет", roosters_message.answers[-1][0])
+
     async def test_feed_restock_writeoff_and_edit_handlers(self) -> None:
         feed = self.feed_service.create_feed(
             user_id=1,
