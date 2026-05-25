@@ -21,6 +21,10 @@ class FeedService:
         daily_per_bird_g: float,
         low_threshold_kg: float,
         bird_group_id: int | None = None,
+        hen_count: int | None = None,
+        rooster_count: int | None = None,
+        hen_daily_g: float | None = None,
+        rooster_daily_g: float | None = None,
     ) -> FeedStock:
         clean_name = name.strip()[:255]
         if not clean_name:
@@ -31,13 +35,28 @@ class FeedService:
             raise ValueError("Количество птиц должно быть больше нуля.")
         if not isfinite(daily_per_bird_g) or daily_per_bird_g <= 0:
             raise ValueError("Расход на птицу должен быть больше нуля.")
+        hen_count = bird_count if hen_count is None and rooster_count is None else int(hen_count or 0)
+        rooster_count = int(rooster_count or 0)
+        if hen_count < 0 or rooster_count < 0 or hen_count + rooster_count <= 0:
+            raise ValueError("Укажите количество кур и петухов: хотя бы одна птица должна быть больше нуля.")
+        bird_count = hen_count + rooster_count
+        hen_daily_g = daily_per_bird_g if hen_daily_g is None else hen_daily_g
+        rooster_daily_g = daily_per_bird_g if rooster_daily_g is None else rooster_daily_g
+        if not isfinite(hen_daily_g) or hen_daily_g <= 0:
+            raise ValueError("Расход на курицу должен быть больше нуля.")
+        if rooster_count > 0 and (not isfinite(rooster_daily_g) or rooster_daily_g <= 0):
+            raise ValueError("Расход на петуха должен быть больше нуля.")
         if not isfinite(low_threshold_kg) or low_threshold_kg < 0:
             raise ValueError("Порог покупки не может быть отрицательным.")
         if bird_group_id is not None:
             group = self.feeds.get_bird_group(bird_group_id, user_id)
             if group is None:
                 raise ValueError("Группа птицы не найдена.")
-            bird_count = group.bird_count
+            if bird_count != group.bird_count:
+                raise ValueError(
+                    f"В выбранной группе {group.bird_count} птиц. "
+                    "Сумма кур и петухов должна совпадать с группой."
+                )
         feed = self.feeds.create(
             user_id=user_id,
             name=clean_name,
@@ -46,6 +65,10 @@ class FeedService:
             daily_per_bird_g=daily_per_bird_g,
             low_threshold_kg=low_threshold_kg,
             bird_group_id=bird_group_id,
+            hen_count=hen_count,
+            rooster_count=rooster_count,
+            hen_daily_g=hen_daily_g,
+            rooster_daily_g=rooster_daily_g,
         )
         self._track("feed_created", user_id=user_id, feed_id=feed.id)
         return feed
@@ -91,8 +114,15 @@ class FeedService:
         daily_per_bird_g: float | None = None,
         low_threshold_kg: float | None = None,
         bird_group_id: int | None = None,
+        hen_count: int | None = None,
+        rooster_count: int | None = None,
+        hen_daily_g: float | None = None,
+        rooster_daily_g: float | None = None,
         clear_bird_group: bool = False,
     ) -> FeedStock | None:
+        current = self.feeds.get(feed_id, user_id)
+        if current is None:
+            return None
         if name is not None:
             name = name.strip()[:255]
             if not name:
@@ -103,6 +133,20 @@ class FeedService:
             not isfinite(daily_per_bird_g) or daily_per_bird_g <= 0
         ):
             raise ValueError("Расход на птицу должен быть больше нуля.")
+        if hen_count is not None and hen_count < 0:
+            raise ValueError("Количество кур не может быть отрицательным.")
+        if rooster_count is not None and rooster_count < 0:
+            raise ValueError("Количество петухов не может быть отрицательным.")
+        next_hen_count = current.hen_count if hen_count is None else hen_count
+        next_rooster_count = current.rooster_count if rooster_count is None else rooster_count
+        if next_hen_count + next_rooster_count <= 0:
+            raise ValueError("Укажите хотя бы одну курицу или одного петуха.")
+        if hen_daily_g is not None and (not isfinite(hen_daily_g) or hen_daily_g <= 0):
+            raise ValueError("Расход на курицу должен быть больше нуля.")
+        if rooster_daily_g is not None and (
+            not isfinite(rooster_daily_g) or rooster_daily_g <= 0
+        ):
+            raise ValueError("Расход на петуха должен быть больше нуля.")
         if low_threshold_kg is not None and (
             not isfinite(low_threshold_kg) or low_threshold_kg < 0
         ):
@@ -111,7 +155,15 @@ class FeedService:
             group = self.feeds.get_bird_group(bird_group_id, user_id)
             if group is None:
                 raise ValueError("Группа птицы не найдена.")
-            bird_count = group.bird_count
+            if next_hen_count + next_rooster_count != group.bird_count:
+                next_hen_count = group.bird_count
+                next_rooster_count = 0
+            bird_count = next_hen_count + next_rooster_count
+        elif hen_count is not None or rooster_count is not None:
+            bird_count = next_hen_count + next_rooster_count
+        if daily_per_bird_g is not None:
+            hen_daily_g = daily_per_bird_g if hen_daily_g is None else hen_daily_g
+            rooster_daily_g = daily_per_bird_g if rooster_daily_g is None else rooster_daily_g
         feed = self.feeds.update(
             feed_id=feed_id,
             user_id=user_id,
@@ -120,6 +172,12 @@ class FeedService:
             daily_per_bird_g=daily_per_bird_g,
             low_threshold_kg=low_threshold_kg,
             bird_group_id=bird_group_id,
+            hen_count=next_hen_count if hen_count is not None or rooster_count is not None else None,
+            rooster_count=(
+                next_rooster_count if hen_count is not None or rooster_count is not None else None
+            ),
+            hen_daily_g=hen_daily_g,
+            rooster_daily_g=rooster_daily_g,
             clear_bird_group=clear_bird_group,
         )
         if feed is not None:
@@ -250,7 +308,13 @@ class FeedService:
         baseline = feed.updated_at or feed.created_at
         current, baseline = FeedService._align_datetimes(current, baseline)
         elapsed_days = max((current - baseline).total_seconds() / 86400, 0)
-        daily_usage_kg = feed.bird_count * feed.daily_per_bird_g / 1000
+        hen_count = feed.hen_count if feed.hen_count or feed.rooster_count else feed.bird_count
+        rooster_count = feed.rooster_count
+        hen_daily_g = feed.hen_daily_g if feed.hen_daily_g is not None else feed.daily_per_bird_g
+        rooster_daily_g = (
+            feed.rooster_daily_g if feed.rooster_daily_g is not None else feed.daily_per_bird_g
+        )
+        daily_usage_kg = (hen_count * hen_daily_g + rooster_count * rooster_daily_g) / 1000
         if daily_usage_kg <= 0:
             return FeedEstimate(feed, feed.amount_kg, 0, None, None, None)
 

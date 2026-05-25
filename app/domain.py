@@ -64,6 +64,10 @@ class FeedStock:
     daily_per_bird_g: float
     low_threshold_kg: float
     created_at: datetime
+    hen_count: int = 0
+    rooster_count: int = 0
+    hen_daily_g: float | None = None
+    rooster_daily_g: float | None = None
     updated_at: datetime | None = None
     purchase_reminded_at: datetime | None = None
     bird_group_id: int | None = None

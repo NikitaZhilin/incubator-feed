@@ -19,16 +19,25 @@ class FeedRepository:
         daily_per_bird_g: float,
         low_threshold_kg: float,
         bird_group_id: int | None = None,
+        hen_count: int | None = None,
+        rooster_count: int | None = None,
+        hen_daily_g: float | None = None,
+        rooster_daily_g: float | None = None,
     ) -> FeedStock:
         created_at = datetime.now(timezone.utc).isoformat()
+        hen_count = bird_count if hen_count is None and rooster_count is None else int(hen_count or 0)
+        rooster_count = int(rooster_count or 0)
+        hen_daily_g = daily_per_bird_g if hen_daily_g is None else hen_daily_g
+        rooster_daily_g = daily_per_bird_g if rooster_daily_g is None else rooster_daily_g
         with self.database.connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO feed_stocks (
                     user_id, name, amount_kg, bird_count, daily_per_bird_g, low_threshold_kg,
-                    bird_group_id, created_at, updated_at
+                    bird_group_id, hen_count, rooster_count, hen_daily_g, rooster_daily_g,
+                    created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user_id,
@@ -38,6 +47,10 @@ class FeedRepository:
                     daily_per_bird_g,
                     low_threshold_kg,
                     bird_group_id,
+                    hen_count,
+                    rooster_count,
+                    hen_daily_g,
+                    rooster_daily_g,
                     created_at,
                     created_at,
                 ),
@@ -59,7 +72,9 @@ class FeedRepository:
             row = connection.execute(
                 """
                 SELECT fs.id, fs.user_id, fs.name, fs.amount_kg, fs.bird_count,
-                       fs.daily_per_bird_g, fs.low_threshold_kg, fs.purchase_reminded_at,
+                       fs.daily_per_bird_g, fs.low_threshold_kg, fs.hen_count,
+                       fs.rooster_count, fs.hen_daily_g, fs.rooster_daily_g,
+                       fs.purchase_reminded_at,
                        fs.created_at, fs.updated_at, fs.bird_group_id, bg.name AS bird_group_name,
                        fs.is_archived
                 FROM feed_stocks
@@ -76,7 +91,9 @@ class FeedRepository:
             rows = connection.execute(
                 """
                 SELECT fs.id, fs.user_id, fs.name, fs.amount_kg, fs.bird_count,
-                       fs.daily_per_bird_g, fs.low_threshold_kg, fs.purchase_reminded_at,
+                       fs.daily_per_bird_g, fs.low_threshold_kg, fs.hen_count,
+                       fs.rooster_count, fs.hen_daily_g, fs.rooster_daily_g,
+                       fs.purchase_reminded_at,
                        fs.created_at, fs.updated_at, fs.bird_group_id, bg.name AS bird_group_name,
                        fs.is_archived
                 FROM feed_stocks AS fs
@@ -93,7 +110,9 @@ class FeedRepository:
             rows = connection.execute(
                 """
                 SELECT fs.id, fs.user_id, fs.name, fs.amount_kg, fs.bird_count,
-                       fs.daily_per_bird_g, fs.low_threshold_kg, fs.purchase_reminded_at,
+                       fs.daily_per_bird_g, fs.low_threshold_kg, fs.hen_count,
+                       fs.rooster_count, fs.hen_daily_g, fs.rooster_daily_g,
+                       fs.purchase_reminded_at,
                        fs.created_at, fs.updated_at, fs.bird_group_id, bg.name AS bird_group_name,
                        fs.is_archived
                 FROM feed_stocks AS fs
@@ -129,6 +148,10 @@ class FeedRepository:
         daily_per_bird_g: float | None = None,
         low_threshold_kg: float | None = None,
         bird_group_id: int | None = None,
+        hen_count: int | None = None,
+        rooster_count: int | None = None,
+        hen_daily_g: float | None = None,
+        rooster_daily_g: float | None = None,
         clear_bird_group: bool = False,
     ) -> FeedStock | None:
         current = self.get(feed_id, user_id)
@@ -143,6 +166,10 @@ class FeedRepository:
                     daily_per_bird_g = ?,
                     low_threshold_kg = ?,
                     bird_group_id = ?,
+                    hen_count = ?,
+                    rooster_count = ?,
+                    hen_daily_g = ?,
+                    rooster_daily_g = ?,
                     purchase_reminded_at = NULL
                 WHERE id = ? AND user_id = ?
                 """,
@@ -154,6 +181,10 @@ class FeedRepository:
                     None if clear_bird_group else (
                         bird_group_id if bird_group_id is not None else current.bird_group_id
                     ),
+                    hen_count if hen_count is not None else current.hen_count,
+                    rooster_count if rooster_count is not None else current.rooster_count,
+                    hen_daily_g if hen_daily_g is not None else current.hen_daily_g,
+                    rooster_daily_g if rooster_daily_g is not None else current.rooster_daily_g,
                     feed_id,
                     user_id,
                 ),
@@ -327,6 +358,18 @@ class FeedRepository:
             daily_per_bird_g=float(row["daily_per_bird_g"]),
             low_threshold_kg=float(row["low_threshold_kg"]),
             created_at=datetime.fromisoformat(str(row["created_at"])),
+            hen_count=int(row["hen_count"]) if "hen_count" in row.keys() else int(row["bird_count"]),
+            rooster_count=int(row["rooster_count"]) if "rooster_count" in row.keys() else 0,
+            hen_daily_g=(
+                float(row["hen_daily_g"])
+                if "hen_daily_g" in row.keys() and row["hen_daily_g"] is not None
+                else float(row["daily_per_bird_g"])
+            ),
+            rooster_daily_g=(
+                float(row["rooster_daily_g"])
+                if "rooster_daily_g" in row.keys() and row["rooster_daily_g"] is not None
+                else float(row["daily_per_bird_g"])
+            ),
             updated_at=datetime.fromisoformat(str(updated_at)) if updated_at else None,
             purchase_reminded_at=(
                 datetime.fromisoformat(str(purchase_reminded_at))

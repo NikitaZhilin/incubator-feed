@@ -36,6 +36,28 @@ class FeedServiceTest(unittest.TestCase):
         self.assertEqual(round(estimate.remaining_kg, 1), 32.8)
         self.assertEqual(estimate.days_left, 13)
 
+    def test_feed_estimate_uses_separate_hen_and_rooster_rates(self) -> None:
+        feed = self.service.create_feed(
+            user_id=1,
+            name="Layer mix",
+            amount_kg=40,
+            bird_count=12,
+            daily_per_bird_g=120,
+            low_threshold_kg=5,
+            hen_count=10,
+            rooster_count=2,
+            hen_daily_g=115,
+            rooster_daily_g=150,
+        )
+
+        estimate = self.service.estimate(feed, now=feed.created_at + timedelta(days=2))
+
+        self.assertEqual(feed.bird_count, 12)
+        self.assertEqual(feed.hen_count, 10)
+        self.assertEqual(feed.rooster_count, 2)
+        self.assertEqual(round(estimate.daily_usage_kg, 2), 1.45)
+        self.assertEqual(round(estimate.remaining_kg, 1), 37.1)
+
     def test_due_purchase_reminder(self) -> None:
         feed = self.service.create_feed(
             user_id=1,
@@ -107,6 +129,8 @@ class FeedServiceTest(unittest.TestCase):
             daily_per_bird_g=120,
             low_threshold_kg=5,
             bird_group_id=group.id,
+            hen_count=25,
+            rooster_count=0,
         )
 
         self.assertEqual(feed.bird_group_id, group.id)

@@ -9,10 +9,11 @@ from app.handlers.feeds import (
     EditFeed,
     NewFeed,
     feed_amount,
-    feed_birds,
     feed_change_amount,
     feed_edit_value,
+    feed_hens,
     feed_name_with_service,
+    feed_roosters,
     feed_threshold,
 )
 from app.handlers.incubation import NewBatch, enter_eggs_count
@@ -115,10 +116,12 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         await feed_name_with_service(FakeMessage("ПК-1"), state, self.feed_service, self.incubation)
         self.assertEqual(state.state, NewFeed.amount)
         await feed_amount(FakeMessage("25 кг"), state, self.incubation)
-        self.assertEqual(state.state, NewFeed.birds)
-        await feed_birds(FakeMessage("20"), state, self.incubation)
-        self.assertEqual(state.state, NewFeed.rate)
-        await state.update_data(daily_per_bird_g=120)
+        self.assertEqual(state.state, NewFeed.hens)
+        await feed_hens(FakeMessage("18"), state, self.incubation)
+        self.assertEqual(state.state, NewFeed.roosters)
+        await feed_roosters(FakeMessage("2"), state, self.incubation)
+        self.assertEqual(state.state, NewFeed.hen_rate)
+        await state.update_data(hen_daily_g=120, rooster_daily_g=150)
         await state.set_state(NewFeed.threshold)
         threshold_message = FakeMessage("5")
 

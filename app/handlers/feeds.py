@@ -35,7 +35,11 @@ class NewFeed(StatesGroup):
     group = State()
     amount = State()
     birds = State()
+    hens = State()
+    roosters = State()
     rate = State()
+    hen_rate = State()
+    rooster_rate = State()
     threshold = State()
 
 
@@ -67,7 +71,11 @@ FEED_FLOW_STATES = (
     NewFeed.group,
     NewFeed.amount,
     NewFeed.birds,
+    NewFeed.hens,
+    NewFeed.roosters,
     NewFeed.rate,
+    NewFeed.hen_rate,
+    NewFeed.rooster_rate,
     NewFeed.threshold,
     FeedMix.amount,
     RestockFeed.amount,
@@ -317,15 +325,69 @@ async def feed_amount(message: Message, state: FSMContext, incubation_service: I
     await state.update_data(amount_kg=amount)
     data = await state.get_data()
     if data.get("bird_group_id") is not None:
-        await state.set_state(NewFeed.rate)
+        await state.set_state(NewFeed.hens)
         await message.answer(
-            f"Количество птиц взято из группы: {data['bird_count']}.\n"
-            "Укажите расход на одну птицу в день.",
-            reply_markup=feed_rate_keyboard(),
+            f"В выбранной группе {data['bird_count']} птиц.\n"
+            "Сколько из них кур/несушек? Введите число, можно 0.",
+            reply_markup=feed_cancel_keyboard(),
         )
         return
-    await state.set_state(NewFeed.birds)
-    await message.answer("На сколько птиц считать расход? Введите число.", reply_markup=feed_cancel_keyboard())
+    await state.set_state(NewFeed.hens)
+    await message.answer("Сколько кур/несушек будет есть этот корм? Введите число, можно 0.", reply_markup=feed_cancel_keyboard())
+
+
+@router.message(NewFeed.hens)
+async def feed_hens(message: Message, state: FSMContext, incubation_service: IncubationService) -> None:
+    if not message.text or not message.text.strip().isdigit():
+        incubation_service.track_scenario_error(
+            user_id=message.from_user.id,
+            scenario="feed_hens",
+            message="invalid_count",
+        )
+        await message.answer("Введите количество кур числом, например 25. Если кур нет, введите 0.")
+        return
+    await state.update_data(hen_count=int(message.text.strip()))
+    await state.set_state(NewFeed.roosters)
+    await message.answer("Сколько петухов будет есть этот корм? Введите число, можно 0.", reply_markup=feed_cancel_keyboard())
+
+
+@router.message(NewFeed.roosters)
+async def feed_roosters(message: Message, state: FSMContext, incubation_service: IncubationService) -> None:
+    if not message.text or not message.text.strip().isdigit():
+        incubation_service.track_scenario_error(
+            user_id=message.from_user.id,
+            scenario="feed_roosters",
+            message="invalid_count",
+        )
+        await message.answer("Введите количество петухов числом, например 2. Если петухов нет, введите 0.")
+        return
+    rooster_count = int(message.text.strip())
+    data = await state.get_data()
+    hen_count = int(data.get("hen_count", 0))
+    total = hen_count + rooster_count
+    if total <= 0:
+        incubation_service.track_scenario_error(
+            user_id=message.from_user.id,
+            scenario="feed_roosters",
+            message="empty_flock",
+        )
+        await message.answer("Нужно указать хотя бы одну курицу или одного петуха.")
+        return
+    group_total = data.get("bird_count") if data.get("bird_group_id") is not None else None
+    if group_total is not None and total != int(group_total):
+        incubation_service.track_scenario_error(
+            user_id=message.from_user.id,
+            scenario="feed_roosters",
+            message="group_total_mismatch",
+        )
+        await message.answer(
+            f"В выбранной группе {group_total} птиц, а вы указали {total}. "
+            "Введите количество петухов еще раз так, чтобы куры + петухи совпали с группой."
+        )
+        return
+    await state.update_data(rooster_count=rooster_count, bird_count=total)
+    await state.set_state(NewFeed.hen_rate)
+    await message.answer("Укажите расход на одну курицу/несушку в день.", reply_markup=feed_rate_keyboard())
 
 
 @router.message(NewFeed.birds)
@@ -357,6 +419,92 @@ async def feed_rate_callback(callback: CallbackQuery, state: FSMContext) -> None
         reply_markup=feed_cancel_keyboard(),
     )
     await callback.answer()
+
+
+@router.callback_query(NewFeed.hen_rate, F.data.startswith("feed_rate:"))
+async def feed_hen_rate_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    value = str(callback.data).split(":", 1)[1]
+    if value == "manual":
+        await callback.message.answer("Введите расход в граммах на одну курицу/несушку в день, например 120.")
+        await callback.answer()
+        return
+    await state.update_data(hen_daily_g=float(value))
+    await state.set_state(NewFeed.rooster_rate)
+    data = await state.get_data()
+    if int(data.get("rooster_count", 0)) == 0:
+        await state.update_data(rooster_daily_g=float(value))
+        await state.set_state(NewFeed.threshold)
+        await callback.message.answer(
+            "Петухов нет, расход для них не нужен.\n"
+            "При каком остатке напомнить о покупке? Введите кг, например 5.",
+            reply_markup=feed_cancel_keyboard(),
+        )
+    else:
+        await callback.message.answer("Укажите расход на одного петуха в день.", reply_markup=feed_rate_keyboard())
+    await callback.answer()
+
+
+@router.message(NewFeed.hen_rate)
+async def feed_hen_rate_message(message: Message, state: FSMContext, incubation_service: IncubationService) -> None:
+    try:
+        rate = _parse_float(message.text)
+    except ValueError:
+        incubation_service.track_scenario_error(
+            user_id=message.from_user.id,
+            scenario="feed_hen_rate",
+            message="invalid_rate",
+        )
+        await message.answer("Введите расход на курицу в граммах, например 120.")
+        return
+    await state.update_data(hen_daily_g=rate)
+    data = await state.get_data()
+    if int(data.get("rooster_count", 0)) == 0:
+        await state.update_data(rooster_daily_g=rate)
+        await state.set_state(NewFeed.threshold)
+        await message.answer(
+            "Петухов нет, расход для них не нужен.\n"
+            "При каком остатке напомнить о покупке? Введите кг, например 5.",
+            reply_markup=feed_cancel_keyboard(),
+        )
+        return
+    await state.set_state(NewFeed.rooster_rate)
+    await message.answer("Укажите расход на одного петуха в день.", reply_markup=feed_rate_keyboard())
+
+
+@router.callback_query(NewFeed.rooster_rate, F.data.startswith("feed_rate:"))
+async def feed_rooster_rate_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    value = str(callback.data).split(":", 1)[1]
+    if value == "manual":
+        await callback.message.answer("Введите расход в граммах на одного петуха в день, например 150.")
+        await callback.answer()
+        return
+    await state.update_data(rooster_daily_g=float(value))
+    await state.set_state(NewFeed.threshold)
+    await callback.message.answer(
+        "При каком остатке напомнить о покупке? Введите кг, например 5.",
+        reply_markup=feed_cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.message(NewFeed.rooster_rate)
+async def feed_rooster_rate_message(message: Message, state: FSMContext, incubation_service: IncubationService) -> None:
+    try:
+        rate = _parse_float(message.text)
+    except ValueError:
+        incubation_service.track_scenario_error(
+            user_id=message.from_user.id,
+            scenario="feed_rooster_rate",
+            message="invalid_rate",
+        )
+        await message.answer("Введите расход на петуха в граммах, например 150.")
+        return
+    await state.update_data(rooster_daily_g=rate)
+    await state.set_state(NewFeed.threshold)
+    await message.answer(
+        "При каком остатке напомнить о покупке? Введите кг, например 5.",
+        reply_markup=feed_cancel_keyboard(),
+    )
 
 
 @router.message(NewFeed.rate)
@@ -402,13 +550,17 @@ async def feed_threshold(
         name=str(data["name"]),
         amount_kg=float(data["amount_kg"]),
         bird_count=int(data["bird_count"]),
-        daily_per_bird_g=float(data["daily_per_bird_g"]),
+        daily_per_bird_g=float(data.get("hen_daily_g", data.get("daily_per_bird_g", 120))),
         low_threshold_kg=threshold,
         bird_group_id=(
             int(data["bird_group_id"])
             if data.get("bird_group_id") is not None
             else None
         ),
+        hen_count=int(data.get("hen_count", data["bird_count"])),
+        rooster_count=int(data.get("rooster_count", 0)),
+        hen_daily_g=float(data.get("hen_daily_g", data.get("daily_per_bird_g", 120))),
+        rooster_daily_g=float(data.get("rooster_daily_g", data.get("hen_daily_g", data.get("daily_per_bird_g", 120)))),
     )
     await state.clear()
     estimate = feed_service.estimate(feed)
@@ -578,7 +730,11 @@ async def feed_edit_field(callback: CallbackQuery, state: FSMContext, feed_servi
     prompts = {
         "name": "Введите новое название корма.",
         "birds": "Введите новое количество птиц.",
+        "hens": "Введите новое количество кур/несушек.",
+        "roosters": "Введите новое количество петухов.",
         "rate": "Введите новый расход в граммах на птицу в день.",
+        "hen_rate": "Введите новый расход в граммах на курицу/несушку в день.",
+        "rooster_rate": "Введите новый расход в граммах на петуха в день.",
         "threshold": "Введите новый порог предупреждения в кг.",
         "group": "Выберите новую группу птицы или оставьте корм без группы.",
     }
@@ -653,8 +809,32 @@ async def feed_edit_value(
                 )
                 raise ValueError("Количество птиц должно быть числом.")
             kwargs["bird_count"] = int(value)
+            kwargs["hen_count"] = int(value)
+            kwargs["rooster_count"] = 0
+        elif field == "hens":
+            if not value.isdigit():
+                incubation_service.track_scenario_error(
+                    user_id=message.from_user.id,
+                    scenario="feed_edit_hens",
+                    message="invalid_count",
+                )
+                raise ValueError("Количество кур должно быть числом.")
+            kwargs["hen_count"] = int(value)
+        elif field == "roosters":
+            if not value.isdigit():
+                incubation_service.track_scenario_error(
+                    user_id=message.from_user.id,
+                    scenario="feed_edit_roosters",
+                    message="invalid_count",
+                )
+                raise ValueError("Количество петухов должно быть числом.")
+            kwargs["rooster_count"] = int(value)
         elif field == "rate":
             kwargs["daily_per_bird_g"] = _parse_float(value)
+        elif field == "hen_rate":
+            kwargs["hen_daily_g"] = _parse_float(value)
+        elif field == "rooster_rate":
+            kwargs["rooster_daily_g"] = _parse_float(value)
         elif field == "threshold":
             kwargs["low_threshold_kg"] = _parse_float(value, allow_zero=True)
         else:
@@ -753,12 +933,18 @@ def _format_estimate(estimate: FeedEstimate) -> str:
         if estimate.threshold_days_left is None
         else f"через {estimate.threshold_days_left} дн."
     )
+    hen_daily_g = feed.hen_daily_g if feed.hen_daily_g is not None else feed.daily_per_bird_g
+    rooster_daily_g = (
+        feed.rooster_daily_g if feed.rooster_daily_g is not None else feed.daily_per_bird_g
+    )
     return (
         f"#{feed.id} {feed.name}\n"
         f"Группа: {feed.bird_group_name or 'не указана'}\n"
         f"Остаток расчетный: {estimate.remaining_kg:.1f} кг из {feed.amount_kg:g} кг\n"
-        f"Птиц: {feed.bird_count}\n"
-        f"Расход: {feed.daily_per_bird_g:g} г/птица/день ({estimate.daily_usage_kg:.2f} кг/день)\n"
+        f"Птиц: {feed.bird_count} (кур/несушек: {feed.hen_count}, петухов: {feed.rooster_count})\n"
+        f"Расход кур: {hen_daily_g:g} г/гол./день\n"
+        f"Расход петухов: {rooster_daily_g:g} г/гол./день\n"
+        f"Общий расход: {estimate.daily_usage_kg:.2f} кг/день\n"
         f"Хватит примерно: {days_left}\n"
         f"Напомнить при остатке: {feed.low_threshold_kg:g} кг ({threshold})"
     )

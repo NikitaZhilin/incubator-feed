@@ -12,6 +12,7 @@ MIGRATIONS = (
     "004_feed_history_groups_recipes",
     "005_analytics",
     "006_sync_user_notification_settings",
+    "007_feed_gender_counts",
 )
 
 

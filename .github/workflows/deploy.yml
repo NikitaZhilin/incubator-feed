@@ -68,7 +68,8 @@ jobs:
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Deployment skipped: configure BOT_TOKEN, VPS_HOST, VPS_USER, and VPS_SSH_KEY secrets."
+            echo "Deployment cannot start: configure BOT_TOKEN, VPS_HOST, VPS_USER, and VPS_SSH_KEY secrets." >&2
+            exit 1
           fi
 
       - name: Configure SSH
@@ -182,5 +183,6 @@ jobs:
               -v '$DEPLOY_PATH/backups:/app/backups' \
               '$IMAGE_NAME' python main.py
             docker ps --filter name='$CONTAINER_NAME'
+            docker exec '$CONTAINER_NAME' python -B -c 'from app.version import APP_VERSION; print(\"container app version\", APP_VERSION)'
             docker logs --tail=80 '$CONTAINER_NAME'
           "

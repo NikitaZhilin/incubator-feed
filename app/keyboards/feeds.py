@@ -74,11 +74,15 @@ def feed_edit_keyboard(feed_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="Название", callback_data=f"feeds:edit_field:{feed_id}:name"),
-                InlineKeyboardButton(text="Птицы", callback_data=f"feeds:edit_field:{feed_id}:birds"),
+                InlineKeyboardButton(text="Куры", callback_data=f"feeds:edit_field:{feed_id}:hens"),
             ],
             [
-                InlineKeyboardButton(text="Расход", callback_data=f"feeds:edit_field:{feed_id}:rate"),
+                InlineKeyboardButton(text="Петухи", callback_data=f"feeds:edit_field:{feed_id}:roosters"),
                 InlineKeyboardButton(text="Порог", callback_data=f"feeds:edit_field:{feed_id}:threshold"),
+            ],
+            [
+                InlineKeyboardButton(text="Расход кур", callback_data=f"feeds:edit_field:{feed_id}:hen_rate"),
+                InlineKeyboardButton(text="Расход петухов", callback_data=f"feeds:edit_field:{feed_id}:rooster_rate"),
             ],
             [InlineKeyboardButton(text="Группа птицы", callback_data=f"feeds:edit_field:{feed_id}:group")],
             [InlineKeyboardButton(text="Отмена", callback_data=f"feeds:view:{feed_id}")],

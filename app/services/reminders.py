@@ -171,7 +171,8 @@ class ReminderRunner:
                     f"{feed.name}\n"
                     f"Расчетный остаток: {estimate.remaining_kg:.1f} кг\n"
                     f"Порог покупки: {feed.low_threshold_kg:g} кг\n"
-                    f"Расход: {estimate.daily_usage_kg:.2f} кг/день на {feed.bird_count} птиц.",
+                    f"Расход: {estimate.daily_usage_kg:.2f} кг/день "
+                    f"на {feed.hen_count} кур и {feed.rooster_count} петухов.",
                 )
             except Exception as exc:
                 logger.exception("Failed to send feed reminder for feed %s", feed.id)
