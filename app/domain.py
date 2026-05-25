@@ -117,6 +117,77 @@ class FeedEstimate:
     buy_remind_at: datetime | None
 
 
+@dataclass(frozen=True)
+class StockItem:
+    id: int
+    user_id: int
+    name: str
+    kind: str
+    unit: str
+    low_threshold_kg: float
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class StockTransaction:
+    id: int
+    user_id: int
+    stock_item_id: int
+    type: str
+    amount_kg: float
+    balance_after_kg: float
+    note: str
+    related_mix_id: int | None
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class MixProduction:
+    id: int
+    user_id: int
+    recipe_code: str
+    recipe_version: str
+    mix_count: float
+    output_stock_item_id: int
+    output_kg: float
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class MixProductionItem:
+    id: int
+    mix_production_id: int
+    ingredient_stock_item_id: int
+    ingredient_name: str
+    amount_kg: float
+
+
+@dataclass(frozen=True)
+class FeedingAssignment:
+    id: int
+    user_id: int
+    bird_group_id: int
+    stock_item_id: int
+    is_active: bool
+    started_at: datetime
+    ended_at: datetime | None = None
+    daily_per_bird_g: float = 120.0
+    reserve_percent: float = 0.0
+    bird_group_name: str | None = None
+    stock_item_name: str | None = None
+
+
+@dataclass(frozen=True)
+class StockEstimate:
+    item: StockItem
+    remaining_kg: float
+    daily_usage_kg: float
+    days_left: int | None
+    last_transaction_at: datetime | None
+
+
 def content_path() -> Path:
     return Path(__file__).resolve().parent / "content" / "incubation.json"
 

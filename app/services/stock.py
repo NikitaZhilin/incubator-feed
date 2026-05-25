@@ -1,0 +1,320 @@
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from math import floor, isfinite
+
+from app.domain import CONTENT, FeedingAssignment, StockEstimate, StockItem
+from app.services.feed_recipes import CHICKEN_MIX_RECIPE
+from app.services.feeds import FeedService
+from app.storage.repositories.feeds import FeedRepository
+from app.storage.repositories.stock import StockRepository
+from app.storage.repositories.analytics import AnalyticsRepository
+
+
+STOCK_KIND_LABELS = {
+    "ingredient": "ингредиент",
+    "finished_mix": "готовая смесь",
+    "commercial_feed": "готовый корм",
+    "other": "другое",
+}
+
+
+@dataclass(frozen=True)
+class RequiredIngredient:
+    name: str
+    required_kg: float
+    available_kg: float
+    stock_item_id: int | None
+
+    @property
+    def missing_kg(self) -> float:
+        return max(self.required_kg - self.available_kg, 0)
+
+
+@dataclass(frozen=True)
+class MixPlan:
+    recipe_code: str
+    recipe_version: str
+    title: str
+    mix_count: float
+    output_name: str
+    output_kg: float
+    ingredients: tuple[RequiredIngredient, ...]
+
+    @property
+    def can_produce(self) -> bool:
+        return all(item.missing_kg <= 0 for item in self.ingredients)
+
+    @property
+    def max_mix_count(self) -> float:
+        limits = [
+            item.available_kg / item.required_kg * self.mix_count
+            for item in self.ingredients
+            if item.required_kg > 0
+        ]
+        return max(min(limits), 0) if limits else 0
+
+
+class StockService:
+    def __init__(
+        self,
+        stock: StockRepository,
+        feeds: FeedRepository,
+        analytics: AnalyticsRepository | None = None,
+    ) -> None:
+        self.stock = stock
+        self.feeds = feeds
+        self.analytics = analytics
+
+    def list_estimates(
+        self,
+        user_id: int,
+        *,
+        now: datetime | None = None,
+    ) -> list[StockEstimate]:
+        current = now or datetime.now(timezone.utc)
+        return [self.estimate_item(item, now=current) for item in self.stock.list_items(user_id)]
+
+    def estimate_item(
+        self,
+        item: StockItem,
+        *,
+        now: datetime | None = None,
+    ) -> StockEstimate:
+        current = now or datetime.now(timezone.utc)
+        last = self.stock.last_transaction(item.id, item.user_id)
+        if last is None:
+            return StockEstimate(item, 0, self._daily_usage_kg(item, current), None, None)
+
+        consumed_kg = self._consumed_since(item, last.created_at, current)
+        remaining_kg = max(last.balance_after_kg - consumed_kg, 0)
+        daily_usage_kg = self._daily_usage_kg(item, current)
+        days_left = floor(remaining_kg / daily_usage_kg) if daily_usage_kg > 0 else None
+        return StockEstimate(
+            item=item,
+            remaining_kg=remaining_kg,
+            daily_usage_kg=daily_usage_kg,
+            days_left=days_left,
+            last_transaction_at=last.created_at,
+        )
+
+    def add_purchase(
+        self,
+        *,
+        user_id: int,
+        name: str,
+        kind: str,
+        amount_kg: float,
+        note: str = "",
+    ) -> StockEstimate:
+        self._validate_amount(amount_kg)
+        item = self.stock.get_or_create_item(user_id=user_id, name=name, kind=kind)
+        current = self.estimate_item(item)
+        transaction = self.stock.add_transaction(
+            user_id=user_id,
+            stock_item_id=item.id,
+            transaction_type="purchase",
+            amount_kg=amount_kg,
+            balance_after_kg=current.remaining_kg + amount_kg,
+            note=note or "Покупка",
+        )
+        self._track("stock_purchase", user_id=user_id, entity_id=item.id)
+        return self.estimate_item(item, now=transaction.created_at)
+
+    def adjust_stock(
+        self,
+        *,
+        user_id: int,
+        stock_item_id: int,
+        amount_kg: float,
+        note: str = "",
+    ) -> StockEstimate | None:
+        self._validate_amount(amount_kg, allow_zero=True)
+        item = self.stock.get_item(stock_item_id, user_id)
+        if item is None:
+            return None
+        transaction = self.stock.add_transaction(
+            user_id=user_id,
+            stock_item_id=item.id,
+            transaction_type="manual_adjustment",
+            amount_kg=amount_kg,
+            balance_after_kg=amount_kg,
+            note=note or "Фактический остаток",
+        )
+        self._track("stock_adjusted", user_id=user_id, entity_id=item.id)
+        return self.estimate_item(item, now=transaction.created_at)
+
+    def plan_mix(
+        self,
+        *,
+        user_id: int,
+        mix_count: float,
+        now: datetime | None = None,
+    ) -> MixPlan:
+        self._validate_amount(mix_count)
+        recipe_payload = CONTENT["feed_recipes"]["chicken_mix"]
+        one_cycle_kg = self.one_chicken_mix_cycle_kg()
+        ingredients = []
+        current = now or datetime.now(timezone.utc)
+        for ingredient in CHICKEN_MIX_RECIPE:
+            required_kg = ingredient.parts * ingredient.density_kg_per_l * mix_count
+            item = self.stock.find_item_by_name(user_id=user_id, name=ingredient.name)
+            available_kg = self.estimate_item(item, now=current).remaining_kg if item else 0
+            ingredients.append(
+                RequiredIngredient(
+                    name=ingredient.name,
+                    required_kg=required_kg,
+                    available_kg=available_kg,
+                    stock_item_id=item.id if item else None,
+                )
+            )
+        return MixPlan(
+            recipe_code="chicken_mix",
+            recipe_version=str(recipe_payload["version"]),
+            title=str(recipe_payload["title"]),
+            mix_count=mix_count,
+            output_name=str(recipe_payload["title"]),
+            output_kg=one_cycle_kg * mix_count,
+            ingredients=tuple(ingredients),
+        )
+
+    def produce_mix(
+        self,
+        *,
+        user_id: int,
+        mix_count: float,
+    ) -> MixPlan:
+        plan = self.plan_mix(user_id=user_id, mix_count=mix_count)
+        if not plan.can_produce:
+            raise ValueError("Недостаточно ингредиентов для замеса.")
+        output = self.stock.get_or_create_item(
+            user_id=user_id,
+            name=plan.output_name,
+            kind="finished_mix",
+        )
+        mix = self.stock.create_mix_production(
+            user_id=user_id,
+            recipe_code=plan.recipe_code,
+            recipe_version=plan.recipe_version,
+            mix_count=plan.mix_count,
+            output_stock_item_id=output.id,
+            output_kg=plan.output_kg,
+        )
+        for required in plan.ingredients:
+            ingredient_item = self.stock.get_or_create_item(
+                user_id=user_id,
+                name=required.name,
+                kind="ingredient",
+            )
+            current = self.estimate_item(ingredient_item, now=mix.created_at)
+            self.stock.add_mix_item(
+                mix_production_id=mix.id,
+                ingredient_stock_item_id=ingredient_item.id,
+                ingredient_name=required.name,
+                amount_kg=required.required_kg,
+            )
+            self.stock.add_transaction(
+                user_id=user_id,
+                stock_item_id=ingredient_item.id,
+                transaction_type="mix_input",
+                amount_kg=-required.required_kg,
+                balance_after_kg=max(current.remaining_kg - required.required_kg, 0),
+                note=f"Замес #{mix.id}",
+                related_mix_id=mix.id,
+                created_at=mix.created_at,
+            )
+        output_current = self.estimate_item(output, now=mix.created_at)
+        self.stock.add_transaction(
+            user_id=user_id,
+            stock_item_id=output.id,
+            transaction_type="mix_output",
+            amount_kg=plan.output_kg,
+            balance_after_kg=output_current.remaining_kg + plan.output_kg,
+            note=f"Замес #{mix.id}",
+            related_mix_id=mix.id,
+            created_at=mix.created_at,
+        )
+        self._track("mix_produced", user_id=user_id, entity_id=mix.id)
+        return plan
+
+    def assign_feed(
+        self,
+        *,
+        user_id: int,
+        bird_group_id: int,
+        stock_item_id: int,
+        daily_per_bird_g: float = 120,
+        reserve_percent: float = 0,
+    ) -> FeedingAssignment:
+        if self.feeds.get_bird_group(bird_group_id, user_id) is None:
+            raise ValueError("Поголовье не найдено.")
+        if self.stock.get_item(stock_item_id, user_id) is None:
+            raise ValueError("Позиция склада не найдена.")
+        self._validate_amount(daily_per_bird_g)
+        self._validate_amount(reserve_percent, allow_zero=True)
+        assignment = self.stock.create_assignment(
+            user_id=user_id,
+            bird_group_id=bird_group_id,
+            stock_item_id=stock_item_id,
+            daily_per_bird_g=daily_per_bird_g,
+            reserve_percent=reserve_percent,
+        )
+        self._track("feeding_assigned", user_id=user_id, entity_id=assignment.id)
+        return assignment
+
+    def list_assignments(self, user_id: int) -> list[FeedingAssignment]:
+        return self.stock.list_assignments(user_id)
+
+    def list_history(self, user_id: int, limit: int = 20):
+        return self.stock.list_transactions(user_id, limit=limit)
+
+    @staticmethod
+    def one_chicken_mix_cycle_kg() -> float:
+        return sum(item.parts * item.density_kg_per_l for item in CHICKEN_MIX_RECIPE)
+
+    def _consumed_since(self, item: StockItem, since: datetime, until: datetime) -> float:
+        consumed = 0.0
+        for assignment in self.stock.list_assignments_for_item(item.user_id, item.id):
+            start = max(since, assignment.started_at)
+            if until <= start:
+                continue
+            consumed += self._assignment_daily_usage_kg(assignment, until) * (
+                (until - start).total_seconds() / 86400
+            )
+        return consumed
+
+    def _daily_usage_kg(self, item: StockItem, current: datetime) -> float:
+        return sum(
+            self._assignment_daily_usage_kg(assignment, current)
+            for assignment in self.stock.list_assignments_for_item(item.user_id, item.id)
+        )
+
+    def _assignment_daily_usage_kg(
+        self,
+        assignment: FeedingAssignment,
+        current: datetime,
+    ) -> float:
+        group = self.feeds.get_bird_group(assignment.bird_group_id, assignment.user_id)
+        if group is None:
+            return 0
+        if group.group_kind == "chicks" and group.hatched_at is not None:
+            if group.joined_at is not None and current.date() >= group.joined_at:
+                return 0
+            age_days = max((current.date() - group.hatched_at).days, 0)
+            reserve = 1 + max(group.reserve_percent, 0) / 100
+            return group.bird_count * FeedService.chick_daily_g(age_days) * reserve / 1000
+        reserve = 1 + max(assignment.reserve_percent, 0) / 100
+        return group.bird_count * assignment.daily_per_bird_g * reserve / 1000
+
+    @staticmethod
+    def _validate_amount(value: float, *, allow_zero: bool = False) -> None:
+        if not isfinite(value) or value < 0 or (value == 0 and not allow_zero):
+            raise ValueError("Количество должно быть больше нуля.")
+
+    def _track(self, event_name: str, *, user_id: int, entity_id: int) -> None:
+        if self.analytics is not None:
+            self.analytics.track(
+                event_name,
+                user_id=user_id,
+                entity_type="stock",
+                entity_id=entity_id,
+            )

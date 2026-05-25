@@ -14,6 +14,7 @@ from app.middlewares.callbacks import StaleCallbackMiddleware
 from app.middlewares.users import UserTrackingMiddleware
 from app.services.incubation import IncubationService
 from app.services.feeds import FeedService
+from app.services.stock import StockService
 from app.services.admin import AdminService
 from app.services.release_notifications import ReleaseNotificationService
 from app.services.reminders import ReminderRunner
@@ -24,6 +25,7 @@ from app.storage.repositories.feeds import FeedRepository
 from app.storage.repositories.notifications import NotificationRepository
 from app.storage.repositories.reminders import ReminderRepository
 from app.storage.repositories.users import UserRepository
+from app.storage.repositories.stock import StockRepository
 from app.utils.single_instance import SingleInstanceLock
 
 
@@ -87,7 +89,9 @@ async def main() -> None:
             users,
             analytics,
         )
-        feed_service = FeedService(FeedRepository(database), analytics)
+        feed_repository = FeedRepository(database)
+        feed_service = FeedService(feed_repository, analytics)
+        stock_service = StockService(StockRepository(database), feed_repository, analytics)
         admin_service = AdminService(
             database=database,
             users=users,
@@ -103,6 +107,7 @@ async def main() -> None:
         dispatcher = Dispatcher(storage=MemoryStorage())
         dispatcher["incubation_service"] = incubation_service
         dispatcher["feed_service"] = feed_service
+        dispatcher["stock_service"] = stock_service
         dispatcher["admin_service"] = admin_service
         dispatcher["analytics"] = analytics
         dispatcher["config"] = config

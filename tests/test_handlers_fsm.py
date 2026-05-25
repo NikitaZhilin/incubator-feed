@@ -8,6 +8,7 @@ from app.handlers.feeds import (
     ChangeFeed,
     EditFeed,
     NewFeed,
+    StockPurchaseFlow,
     feed_amount,
     feed_change_amount,
     feed_edit_value,
@@ -15,15 +16,19 @@ from app.handlers.feeds import (
     feed_name_with_service,
     feed_roosters,
     feed_threshold,
+    stock_purchase_amount,
+    stock_purchase_name,
 )
 from app.handlers.incubation import NewBatch, enter_eggs_count
 from app.services.feeds import FeedService
 from app.services.incubation import IncubationService
+from app.services.stock import StockService
 from app.storage.database import Database
 from app.storage.repositories.analytics import AnalyticsRepository
 from app.storage.repositories.batches import BatchRepository
 from app.storage.repositories.feeds import FeedRepository
 from app.storage.repositories.reminders import ReminderRepository
+from app.storage.repositories.stock import StockRepository
 from app.storage.repositories.users import UserRepository
 
 
@@ -80,6 +85,11 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
             self.analytics,
         )
         self.feed_service = FeedService(FeedRepository(self.database), self.analytics)
+        self.stock_service = StockService(
+            StockRepository(self.database),
+            FeedRepository(self.database),
+            self.analytics,
+        )
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -197,6 +207,23 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         await feed_edit_value(FakeMessage("ПК-2"), state, self.feed_service, self.incubation)
 
         self.assertEqual(self.feed_service.get_estimate(feed.id, 1).feed.name, "ПК-2")
+
+    async def test_stock_purchase_fsm_critical_path(self) -> None:
+        state = FakeState()
+        await state.set_state(StockPurchaseFlow.name)
+
+        await stock_purchase_name(FakeMessage("Кукуруза"), state)
+        self.assertEqual(state.state, StockPurchaseFlow.kind)
+        await state.update_data(kind="ingredient")
+        await state.set_state(StockPurchaseFlow.amount)
+        amount_message = FakeMessage("2 мешка по 25")
+
+        await stock_purchase_amount(amount_message, state, self.stock_service, self.incubation)
+
+        self.assertTrue(state.cleared)
+        self.assertIn("Покупка добавлена", amount_message.answers[-1][0])
+        estimates = self.stock_service.list_estimates(1)
+        self.assertEqual(estimates[0].remaining_kg, 50)
 
 
 if __name__ == "__main__":

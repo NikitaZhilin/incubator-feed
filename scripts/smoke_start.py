@@ -12,6 +12,7 @@ from app.config import load_config
 from app.handlers import register_handlers
 from app.services.admin import AdminService
 from app.services.feeds import FeedService
+from app.services.stock import StockService
 from app.services.incubation import IncubationService
 from app.storage.database import Database
 from app.storage.repositories.analytics import AnalyticsRepository
@@ -20,6 +21,7 @@ from app.storage.repositories.feeds import FeedRepository
 from app.storage.repositories.notifications import NotificationRepository
 from app.storage.repositories.reminders import ReminderRepository
 from app.storage.repositories.users import UserRepository
+from app.storage.repositories.stock import StockRepository
 
 
 def main() -> None:
@@ -36,7 +38,9 @@ def main() -> None:
         users,
         analytics,
     )
-    dispatcher["feed_service"] = FeedService(FeedRepository(database), analytics)
+    feed_repository = FeedRepository(database)
+    dispatcher["feed_service"] = FeedService(feed_repository, analytics)
+    dispatcher["stock_service"] = StockService(StockRepository(database), feed_repository, analytics)
     dispatcher["admin_service"] = AdminService(
         database=database,
         users=users,
