@@ -59,6 +59,8 @@ a reply keyboard and includes the MVP testing warning. The version should be a
 numeric beta version, for example `0.1.42-beta`. If the process restarts several
 times with the same version, users still receive the notice only once because
 delivery is recorded in `notification_log`.
+For automatic push deploys the default release notes are written in Russian;
+use the manual workflow input `release_notes` when a specific text is needed.
 
 ## Manual VPS deploy
 

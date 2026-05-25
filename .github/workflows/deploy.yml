@@ -128,7 +128,7 @@ jobs:
               RELEASE_VERSION="0.1.${GITHUB_RUN_NUMBER}-beta"
             fi
             if [ -z "$RELEASE_NOTES" ]; then
-              RELEASE_NOTES="$(git log -1 --pretty=%s)"
+              RELEASE_NOTES="Обновлено главное меню; Улучшен расчет кормов для кур и петухов; Исправлен автоматический деплой на VPS"
             fi
           fi
           if [ -n "$BOT_TOKEN" ]; then

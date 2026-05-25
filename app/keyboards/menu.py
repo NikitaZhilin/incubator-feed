@@ -5,8 +5,8 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🥚 Инкубация", callback_data="menu:incubation"),
                 InlineKeyboardButton(text="🌾 Корма", callback_data="feeds:menu"),
+                InlineKeyboardButton(text="🥚 Инкубация", callback_data="menu:incubation"),
             ],
             [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings:menu")],
         ]
