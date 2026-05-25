@@ -60,6 +60,18 @@ class IncubationServiceTest(unittest.TestCase):
         self.assertEqual(stats.total_hatched, 16)
         self.assertEqual(stats.hatch_rate, 80)
 
+    def test_batches_are_isolated_by_telegram_user(self) -> None:
+        batch = self.service.create_batch(
+            user_id=1,
+            species="chicken",
+            eggs_count=12,
+            start_date=date(2026, 5, 20),
+        )
+
+        self.assertEqual([item.id for item in self.service.list_active(1)], [batch.id])
+        self.assertEqual(self.service.list_active(2), [])
+        self.assertIsNone(self.service.get_batch(batch.id, 2))
+
     def test_completed_batch_cannot_be_edited(self) -> None:
         batch = self.service.create_batch(
             user_id=1,

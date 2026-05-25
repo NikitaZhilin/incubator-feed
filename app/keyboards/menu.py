@@ -9,6 +9,7 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🥚 Инкубация", callback_data="menu:incubation"),
             ],
             [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings:menu")],
+            [InlineKeyboardButton(text="🔗 Поделиться ботом", callback_data="menu:share")],
         ]
     )
 

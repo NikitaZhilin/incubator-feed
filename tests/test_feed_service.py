@@ -58,6 +58,30 @@ class FeedServiceTest(unittest.TestCase):
         self.assertEqual(round(estimate.daily_usage_kg, 2), 1.45)
         self.assertEqual(round(estimate.remaining_kg, 1), 37.1)
 
+    def test_feeds_and_flocks_are_isolated_by_telegram_user(self) -> None:
+        group = self.service.create_bird_group(
+            user_id=1,
+            name="Основное стадо",
+            bird_count=12,
+            species="chicken",
+        )
+        feed = self.service.create_feed(
+            user_id=1,
+            name="Зерносмесь",
+            amount_kg=40,
+            bird_count=12,
+            daily_per_bird_g=120,
+            low_threshold_kg=5,
+            bird_group_id=group.id,
+            hen_count=10,
+            rooster_count=2,
+        )
+
+        self.assertEqual([item.feed.id for item in self.service.list_user_estimates(1)], [feed.id])
+        self.assertEqual(self.service.list_user_estimates(2), [])
+        self.assertIsNone(self.service.get_estimate(feed.id, 2))
+        self.assertEqual(self.service.list_bird_groups(2), [])
+
     def test_due_purchase_reminder(self) -> None:
         feed = self.service.create_feed(
             user_id=1,

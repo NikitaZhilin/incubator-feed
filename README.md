@@ -73,7 +73,9 @@ Production-режим читает токен только из `BOT_TOKEN`. Leg
 
 Подробно: [docs/USER_COMMANDS.md](D:\проекты qwen\tg_bot_inkubator\docs\USER_COMMANDS.md)
 
-Основные команды: `/start`, `/help`, `/version`, `/new`, `/batches`, `/today`, `/history`, `/stats`, `/calendar`, `/care`, `/feed`, `/settings`, `/remind 09:00`, `/remind off`, `/timezone Europe/Moscow`, `/farm Название`, `/cancel`. Поголовье доступно в разделе `Корма`.
+Основные команды: `/start`, `/share`, `/help`, `/version`, `/new`, `/batches`, `/today`, `/history`, `/stats`, `/calendar`, `/care`, `/feed`, `/settings`, `/remind 09:00`, `/remind off`, `/timezone Europe/Moscow`, `/farm Название`, `/cancel`. Поголовье доступно в разделе `Корма`.
+
+Бот можно открыть с разных Telegram-аккаунтов по ссылке из `/share` или кнопке `Поделиться ботом`. Каждый Telegram-аккаунт работает изолированно: видит только свои партии, корма, поголовье, настройки и напоминания.
 
 ## Миграции
 

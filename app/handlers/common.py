@@ -1,7 +1,7 @@
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
 from app.config import AppConfig
 from app.keyboards.menu import main_menu_keyboard
@@ -10,6 +10,20 @@ from app.version import APP_VERSION
 
 
 router = Router()
+
+
+def build_share_text(bot_username: str | None) -> str:
+    if bot_username:
+        link = f"https://t.me/{bot_username}?start=share"
+        link_line = f"{link}\n\n"
+    else:
+        link_line = ""
+    return (
+        "Можно открыть этого бота с другого Telegram-аккаунта по ссылке:\n"
+        f"{link_line}"
+        "Каждый Telegram-аккаунт работает изолированно: свои партии, корма, "
+        "поголовье, настройки и напоминания. Данные одного аккаунта не видны другому."
+    )
 
 
 @router.message(Command("start"))
@@ -21,6 +35,19 @@ async def start(message: Message, state: FSMContext, incubation_service: Incubat
         "Выберите раздел в меню ниже.",
         reply_markup=main_menu_keyboard(),
     )
+
+
+@router.message(Command("share"))
+async def share_command(message: Message) -> None:
+    username = await _get_bot_username(message)
+    await message.answer(build_share_text(username))
+
+
+@router.callback_query(F.data == "menu:share")
+async def share_callback(callback: CallbackQuery) -> None:
+    username = await _get_bot_username(callback.message)
+    await callback.message.answer(build_share_text(username))
+    await callback.answer()
 
 
 @router.message(Command("help"))
@@ -68,3 +95,8 @@ async def menu(message: Message, state: FSMContext) -> None:
 async def cancel_any(message: Message, state: FSMContext) -> None:
     await state.clear()
     await message.answer("Действие отменено. Главное меню:", reply_markup=main_menu_keyboard())
+
+
+async def _get_bot_username(message: Message) -> str | None:
+    me = await message.bot.get_me()
+    return me.username
