@@ -161,6 +161,35 @@ jobs:
             RELEASE_NOTICE_ENABLED_B64="$(printf '%s' "$RELEASE_NOTICE_ENABLED" | base64 -w0)"
             RELEASE_VERSION_B64="$(printf '%s' "$RELEASE_VERSION" | base64 -w0)"
             RELEASE_NOTES_B64="$(printf '%s' "$RELEASE_NOTES" | base64 -w0)"
+            cat > update_env_release.py <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          path = Path(os.environ['ENV_PATH'])
+          updates = {
+              'RELEASE_NOTICE_ENABLED': base64.b64decode(os.environ['RELEASE_NOTICE_ENABLED_B64']).decode(),
+              'RELEASE_VERSION': base64.b64decode(os.environ['RELEASE_VERSION_B64']).decode(),
+              'RELEASE_NOTES': base64.b64decode(os.environ['RELEASE_NOTES_B64']).decode(),
+          }
+          lines = path.read_text(encoding='utf-8').splitlines()
+          seen = set()
+          new_lines = []
+          for line in lines:
+              key = line.split('=', 1)[0] if '=' in line else ''
+              if key in updates:
+                  new_lines.append(f'{key}={updates[key]}')
+                  seen.add(key)
+              else:
+                  new_lines.append(line)
+          for key, value in updates.items():
+              if key not in seen:
+                  new_lines.append(f'{key}={value}')
+          path.write_text('\n'.join(new_lines) + '\n', encoding='utf-8')
+          PY
+            sed -i 's/^          //' update_env_release.py
+            scp -i ~/.ssh/deploy_key -P "$VPS_PORT" update_env_release.py "$VPS_USER@$VPS_HOST:$DEPLOY_PATH/.update_env_release.py"
+            rm -f update_env_release.py
             ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "
               set -e
               if [ ! -s '$DEPLOY_PATH/.env.prod' ]; then
@@ -171,32 +200,8 @@ jobs:
               RELEASE_VERSION_B64='$RELEASE_VERSION_B64' \
               RELEASE_NOTES_B64='$RELEASE_NOTES_B64' \
               ENV_PATH='$DEPLOY_PATH/.env.prod' \
-              python3 - <<'PY'
-import base64
-import os
-from pathlib import Path
-
-path = Path(os.environ['ENV_PATH'])
-updates = {
-    'RELEASE_NOTICE_ENABLED': base64.b64decode(os.environ['RELEASE_NOTICE_ENABLED_B64']).decode(),
-    'RELEASE_VERSION': base64.b64decode(os.environ['RELEASE_VERSION_B64']).decode(),
-    'RELEASE_NOTES': base64.b64decode(os.environ['RELEASE_NOTES_B64']).decode(),
-}
-lines = path.read_text(encoding='utf-8').splitlines()
-seen = set()
-new_lines = []
-for line in lines:
-    key = line.split('=', 1)[0] if '=' in line else ''
-    if key in updates:
-        new_lines.append(f'{key}={updates[key]}')
-        seen.add(key)
-    else:
-        new_lines.append(line)
-for key, value in updates.items():
-    if key not in seen:
-        new_lines.append(f'{key}={value}')
-path.write_text('\n'.join(new_lines) + '\n', encoding='utf-8')
-PY
+              python3 '$DEPLOY_PATH/.update_env_release.py'
+              rm -f '$DEPLOY_PATH/.update_env_release.py'
               chmod 600 '$DEPLOY_PATH/.env.prod'
             "
           fi
