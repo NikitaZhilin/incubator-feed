@@ -41,10 +41,11 @@ The workflow updates the project on the VPS, writes `.env.prod` from GitHub
 Secrets, runs migrations, rebuilds the Docker image, and starts the bot as a
 Docker container with `--restart unless-stopped`.
 
-After a successful deploy the workflow sends a release notice to active users
-who have service notifications enabled. The notice is deduplicated in
-`notification_log` by release version, so re-running the same deploy does not
-send the same update twice.
+After a successful deploy the workflow writes release metadata to `.env.prod`,
+then the main bot process sends a release notice to active users who have
+service notifications enabled. The notice is deduplicated in `notification_log`
+by release version, so re-running or restarting the same version does not send
+the same update twice.
 
 For a manual GitHub Actions run you can fill:
 

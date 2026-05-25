@@ -126,9 +126,11 @@ jobs:
           RELEASE_VERSION="$RELEASE_VERSION_INPUT"
           RELEASE_NOTES="$RELEASE_NOTES_INPUT"
           if [ "$SKIP_RELEASE_NOTICE" = "true" ]; then
+            RELEASE_NOTICE_ENABLED="0"
             RELEASE_VERSION=""
             RELEASE_NOTES=""
           else
+            RELEASE_NOTICE_ENABLED="1"
             if [ -z "$RELEASE_VERSION" ]; then
               RELEASE_VERSION="0.1.${GITHUB_RUN_NUMBER}-beta"
             fi
@@ -148,6 +150,7 @@ jobs:
           BACKUP_DIR=backups/prod
           REMINDER_INTERVAL_SECONDS=60
           MIN_FREE_DISK_MB=512
+          RELEASE_NOTICE_ENABLED=$RELEASE_NOTICE_ENABLED
           RELEASE_VERSION=$RELEASE_VERSION
           RELEASE_NOTES=$RELEASE_NOTES
           EOF

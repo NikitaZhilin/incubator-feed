@@ -77,6 +77,7 @@ $quotedImageName = ConvertTo-ShellSingleQuoted $ImageName
 $quotedContainerName = ConvertTo-ShellSingleQuoted $ContainerName
 
 if (-not $SkipReleaseNotice) {
+    $releaseNoticeEnabled = "1"
     if ([string]::IsNullOrWhiteSpace($ReleaseVersion)) {
         $commitCount = ""
         try {
@@ -98,10 +99,12 @@ if (-not $SkipReleaseNotice) {
         }
     }
 } else {
+    $releaseNoticeEnabled = "0"
     $ReleaseVersion = ""
     $ReleaseNotes = ""
 }
 
+$quotedReleaseNoticeEnabled = ConvertTo-ShellSingleQuoted $releaseNoticeEnabled
 $quotedReleaseVersion = ConvertTo-ShellSingleQuoted $ReleaseVersion
 $quotedReleaseNotes = ConvertTo-ShellSingleQuoted $ReleaseNotes
 
@@ -110,6 +113,7 @@ set -e
 cd $quotedDeployPath
 IMAGE_NAME=$quotedImageName
 CONTAINER_NAME=$quotedContainerName
+RELEASE_NOTICE_ENABLED=$quotedReleaseNoticeEnabled
 RELEASE_VERSION=$quotedReleaseVersion
 RELEASE_NOTES=$quotedReleaseNotes
 docker build -t "`$IMAGE_NAME" .
@@ -121,6 +125,7 @@ docker run --rm --env-file .env.prod \
 docker rm -f "`$CONTAINER_NAME" >/dev/null 2>&1 || true
 docker run -d --name "`$CONTAINER_NAME" --restart unless-stopped \
   --env-file "$DeployPath/.env.prod" \
+  -e RELEASE_NOTICE_ENABLED="`$RELEASE_NOTICE_ENABLED" \
   -e RELEASE_VERSION="`$RELEASE_VERSION" \
   -e RELEASE_NOTES="`$RELEASE_NOTES" \
   -v "$DeployPath/data:/app/data" \

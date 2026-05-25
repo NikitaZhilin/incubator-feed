@@ -72,7 +72,7 @@ Production-режим читает токен только из `BOT_TOKEN`. Leg
 
 Подробно: [docs/USER_COMMANDS.md](D:\проекты qwen\tg_bot_inkubator\docs\USER_COMMANDS.md)
 
-Основные команды: `/start`, `/help`, `/new`, `/batches`, `/today`, `/history`, `/stats`, `/calendar`, `/care`, `/feed`, `/settings`, `/remind 09:00`, `/remind off`, `/timezone Europe/Moscow`, `/farm Название`, `/cancel`. Группы птицы доступны в разделе `Корма`.
+Основные команды: `/start`, `/help`, `/version`, `/new`, `/batches`, `/today`, `/history`, `/stats`, `/calendar`, `/care`, `/feed`, `/settings`, `/remind 09:00`, `/remind off`, `/timezone Europe/Moscow`, `/farm Название`, `/cancel`. Группы птицы доступны в разделе `Корма`.
 
 ## Миграции
 

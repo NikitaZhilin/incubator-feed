@@ -3,8 +3,10 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
+from app.config import AppConfig
 from app.keyboards.menu import main_menu_keyboard
 from app.services.incubation import IncubationService
+from app.version import APP_VERSION
 
 
 router = Router()
@@ -48,6 +50,12 @@ async def help_command(message: Message) -> None:
         "/remind off - выключить\n\n"
         "Отмена текущего действия: /cancel."
     )
+
+
+@router.message(Command("version"))
+async def version_command(message: Message, config: AppConfig) -> None:
+    version = config.release_version or APP_VERSION
+    await message.answer(f"Текущая бета-версия бота: {version}")
 
 
 @router.message(Command("menu"))

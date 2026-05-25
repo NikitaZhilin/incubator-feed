@@ -120,7 +120,7 @@ async def main() -> None:
             interval_seconds=config.reminder_interval_seconds,
         )
         reminder_runner.start()
-        if config.release_version:
+        if config.release_notice_enabled and config.release_version:
             try:
                 result = await ReleaseNotificationService(
                     bot=bot,

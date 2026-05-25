@@ -3,6 +3,8 @@ import logging
 import os
 from pathlib import Path
 
+from app.version import APP_VERSION
+
 
 @dataclass(frozen=True)
 class AppConfig:
@@ -17,6 +19,7 @@ class AppConfig:
     min_free_disk_mb: int
     release_version: str
     release_notes: str
+    release_notice_enabled: bool
     timezone: str = "Europe/Moscow"
 
 
@@ -105,6 +108,13 @@ def load_config() -> AppConfig:
     admin_ids = _parse_admin_ids(os.getenv("ADMIN_IDS", ""))
     log_level_name = os.getenv("LOG_LEVEL", "INFO").upper()
     log_level = getattr(logging, log_level_name, logging.INFO)
+    release_notice_enabled = _parse_bool_env(
+        "RELEASE_NOTICE_ENABLED",
+        default=environment == "prod",
+    )
+    release_version = os.getenv("RELEASE_VERSION", os.getenv("APP_VERSION", "")).strip()
+    if release_notice_enabled and not release_version and environment == "prod":
+        release_version = APP_VERSION
 
     return AppConfig(
         bot_token=read_bot_token(root, environment=environment),
@@ -116,8 +126,9 @@ def load_config() -> AppConfig:
         log_level=int(log_level),
         reminder_interval_seconds=_parse_int_env("REMINDER_INTERVAL_SECONDS", 60, minimum=5),
         min_free_disk_mb=_parse_int_env("MIN_FREE_DISK_MB", 512, minimum=1),
-        release_version=os.getenv("RELEASE_VERSION", os.getenv("APP_VERSION", "")).strip(),
+        release_version=release_version,
         release_notes=os.getenv("RELEASE_NOTES", "").strip(),
+        release_notice_enabled=release_notice_enabled,
         timezone=os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
     )
 
@@ -140,3 +151,10 @@ def _parse_int_env(name: str, default: int, *, minimum: int) -> int:
     if value < minimum:
         return minimum
     return value
+
+
+def _parse_bool_env(name: str, *, default: bool) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
