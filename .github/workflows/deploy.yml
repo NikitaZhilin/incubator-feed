@@ -49,6 +49,8 @@ jobs:
     env:
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/incubator-feed' }}
       VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+      VPS_HOST: ${{ secrets.VPS_HOST || '72.56.116.237' }}
+      VPS_USER: ${{ secrets.VPS_USER || 'root' }}
       IMAGE_NAME: incubator-feed:latest
       CONTAINER_NAME: incubator-feed-bot
 
@@ -59,22 +61,19 @@ jobs:
       - name: Check deployment secrets
         id: deploy-secrets
         env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_USER: ${{ secrets.VPS_USER }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
-          if [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_SSH_KEY" ]; then
+          if [ -n "$VPS_SSH_KEY" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Deployment cannot start: configure VPS_HOST, VPS_USER, and VPS_SSH_KEY secrets." >&2
+            echo "Deployment cannot start: configure VPS_SSH_KEY secret." >&2
             exit 1
           fi
 
       - name: Configure SSH
         if: steps.deploy-secrets.outputs.ready == 'true'
         env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           test -n "$VPS_HOST"
@@ -87,9 +86,6 @@ jobs:
 
       - name: Update project on VPS
         if: steps.deploy-secrets.outputs.ready == 'true'
-        env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_USER: ${{ secrets.VPS_USER }}
         run: |
           ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "
             set -e
@@ -116,8 +112,6 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_USER: ${{ secrets.VPS_USER }}
           RELEASE_VERSION_INPUT: ${{ github.event.inputs.release_version || '' }}
           RELEASE_NOTES_INPUT: ${{ github.event.inputs.release_notes || '' }}
           SKIP_RELEASE_NOTICE: ${{ github.event.inputs.skip_release_notice || 'false' }}
@@ -208,9 +202,6 @@ jobs:
 
       - name: Start bot
         if: steps.deploy-secrets.outputs.ready == 'true'
-        env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_USER: ${{ secrets.VPS_USER }}
         run: |
           ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "
             set -e
