@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_version:
-        description: "Version shown to users, for example 2026.05.25-web-menu"
+        description: "Numeric beta version shown to users, for example 0.1.42-beta"
         required: false
         type: string
       release_notes:
@@ -118,8 +118,24 @@ jobs:
           ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
+          RELEASE_VERSION_INPUT: ${{ github.event.inputs.release_version || '' }}
+          RELEASE_NOTES_INPUT: ${{ github.event.inputs.release_notes || '' }}
+          SKIP_RELEASE_NOTICE: ${{ github.event.inputs.skip_release_notice || 'false' }}
         run: |
           test -n "$BOT_TOKEN"
+          RELEASE_VERSION="$RELEASE_VERSION_INPUT"
+          RELEASE_NOTES="$RELEASE_NOTES_INPUT"
+          if [ "$SKIP_RELEASE_NOTICE" = "true" ]; then
+            RELEASE_VERSION=""
+            RELEASE_NOTES=""
+          else
+            if [ -z "$RELEASE_VERSION" ]; then
+              RELEASE_VERSION="0.1.${GITHUB_RUN_NUMBER}-beta"
+            fi
+            if [ -z "$RELEASE_NOTES" ]; then
+              RELEASE_NOTES="$(git log -1 --pretty=%s)"
+            fi
+          fi
           umask 077
           cat > .env.prod.deploy <<EOF
           ENVIRONMENT=prod
@@ -132,6 +148,8 @@ jobs:
           BACKUP_DIR=backups/prod
           REMINDER_INTERVAL_SECONDS=60
           MIN_FREE_DISK_MB=512
+          RELEASE_VERSION=$RELEASE_VERSION
+          RELEASE_NOTES=$RELEASE_NOTES
           EOF
           sed -i 's/^          //' .env.prod.deploy
           scp -i ~/.ssh/deploy_key -P "$VPS_PORT" .env.prod.deploy "$VPS_USER@$VPS_HOST:$DEPLOY_PATH/.env.prod"
@@ -162,38 +180,4 @@ jobs:
               '$IMAGE_NAME' python main.py
             docker ps --filter name='$CONTAINER_NAME'
             docker logs --tail=80 '$CONTAINER_NAME'
-          "
-
-      - name: Notify users about release
-        if: steps.deploy-secrets.outputs.ready == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.skip_release_notice)
-        env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_USER: ${{ secrets.VPS_USER }}
-          RELEASE_VERSION_INPUT: ${{ inputs.release_version || '' }}
-          RELEASE_NOTES_INPUT: ${{ inputs.release_notes || '' }}
-        run: |
-          set -e
-          RELEASE_VERSION="$RELEASE_VERSION_INPUT"
-          RELEASE_NOTES="$RELEASE_NOTES_INPUT"
-          if [ -z "$RELEASE_VERSION" ]; then
-            RELEASE_VERSION="$(date -u +'%Y.%m.%d')-${GITHUB_SHA::7}"
-          fi
-          if [ -z "$RELEASE_NOTES" ]; then
-            RELEASE_NOTES="$(git log -1 --pretty=%s)"
-          fi
-          shell_quote() {
-            printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
-          }
-          Q_RELEASE_VERSION="$(shell_quote "$RELEASE_VERSION")"
-          Q_RELEASE_NOTES="$(shell_quote "$RELEASE_NOTES")"
-          ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "
-            set -e
-            cd '$DEPLOY_PATH'
-            docker run --rm --env-file .env.prod \
-              -e RELEASE_VERSION=$Q_RELEASE_VERSION \
-              -e RELEASE_NOTES=$Q_RELEASE_NOTES \
-              -v '$DEPLOY_PATH/data:/app/data' \
-              -v '$DEPLOY_PATH/logs:/app/logs' \
-              -v '$DEPLOY_PATH/backups:/app/backups' \
-              '$IMAGE_NAME' python -B scripts/notify_release.py
           "

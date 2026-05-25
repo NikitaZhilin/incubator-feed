@@ -40,11 +40,11 @@ class ReleaseNotificationTest(unittest.IsolatedAsyncioTestCase):
 
     def test_release_message_contains_version_notes_menu_hint_and_disclaimer(self) -> None:
         text = build_release_notice(
-            "2026.05.25-web-menu",
+            "0.1.42-beta",
             "Добавлена ссылка на web-версию; Web-ключ теперь удобно копируется",
         )
 
-        self.assertIn("Бот обновлен до версии 2026.05.25-web-menu и перезапущен.", text)
+        self.assertIn("Бот обновлен до бета-версии 0.1.42-beta и перезапущен.", text)
         self.assertIn("- Добавлена ссылка на web-версию", text)
         self.assertIn("- Web-ключ теперь удобно копируется", text)
         self.assertIn("Главное меню открыто ниже", text)
@@ -65,12 +65,12 @@ class ReleaseNotificationTest(unittest.IsolatedAsyncioTestCase):
         now = datetime(2026, 5, 25, 12, 0, tzinfo=timezone.utc)
 
         first = await service.send_release_notice(
-            version="2026.05.25-web-menu",
+            version="0.1.42-beta",
             notes="Добавлена ссылка на web-версию",
             now=now,
         )
         second = await service.send_release_notice(
-            version="2026.05.25-web-menu",
+            version="0.1.42-beta",
             notes="Добавлена ссылка на web-версию",
             now=now,
         )
@@ -84,7 +84,7 @@ class ReleaseNotificationTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(bot.messages[0]["reply_markup"])
         self.assertTrue(
             self.notifications.was_sent(
-                release_event_key("2026.05.25-web-menu", 1)
+                release_event_key("0.1.42-beta", 1)
             )
         )
 

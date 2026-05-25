@@ -26,7 +26,7 @@ def build_release_notice(version: str, notes: str = "") -> str:
     version = version.strip()
     note_items = _normalize_notes(notes)
     lines = [
-        f"Бот обновлен до версии {version} и перезапущен.",
+        f"Бот обновлен до бета-версии {version} и перезапущен.",
     ]
     if note_items:
         lines.extend(["", "Что изменилось:"])

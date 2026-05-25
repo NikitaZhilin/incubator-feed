@@ -49,12 +49,15 @@ send the same update twice.
 For a manual GitHub Actions run you can fill:
 
 ```text
-release_version=2026.05.25-web-menu
+release_version=0.1.42-beta
 release_notes=Добавлена ссылка на web-версию; Web-ключ теперь удобно копируется
 ```
 
-The message opens the main bot menu with a reply keyboard and includes the MVP
-testing warning.
+The main bot process sends this notice on startup. It opens the main menu with
+a reply keyboard and includes the MVP testing warning. The version should be a
+numeric beta version, for example `0.1.42-beta`. If the process restarts several
+times with the same version, users still receive the notice only once because
+delivery is recorded in `notification_log`.
 
 ## Manual VPS deploy
 
@@ -82,7 +85,7 @@ change:
 ```powershell
 .\scripts\deploy-vps.ps1 `
   -SshTarget deploy@YOUR_SERVER_IP `
-  -ReleaseVersion 2026.05.25-web-menu `
+  -ReleaseVersion 0.1.42-beta `
   -ReleaseNotes "Добавлена ссылка на web-версию; Web-ключ теперь удобно копируется"
 ```
 
@@ -100,7 +103,7 @@ docker run --rm --env-file .env.prod \
   -v /opt/incubator-feed/backups:/app/backups \
   incubator-feed:latest \
   python -B scripts/notify_release.py \
-    --version 2026.05.25-web-menu \
+    --version 0.1.42-beta \
     --notes "Добавлена ссылка на web-версию; Web-ключ теперь удобно копируется"
 ```
 

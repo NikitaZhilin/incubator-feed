@@ -15,6 +15,7 @@ from app.middlewares.users import UserTrackingMiddleware
 from app.services.incubation import IncubationService
 from app.services.feeds import FeedService
 from app.services.admin import AdminService
+from app.services.release_notifications import ReleaseNotificationService
 from app.services.reminders import ReminderRunner
 from app.storage.database import Database
 from app.storage.repositories.analytics import AnalyticsRepository
@@ -119,6 +120,24 @@ async def main() -> None:
             interval_seconds=config.reminder_interval_seconds,
         )
         reminder_runner.start()
+        if config.release_version:
+            try:
+                result = await ReleaseNotificationService(
+                    bot=bot,
+                    users=users,
+                    notifications=notifications,
+                ).send_release_notice(
+                    version=config.release_version,
+                    notes=config.release_notes,
+                )
+                logging.info(
+                    "Release notice completed: sent=%s skipped=%s failed=%s",
+                    result.sent,
+                    result.skipped,
+                    result.failed,
+                )
+            except Exception:
+                logging.exception("Release notice failed")
         try:
             try:
                 await dispatcher.start_polling(bot)

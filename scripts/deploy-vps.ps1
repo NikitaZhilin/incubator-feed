@@ -78,16 +78,16 @@ $quotedContainerName = ConvertTo-ShellSingleQuoted $ContainerName
 
 if (-not $SkipReleaseNotice) {
     if ([string]::IsNullOrWhiteSpace($ReleaseVersion)) {
-        $shortSha = ""
+        $commitCount = ""
         try {
-            $shortSha = (git rev-parse --short HEAD 2>$null).Trim()
+            $commitCount = (git rev-list --count HEAD 2>$null).Trim()
         } catch {
-            $shortSha = ""
+            $commitCount = ""
         }
-        if ([string]::IsNullOrWhiteSpace($shortSha)) {
-            $shortSha = "manual"
+        if ([string]::IsNullOrWhiteSpace($commitCount)) {
+            $commitCount = (Get-Date -Format 'yyyyMMddHHmm')
         }
-        $ReleaseVersion = "$(Get-Date -Format 'yyyy.MM.dd')-$shortSha"
+        $ReleaseVersion = "0.1.$commitCount-beta"
     }
 
     if ([string]::IsNullOrWhiteSpace($ReleaseNotes)) {
@@ -97,13 +97,21 @@ if (-not $SkipReleaseNotice) {
             $ReleaseNotes = ""
         }
     }
+} else {
+    $ReleaseVersion = ""
+    $ReleaseNotes = ""
 }
+
+$quotedReleaseVersion = ConvertTo-ShellSingleQuoted $ReleaseVersion
+$quotedReleaseNotes = ConvertTo-ShellSingleQuoted $ReleaseNotes
 
 $runCommand = @"
 set -e
 cd $quotedDeployPath
 IMAGE_NAME=$quotedImageName
 CONTAINER_NAME=$quotedContainerName
+RELEASE_VERSION=$quotedReleaseVersion
+RELEASE_NOTES=$quotedReleaseNotes
 docker build -t "`$IMAGE_NAME" .
 docker run --rm --env-file .env.prod \
   -v "$DeployPath/data:/app/data" \
@@ -113,6 +121,8 @@ docker run --rm --env-file .env.prod \
 docker rm -f "`$CONTAINER_NAME" >/dev/null 2>&1 || true
 docker run -d --name "`$CONTAINER_NAME" --restart unless-stopped \
   --env-file "$DeployPath/.env.prod" \
+  -e RELEASE_VERSION="`$RELEASE_VERSION" \
+  -e RELEASE_NOTES="`$RELEASE_NOTES" \
   -v "$DeployPath/data:/app/data" \
   -v "$DeployPath/logs:/app/logs" \
   -v "$DeployPath/backups:/app/backups" \
@@ -122,24 +132,3 @@ docker logs --tail=80 "`$CONTAINER_NAME"
 "@
 
 ssh -p $Port $SshTarget $runCommand
-
-if (-not $SkipReleaseNotice) {
-    $quotedReleaseVersion = ConvertTo-ShellSingleQuoted $ReleaseVersion
-    $quotedReleaseNotes = ConvertTo-ShellSingleQuoted $ReleaseNotes
-    $notifyCommand = @"
-set -e
-cd $quotedDeployPath
-IMAGE_NAME=$quotedImageName
-RELEASE_VERSION=$quotedReleaseVersion
-RELEASE_NOTES=$quotedReleaseNotes
-docker run --rm --env-file .env.prod \
-  -e RELEASE_VERSION="`$RELEASE_VERSION" \
-  -e RELEASE_NOTES="`$RELEASE_NOTES" \
-  -v "$DeployPath/data:/app/data" \
-  -v "$DeployPath/logs:/app/logs" \
-  -v "$DeployPath/backups:/app/backups" \
-  "`$IMAGE_NAME" python -B scripts/notify_release.py
-"@
-
-    ssh -p $Port $SshTarget $notifyCommand
-}

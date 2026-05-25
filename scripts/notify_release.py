@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--version",
         default=os.getenv("RELEASE_VERSION", "").strip(),
-        help="Release version, for example 2026.05.25-web-menu.",
+        help="Numeric beta release version, for example 0.1.42-beta.",
     )
     parser.add_argument(
         "--notes",

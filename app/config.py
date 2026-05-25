@@ -15,6 +15,8 @@ class AppConfig:
     log_level: int
     reminder_interval_seconds: int
     min_free_disk_mb: int
+    release_version: str
+    release_notes: str
     timezone: str = "Europe/Moscow"
 
 
@@ -114,6 +116,8 @@ def load_config() -> AppConfig:
         log_level=int(log_level),
         reminder_interval_seconds=_parse_int_env("REMINDER_INTERVAL_SECONDS", 60, minimum=5),
         min_free_disk_mb=_parse_int_env("MIN_FREE_DISK_MB", 512, minimum=1),
+        release_version=os.getenv("RELEASE_VERSION", os.getenv("APP_VERSION", "")).strip(),
+        release_notes=os.getenv("RELEASE_NOTES", "").strip(),
         timezone=os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
     )
 

@@ -59,6 +59,8 @@ python -B scripts\smoke_start.py
 - `BACKUP_DIR` - каталог резервных копий.
 - `REMINDER_INTERVAL_SECONDS` - частота reminder loop.
 - `MIN_FREE_DISK_MB` - минимальный свободный объем для проверки диска.
+- `RELEASE_VERSION` - текущая бета-версия для уведомления пользователей, например `0.1.42-beta`.
+- `RELEASE_NOTES` - краткое описание изменений для release notice.
 
 `.env`, `.env.dev`, `.env.prod`, БД, логи и бэкапы не должны попадать в Git.
 
@@ -100,7 +102,7 @@ docker compose up -d --build
 
 Альтернатива без Docker: systemd-шаблоны в `deploy/systemd`.
 
-После production-деплоя пользователям отправляется сервисное уведомление о новой версии с открытием главного меню. Уведомление не дублируется для одной и той же версии, потому что фиксируется в `notification_log`.
+После production-деплоя основной процесс бота отправляет сервисное уведомление о новой бета-версии, например `0.1.42-beta`, с открытием главного меню. Уведомление не дублируется при повторных рестартах одной и той же версии, потому что фиксируется в `notification_log`.
 
 Подробно: [docs/SERVER_SETUP.md](D:\проекты qwen\tg_bot_inkubator\docs\SERVER_SETUP.md) и [docs/OPERATIONS.md](D:\проекты qwen\tg_bot_inkubator\docs\OPERATIONS.md).
 
