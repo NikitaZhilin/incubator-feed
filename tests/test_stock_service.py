@@ -415,6 +415,51 @@ class StockServiceTest(unittest.TestCase):
                 share_percent=100,
             )
 
+    def test_flock_report_includes_possible_mix_production_from_ingredients(self) -> None:
+        group = self.feeds.create_bird_group(
+            user_id=1,
+            name="Несушки",
+            bird_count=10,
+            species="chicken",
+            role="hens",
+        )
+        flock = self.feeds.create_flock(user_id=1, name="Основное стадо")
+        self.feeds.add_flock_member(user_id=1, flock_id=flock.id, bird_group_id=group.id)
+        finished_mix = self.service.add_purchase(
+            user_id=1,
+            name="Смесь для кур",
+            kind="finished_mix",
+            amount_kg=10,
+        )
+        for name in [
+            "Кукуруза",
+            "Пшеница",
+            "Ячмень",
+            "Комбикорм",
+            "Мясокостная мука",
+            "Рыбная мука",
+            "Ракушка",
+            "Премикс",
+        ]:
+            self.service.add_purchase(
+                user_id=1,
+                name=name,
+                kind="ingredient",
+                amount_kg=100,
+            )
+        self.service.assign_flock_feed(
+            user_id=1,
+            flock_id=flock.id,
+            stock_item_id=finished_mix.item.id,
+            share_percent=100,
+        )
+
+        usage = self.service.list_flock_reports(1)[0].assignments[0]
+
+        self.assertGreater(usage.producible_mix_count, 0)
+        self.assertGreater(usage.producible_mix_kg, 0)
+        self.assertGreater(usage.total_days_left, usage.days_left)
+
 
 if __name__ == "__main__":
     unittest.main()

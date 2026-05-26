@@ -18,6 +18,16 @@ def feeds_menu_keyboard(feed_buttons: list[tuple[int, str]] | None = None) -> In
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def feed_stats_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🐔 Поголовье и стада", callback_data="feeds:livestock")],
+            [InlineKeyboardButton(text="⬅️ К кормам", callback_data="feeds:menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
+        ]
+    )
+
+
 def livestock_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -275,8 +285,8 @@ def stock_mix_quick_keyboard(grain_base: str, max_mix_count: int) -> InlineKeybo
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"Сделать {count}",
-                    callback_data=f"stock:mix_confirm:{grain_base}:{count}",
+                    text=f"Рассчитать {count}",
+                    callback_data=f"stock:mix_plan:{grain_base}:{count}",
                 )
                 for count in range(start, min(start + 3, quick_limit + 1))
             ]
@@ -285,8 +295,8 @@ def stock_mix_quick_keyboard(grain_base: str, max_mix_count: int) -> InlineKeybo
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"Сделать максимум ({max_mix_count})",
-                    callback_data=f"stock:mix_confirm:{grain_base}:{max_mix_count}",
+                    text=f"Рассчитать максимум ({max_mix_count})",
+                    callback_data=f"stock:mix_plan:{grain_base}:{max_mix_count}",
                 )
             ]
         )

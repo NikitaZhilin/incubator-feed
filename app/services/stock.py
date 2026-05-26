@@ -378,12 +378,33 @@ class StockService:
                 remaining_kg = self.estimate_item(item, now=current).remaining_kg if item else 0
                 daily_usage_kg = self._flock_assignment_daily_usage_kg(assignment, current)
                 days_left = floor(remaining_kg / daily_usage_kg) if daily_usage_kg > 0 else None
+                mix_plan = self.best_available_mix_plan(user_id=user_id, now=current)
+                producible_mix_count = int(mix_plan.max_mix_count)
+                producible_mix_kg = mix_plan.output_kg * producible_mix_count
+                total_days_left = (
+                    floor((remaining_kg + producible_mix_kg) / daily_usage_kg)
+                    if daily_usage_kg > 0
+                    else None
+                )
+                limiting_ingredient = self._mix_limit_ingredient(mix_plan)
                 usages.append(
                     FlockFeedUsage(
                         assignment=assignment,
                         daily_usage_kg=daily_usage_kg,
                         remaining_kg=remaining_kg,
                         days_left=days_left,
+                        producible_mix_count=producible_mix_count,
+                        producible_mix_kg=producible_mix_kg,
+                        total_days_left=total_days_left,
+                        grain_base_label=mix_plan.grain_base_label,
+                        limiting_ingredient_name=(
+                            limiting_ingredient.name if limiting_ingredient else None
+                        ),
+                        missing_ingredient_names=tuple(
+                            ingredient.name
+                            for ingredient in mix_plan.ingredients
+                            if ingredient.missing_kg > 0
+                        ),
                     )
                 )
             reports.append(
@@ -405,6 +426,13 @@ class StockService:
             item.parts * item.density_kg_per_l
             for item in load_chicken_mix_recipe(grain_base=grain_base)
         )
+
+    @staticmethod
+    def _mix_limit_ingredient(plan: MixPlan) -> RequiredIngredient | None:
+        candidates = [item for item in plan.ingredients if item.required_kg > 0]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda item: item.available_kg / item.required_kg)
 
     def _find_stock_item_by_names(self, *, user_id: int, names: tuple[str, ...]) -> StockItem | None:
         items = self.stock.list_items(user_id)

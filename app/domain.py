@@ -241,6 +241,12 @@ class FlockFeedUsage:
     daily_usage_kg: float
     remaining_kg: float
     days_left: int | None
+    producible_mix_count: int = 0
+    producible_mix_kg: float = 0.0
+    total_days_left: int | None = None
+    grain_base_label: str | None = None
+    limiting_ingredient_name: str | None = None
+    missing_ingredient_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

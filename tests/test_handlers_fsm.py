@@ -18,7 +18,9 @@ from app.handlers.feeds import (
     feed_roosters,
     feed_threshold,
     feed_add,
+    flock_assign_item,
     stock_mix_confirm,
+    stock_mix_plan,
     stock_purchase_amount,
     stock_purchase_name,
 )
@@ -281,6 +283,67 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("Остатки могли измениться", callback.message.answers[-1][0])
         self.assertIn("Актуальный расчет", callback.message.answers[-1][0])
+        self.assertTrue(callback.answered)
+
+    async def test_mix_plan_does_not_create_mix_until_confirmed(self) -> None:
+        for name in [
+            "Кукуруза",
+            "Пшеница",
+            "Ячмень",
+            "Комбикорм",
+            "Мясокостная мука",
+            "Рыбная мука",
+            "Ракушка",
+            "Премикс",
+        ]:
+            self.stock_service.add_purchase(
+                user_id=1,
+                name=name,
+                kind="ingredient",
+                amount_kg=100,
+            )
+        callback = FakeCallback("stock:mix_plan:wheat:2")
+
+        await stock_mix_plan(callback, self.stock_service)
+
+        self.assertIn("Создать замес?", callback.message.answers[-1][0])
+        self.assertEqual(
+            [
+                item.item.name
+                for item in self.stock_service.list_estimates(1)
+                if item.item.kind == "finished_mix"
+            ],
+            [],
+        )
+        self.assertTrue(callback.answered)
+
+    async def test_flock_assign_item_sets_full_mix_without_percent_step(self) -> None:
+        group = self.feed_service.create_bird_group(
+            user_id=1,
+            name="Несушки",
+            bird_count=10,
+            species="chicken",
+            role="hens",
+        )
+        flock = self.feed_service.create_flock(
+            user_id=1,
+            name="Основное стадо",
+            member_group_ids=[group.id],
+        )
+        estimate = self.stock_service.add_purchase(
+            user_id=1,
+            name="Смесь для кур",
+            kind="finished_mix",
+            amount_kg=50,
+        )
+        state = FakeState()
+        await state.update_data(flock_id=flock.id)
+        callback = FakeCallback(f"feeds:flock_assign_item:{estimate.item.id}")
+
+        await flock_assign_item(callback, state, self.stock_service)
+
+        self.assertTrue(state.cleared)
+        self.assertIn("Смесь назначена стаду", callback.message.answers[-1][0])
         self.assertTrue(callback.answered)
 
 

@@ -18,6 +18,7 @@ from app.keyboards.feeds import (
     feed_delete_confirm_keyboard,
     feed_edit_keyboard,
     feed_rate_keyboard,
+    feed_stats_keyboard,
     feeds_menu_keyboard,
     flock_actions_keyboard,
     flock_member_select_keyboard,
@@ -113,7 +114,6 @@ class FlockFlow(StatesGroup):
 
 class FlockAssignFlow(StatesGroup):
     item = State()
-    share = State()
 
 
 FEED_FLOW_STATES = (
@@ -151,7 +151,6 @@ FEED_FLOW_STATES = (
     FlockFlow.name,
     FlockFlow.members,
     FlockAssignFlow.item,
-    FlockAssignFlow.share,
 )
 
 
@@ -803,6 +802,31 @@ async def stock_mix_count(
     )
 
 
+@router.callback_query(F.data.startswith("stock:mix_plan:"))
+async def stock_mix_plan(callback: CallbackQuery, stock_service: StockService) -> None:
+    try:
+        _, _, grain_base, mix_count_text = str(callback.data).split(":", 3)
+        mix_count = float(mix_count_text)
+        plan = stock_service.plan_mix(
+            user_id=callback.from_user.id,
+            mix_count=mix_count,
+            grain_base=grain_base,
+        )
+    except ValueError as exc:
+        await callback.message.answer(str(exc), reply_markup=stock_menu_keyboard())
+        await callback.answer()
+        return
+    await callback.message.answer(
+        _format_mix_plan(plan),
+        reply_markup=(
+            stock_confirm_mix_keyboard(mix_count, grain_base)
+            if plan.can_produce
+            else stock_mix_quick_keyboard(grain_base, int(plan.max_mix_count))
+        ),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("stock:mix_confirm:"))
 async def stock_mix_confirm(callback: CallbackQuery, stock_service: StockService) -> None:
     parts = str(callback.data).split(":")
@@ -832,7 +856,7 @@ async def stock_mix_confirm(callback: CallbackQuery, stock_service: StockService
         await callback.answer()
         return
     await callback.message.answer(
-        "Замес создан.\n\n" + _format_mix_plan(plan),
+        _format_mix_created(plan),
         reply_markup=stock_menu_keyboard(),
     )
     await callback.answer()
@@ -1055,53 +1079,33 @@ async def flock_assign_start(callback: CallbackQuery, state: FSMContext, stock_s
 
 
 @router.callback_query(FlockAssignFlow.item, F.data.startswith("feeds:flock_assign_item:"))
-async def flock_assign_item(callback: CallbackQuery, state: FSMContext) -> None:
+async def flock_assign_item(callback: CallbackQuery, state: FSMContext, stock_service: StockService) -> None:
     item_id = int(str(callback.data).rsplit(":", 1)[1])
-    await state.update_data(stock_item_id=item_id)
     data = await state.get_data()
     flock_id = int(data["flock_id"])
-    await state.set_state(FlockAssignFlow.share)
-    await callback.message.answer(
-        "Какую долю рациона занимает этот корм? Введите процент, например 100 или 50.",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ К стаду", callback_data=f"feeds:flock_view:{flock_id}")],
-                [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")],
-            ]
-        ),
-    )
-    await callback.answer()
-
-
-@router.message(FlockAssignFlow.share)
-async def flock_assign_share(message: Message, state: FSMContext, stock_service: StockService) -> None:
-    try:
-        share = _parse_float(message.text)
-    except ValueError:
-        await message.answer("Введите процент числом, например 100 или 50.")
-        return
-    data = await state.get_data()
     try:
         assignment = stock_service.assign_flock_feed(
-            user_id=message.from_user.id,
-            flock_id=int(data["flock_id"]),
-            stock_item_id=int(data["stock_item_id"]),
-            share_percent=share,
+            user_id=callback.from_user.id,
+            flock_id=flock_id,
+            stock_item_id=item_id,
+            share_percent=100,
         )
     except ValueError as exc:
-        await message.answer(str(exc))
+        await callback.message.answer(str(exc), reply_markup=flock_actions_keyboard(flock_id))
+        await callback.answer()
         return
     await state.clear()
-    await message.answer(
-        f"Рацион стада задан: {assignment.flock_name} -> {assignment.stock_item_name}, {share:g}%.",
+    await callback.message.answer(
+        f"Смесь назначена стаду: {assignment.flock_name} -> {assignment.stock_item_name}.",
         reply_markup=flock_actions_keyboard(assignment.flock_id),
     )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "feeds:stats")
 async def feed_stats(callback: CallbackQuery, stock_service: StockService) -> None:
     reports = stock_service.list_flock_reports(callback.from_user.id)
-    await callback.message.answer(_format_flock_reports(reports), reply_markup=feeds_menu_keyboard())
+    await callback.message.answer(_format_flock_reports(reports), reply_markup=feed_stats_keyboard())
     await callback.answer()
 
 
@@ -1920,7 +1924,7 @@ def _format_flock_reports(reports) -> str:
     if not reports:
         return (
             "📊 Расчеты\n\n"
-            "Стад пока нет. Создайте поголовье, объедините его в стадо и назначьте корм со склада."
+            "Стад пока нет. Создайте поголовье, объедините его в стадо и назначьте смесь со склада."
         )
     lines = ["📊 Расчеты по стадам"]
     for report in reports:
@@ -1938,23 +1942,39 @@ def _format_flock_reports(reports) -> str:
         else:
             lines.append("Состав не задан.")
         if not report.assignments:
-            lines.append("Рацион не задан.")
+            lines.append("Смесь не назначена.")
             continue
         lines.append(f"Расход: примерно {report.daily_usage_kg:.2f} кг/день")
         for usage in report.assignments:
             assignment = usage.assignment
             days = "неизвестно" if usage.days_left is None else f"{usage.days_left} дн."
-            purchase_hint = ""
+            mix_hint = ""
             if usage.days_left is not None:
-                purchase_date = date.today() + timedelta(days=usage.days_left)
-                purchase_hint = f", докупить примерно к {purchase_date.isoformat()}"
-            suggested_kg = max(usage.daily_usage_kg * 30, 1)
+                mix_date = date.today() + timedelta(days=usage.days_left)
+                mix_hint = f", следующий замес примерно {mix_date.isoformat()}"
             lines.append(
-                f"- {assignment.stock_item_name}: {usage.daily_usage_kg:.2f} кг/день, "
-                f"остаток {usage.remaining_kg:.1f} кг, хватит на {days}{purchase_hint}"
+                f"- {assignment.stock_item_name}: расход {usage.daily_usage_kg:.2f} кг/день, "
+                f"готовой смеси {usage.remaining_kg:.1f} кг, хватит на {days}{mix_hint}"
             )
-            if usage.daily_usage_kg > 0:
-                lines.append(f"  Докупить: около {suggested_kg:.1f} кг на 30 дней.")
+            if usage.producible_mix_count > 0:
+                lines.append(
+                    f"  Из текущих ингредиентов можно сделать еще: "
+                    f"{usage.producible_mix_count} замесов, около {usage.producible_mix_kg:.1f} кг."
+                )
+                if usage.total_days_left is not None:
+                    total_date = date.today() + timedelta(days=usage.total_days_left)
+                    lines.append(
+                        f"  Всего с учетом склада ингредиентов хватит примерно на "
+                        f"{usage.total_days_left} дн., до {total_date.isoformat()}."
+                    )
+                if usage.limiting_ingredient_name:
+                    lines.append(f"  Потом первым докупить: {usage.limiting_ingredient_name}.")
+            elif usage.missing_ingredient_names:
+                lines.append(
+                    "  Для следующего замеса нужно докупить: "
+                    + ", ".join(usage.missing_ingredient_names[:5])
+                    + "."
+                )
     return "\n".join(lines)
 
 
@@ -2020,7 +2040,7 @@ def _format_mix_dashboard(plan, *, auto_selected: bool = False) -> str:
                 f"Ограничивает: {limiting.name} "
                 f"(есть {limiting.available_kg:.2f} кг, на 1 замес нужно {limiting.required_kg:.2f} кг)."
             )
-        lines.append("Кнопки ниже сразу создают замес и списывают ингредиенты со склада.")
+        lines.append("Кнопки ниже покажут расчет. Списание будет только после подтверждения.")
     else:
         lines.append("Полного замеса сейчас не хватает.")
         missing = _missing_mix_ingredients(plan)
@@ -2119,6 +2139,16 @@ def _format_mix_plan(plan) -> str:
         lines.append(f"Ингредиентов не хватает. Максимум сейчас: {plan.max_mix_count:.1f} замеса.")
     lines.append("Расчет примерный: вес зависит от влажности и фракции ингредиентов.")
     return "\n".join(lines)
+
+
+def _format_mix_created(plan) -> str:
+    return (
+        "Замес создан.\n\n"
+        f"Зерновая основа: {plan.grain_base_label}\n"
+        f"Замесов: {plan.mix_count:g}\n"
+        f"Добавлено готовой смеси: около {plan.output_kg:.1f} кг.\n\n"
+        "Ингредиенты списаны со склада."
+    )
 
 
 def _parse_float(value: str | None, *, allow_zero: bool = False) -> float:

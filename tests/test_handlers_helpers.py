@@ -14,6 +14,7 @@ from app.handlers.settings import (
 from app.keyboards.feeds import (
     bird_groups_keyboard,
     feed_actions_keyboard,
+    feed_stats_keyboard,
     feeds_menu_keyboard,
     flock_actions_keyboard,
     flocks_keyboard,
@@ -179,6 +180,15 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("📦 К складу", _keyboard_texts(stock_confirm_mix_keyboard(1, "wheat")))
         self.assertIn("Отмена", _keyboard_texts(stock_cancel_keyboard()))
 
+    def test_mix_quick_buttons_open_plan_before_writeoff(self) -> None:
+        quick_keyboard = stock_mix_quick_keyboard("wheat", 3)
+        callbacks = _keyboard_callbacks(quick_keyboard)
+        texts = _keyboard_texts(quick_keyboard)
+
+        self.assertIn("Рассчитать 1", texts)
+        self.assertIn("stock:mix_plan:wheat:1", callbacks)
+        self.assertNotIn("stock:mix_confirm:wheat:1", callbacks)
+
     def test_feed_menu_nests_groups_and_flocks(self) -> None:
         self.assertIn("🐔 Поголовье и стада", _keyboard_texts(feeds_menu_keyboard()))
         self.assertNotIn("🐓 Стада", _keyboard_texts(feeds_menu_keyboard()))
@@ -191,6 +201,14 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertNotIn("🐔 Поголовье", _keyboard_texts(flocks_keyboard()))
         self.assertIn("⬅️ Поголовье и стада", _keyboard_texts(flocks_keyboard()))
         self.assertIn("🍽 Назначить смесь", _keyboard_texts(flock_actions_keyboard(1)))
+
+    def test_feed_stats_keyboard_stays_in_stats_context(self) -> None:
+        texts = _keyboard_texts(feed_stats_keyboard())
+
+        self.assertIn("🐔 Поголовье и стада", texts)
+        self.assertIn("⬅️ К кормам", texts)
+        self.assertNotIn("➕ Добавить корм", texts)
+        self.assertNotIn("📊 Расчеты", texts)
 
     def test_stock_selection_keyboards_cancel_to_stock_menu(self) -> None:
         class Item:
