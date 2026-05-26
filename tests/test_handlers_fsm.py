@@ -23,6 +23,7 @@ from app.handlers.feeds import (
     stock_mix_confirm,
     stock_mix_cycle_done,
     stock_mix_plan,
+    stock_mix_toggle,
     stock_purchase_amount,
     stock_purchase_name,
 )
@@ -52,9 +53,13 @@ class FakeMessage:
         self.from_user = FakeUser()
         self.date = datetime(2026, 5, 25, 9, 0, tzinfo=timezone.utc)
         self.answers: list[tuple[str, object]] = []
+        self.edits: list[tuple[str, object]] = []
 
     async def answer(self, text: str, reply_markup=None, **kwargs) -> None:
         self.answers.append((text, reply_markup))
+
+    async def edit_text(self, text: str, reply_markup=None, **kwargs) -> None:
+        self.edits.append((text, reply_markup))
 
 
 class FakeCallback:
@@ -309,10 +314,11 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
 
         await stock_mix_plan(callback, state, self.stock_service)
 
-        self.assertIn("Формула на 1 замес", callback.message.answers[-1][0])
-        self.assertIn("Кукуруза: 3.5 части", callback.message.answers[-1][0])
-        self.assertIn("Пшеница: 2.5 части", callback.message.answers[-1][0])
-        self.assertIn("Текущий замес: 1 из 2", callback.message.answers[-1][0])
+        self.assertEqual(callback.message.answers, [])
+        self.assertIn("Формула на 1 замес", callback.message.edits[-1][0])
+        self.assertIn("Кукуруза: 3.5 части", callback.message.edits[-1][0])
+        self.assertIn("Пшеница: 2.5 части", callback.message.edits[-1][0])
+        self.assertIn("Текущий замес: 1 из 2", callback.message.edits[-1][0])
         self.assertEqual(
             [
                 item.item.name
@@ -344,14 +350,18 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         callback = FakeCallback("stock:mix_plan:wheat:2")
 
         await stock_mix_plan(callback, state, self.stock_service)
-        await stock_mix_check_all(FakeCallback("stock:mix_check_all"), state, self.stock_service)
+        check_all_callback = FakeCallback("stock:mix_check_all")
+        await stock_mix_check_all(check_all_callback, state, self.stock_service)
+        self.assertEqual(check_all_callback.message.answers, [])
+        self.assertIn("✅ Кукуруза", check_all_callback.message.edits[-1][0])
         done_callback = FakeCallback("stock:mix_cycle_done")
 
         await stock_mix_cycle_done(done_callback, state, self.stock_service)
 
         self.assertEqual(state.data["mix_current_cycle"], 2)
         self.assertEqual(state.data["mix_checked_indices"], [])
-        self.assertIn("Текущий замес: 2 из 2", done_callback.message.answers[-1][0])
+        self.assertEqual(done_callback.message.answers, [])
+        self.assertIn("Текущий замес: 2 из 2", done_callback.message.edits[-1][0])
 
         await stock_mix_check_all(FakeCallback("stock:mix_check_all"), state, self.stock_service)
         confirm_callback = FakeCallback("stock:mix_confirm:wheat:2")
@@ -368,6 +378,33 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
             ],
             ["Смесь для кур"],
         )
+
+    async def test_mix_toggle_edits_existing_checklist_message(self) -> None:
+        for name in [
+            "Кукуруза",
+            "Пшеница",
+            "Ячмень",
+            "Комбикорм",
+            "Мясокостная мука",
+            "Рыбная мука",
+            "Ракушка",
+            "Премикс",
+        ]:
+            self.stock_service.add_purchase(
+                user_id=1,
+                name=name,
+                kind="ingredient",
+                amount_kg=100,
+            )
+        state = FakeState()
+        await stock_mix_plan(FakeCallback("stock:mix_plan:wheat:1"), state, self.stock_service)
+        toggle_callback = FakeCallback("stock:mix_toggle:0")
+
+        await stock_mix_toggle(toggle_callback, state, self.stock_service)
+
+        self.assertEqual(toggle_callback.message.answers, [])
+        self.assertIn("✅ Кукуруза: 3.5 части", toggle_callback.message.edits[-1][0])
+        self.assertTrue(toggle_callback.answered)
 
     async def test_flock_assign_item_sets_full_mix_without_percent_step(self) -> None:
         group = self.feed_service.create_bird_group(

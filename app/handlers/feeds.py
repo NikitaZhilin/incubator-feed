@@ -1,4 +1,5 @@
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -815,7 +816,7 @@ async def stock_mix_plan(callback: CallbackQuery, state: FSMContext, stock_servi
         await callback.answer()
         return
     if plan.can_produce:
-        await _send_mix_checklist(callback.message, state, plan)
+        await _edit_mix_checklist(callback.message, state, plan)
     else:
         await state.clear()
         await callback.message.answer(
@@ -852,6 +853,7 @@ async def stock_mix_toggle(callback: CallbackQuery, state: FSMContext, stock_ser
         plan,
         checked_indices=checked,
         current_cycle=current_cycle,
+        edit=True,
     )
     await callback.answer()
 
@@ -869,6 +871,7 @@ async def stock_mix_check_all(callback: CallbackQuery, state: FSMContext, stock_
         plan,
         checked_indices=set(range(len(plan.ingredients))),
         current_cycle=int(data.get("mix_current_cycle", 1)),
+        edit=True,
     )
     await callback.answer()
 
@@ -887,7 +890,7 @@ async def stock_mix_cycle_done(callback: CallbackQuery, state: FSMContext, stock
     current_cycle = int(data.get("mix_current_cycle", 1))
     total_cycles = int(data.get("mix_total_cycles", int(plan.mix_count)))
     if current_cycle >= total_cycles:
-        await callback.answer("Это последний замес. Нажмите списание склада.", show_alert=True)
+        await callback.answer("Это последний замес. Обновите склад финальной кнопкой.", show_alert=True)
         return
     await _send_mix_checklist(
         callback.message,
@@ -895,6 +898,7 @@ async def stock_mix_cycle_done(callback: CallbackQuery, state: FSMContext, stock
         plan,
         checked_indices=set(),
         current_cycle=current_cycle + 1,
+        edit=True,
     )
     await callback.answer()
 
@@ -932,8 +936,8 @@ async def stock_mix_confirm(callback: CallbackQuery, state: FSMContext, stock_se
     current_cycle = int(data.get("mix_current_cycle", 1))
     total_cycles = int(data.get("mix_total_cycles", int(mix_count)))
     if current_cycle < total_cycles or len(checked) < len(state_plan.ingredients):
-            await callback.answer("Сначала отметьте ингредиенты всех замесов.", show_alert=True)
-            return
+        await callback.answer("Сначала отметьте ингредиенты всех замесов.", show_alert=True)
+        return
     try:
         plan = stock_service.produce_mix(
             user_id=callback.from_user.id,
@@ -1978,6 +1982,7 @@ async def _send_mix_checklist(
     *,
     checked_indices: set[int] | None = None,
     current_cycle: int = 1,
+    edit: bool = False,
 ) -> None:
     total_cycles = _parse_mix_cycle_count(plan.mix_count)
     checked = checked_indices or set()
@@ -1989,19 +1994,43 @@ async def _send_mix_checklist(
         mix_current_cycle=current,
         mix_checked_indices=sorted(checked),
     )
-    await message.answer(
-        _format_mix_plan(
-            plan,
-            checked_indices=checked,
-            current_cycle=current,
-            total_cycles=total_cycles,
-        ),
-        reply_markup=stock_mix_checklist_keyboard(
-            plan,
-            checked_indices=checked,
-            current_cycle=current,
-            total_cycles=total_cycles,
-        ),
+    text = _format_mix_plan(
+        plan,
+        checked_indices=checked,
+        current_cycle=current,
+        total_cycles=total_cycles,
+    )
+    reply_markup = stock_mix_checklist_keyboard(
+        plan,
+        checked_indices=checked,
+        current_cycle=current,
+        total_cycles=total_cycles,
+    )
+    if edit:
+        try:
+            await message.edit_text(text, reply_markup=reply_markup)
+            return
+        except TelegramBadRequest as exc:
+            if "message is not modified" in str(exc).lower():
+                return
+    await message.answer(text, reply_markup=reply_markup)
+
+
+async def _edit_mix_checklist(
+    message: Message,
+    state: FSMContext,
+    plan,
+    *,
+    checked_indices: set[int] | None = None,
+    current_cycle: int = 1,
+) -> None:
+    await _send_mix_checklist(
+        message,
+        state,
+        plan,
+        checked_indices=checked_indices,
+        current_cycle=current_cycle,
+        edit=True,
     )
 
 
