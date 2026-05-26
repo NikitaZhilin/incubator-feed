@@ -67,6 +67,20 @@ def settings_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="Уход вкл/выкл", callback_data="settings:toggle:notify_post_hatch_care"),
                 InlineKeyboardButton(text="Сервис вкл/выкл", callback_data="settings:toggle:notify_service"),
             ],
+            [InlineKeyboardButton(text="ℹ️ О боте", callback_data="settings:about")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
+        ]
+    )
+
+
+def about_bot_keyboard(*, github_url: str, changelog_url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📦 GitHub", url=github_url),
+                InlineKeyboardButton(text="📝 История изменений", url=changelog_url),
+            ],
+            [InlineKeyboardButton(text="⬅️ Настройки", callback_data="settings:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
     )

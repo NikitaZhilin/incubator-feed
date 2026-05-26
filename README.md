@@ -61,8 +61,10 @@ python -B scripts\smoke_start.py
 - `BACKUP_DIR` - каталог резервных копий.
 - `REMINDER_INTERVAL_SECONDS` - частота reminder loop.
 - `MIN_FREE_DISK_MB` - минимальный свободный объем для проверки диска.
-- `RELEASE_VERSION` - текущая бета-версия для уведомления пользователей, например `0.1.42-beta`.
-- `RELEASE_NOTES` - краткое описание изменений для release notice.
+- `RELEASE_VERSION` - текущая бета-версия, например `0.1.42-beta`.
+- `RELEASE_NOTES` - краткое описание изменений для экрана `О боте` и важных release notice.
+- `RELEASE_NOTICE_ENABLED` и `RELEASE_IMPORTANCE` - явное включение важных release notice; обычные деплои остаются тихими.
+- `RELEASE_CHANNEL`, `GITHUB_URL`, `CHANGELOG_URL` - данные для `Настройки -> О боте`.
 
 `.env`, `.env.dev`, `.env.prod`, БД, логи и бэкапы не должны попадать в Git.
 

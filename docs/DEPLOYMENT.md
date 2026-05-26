@@ -41,11 +41,11 @@ The workflow updates the project on the VPS, writes `.env.prod` from GitHub
 Secrets, runs migrations, rebuilds the Docker image, and starts the bot as a
 Docker container with `--restart unless-stopped`.
 
-After a successful deploy the workflow writes release metadata to `.env.prod`,
-then the main bot process sends a release notice to active users who have
-service notifications enabled. The notice is deduplicated in `notification_log`
-by release version, so re-running or restarting the same version does not send
-the same update twice.
+Regular deploys are silent for users. Version, GitHub and changelog links are
+available in Telegram under `Настройки -> О боте`. A release notice is sent only
+when it is explicitly enabled and marked as `major` or `critical`. The notice is
+deduplicated in `notification_log` by release version, so re-running or
+restarting the same version does not send the same update twice.
 
 For a manual GitHub Actions run you can fill:
 
@@ -54,13 +54,9 @@ release_version=0.1.42-beta
 release_notes=Добавлена ссылка на web-версию; Web-ключ теперь удобно копируется
 ```
 
-The main bot process sends this notice on startup. It opens the main menu with
-a reply keyboard and includes the MVP testing warning. The version should be a
-numeric beta version, for example `0.1.42-beta`. If the process restarts several
-times with the same version, users still receive the notice only once because
-delivery is recorded in `notification_log`.
-For automatic push deploys the default release notes are written in Russian;
-use the manual workflow input `release_notes` when a specific text is needed.
+The main bot process sends this notice on startup only when
+`RELEASE_NOTICE_ENABLED=1` and `RELEASE_IMPORTANCE` is `major` or `critical`.
+The version should be a numeric beta version, for example `0.1.42-beta`.
 
 ## Manual VPS deploy
 
@@ -82,18 +78,21 @@ Use a non-default port or path if needed:
   -DeployPath /opt/incubator-feed
 ```
 
-Pass release text when the deploy should explicitly announce a user-visible
-change:
+Pass `-AnnounceRelease` and release text only when the deploy should explicitly
+announce a user-visible change:
 
 ```powershell
 .\scripts\deploy-vps.ps1 `
   -SshTarget deploy@YOUR_SERVER_IP `
+  -AnnounceRelease `
   -ReleaseVersion 0.1.42-beta `
+  -ReleaseImportance major `
   -ReleaseNotes "Добавлена ссылка на web-версию; Web-ключ теперь удобно копируется"
 ```
 
-Use `-SkipReleaseNotice` only for purely technical redeploys that should stay
-silent.
+Without `-AnnounceRelease`, the deploy stays silent even if it changes the
+version. `-SkipReleaseNotice` is kept for compatibility and also forces a silent
+deploy.
 
 You can also send or retry the notice from the VPS. The same version will not
 be duplicated for users who already received it:

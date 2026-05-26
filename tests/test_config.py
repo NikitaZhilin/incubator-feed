@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from app.config import load_config, read_bot_token
+from app.config import load_config, read_bot_token, should_send_release_notice
 from app.version import APP_VERSION
 
 
@@ -36,6 +36,10 @@ class ConfigTest(unittest.TestCase):
                     "DATABASE_PATH": str(db_path),
                     "RELEASE_VERSION": "0.1.42-beta",
                     "RELEASE_NOTES": "Добавлена ссылка на web-версию",
+                    "RELEASE_CHANNEL": "beta",
+                    "RELEASE_IMPORTANCE": "major",
+                    "GITHUB_URL": "https://github.com/example/project",
+                    "CHANGELOG_URL": "https://github.com/example/project/releases",
                 },
                 clear=True,
             ):
@@ -44,9 +48,13 @@ class ConfigTest(unittest.TestCase):
 
         self.assertEqual(config.release_version, "0.1.42-beta")
         self.assertEqual(config.release_notes, "Добавлена ссылка на web-версию")
+        self.assertEqual(config.release_channel, "beta")
+        self.assertEqual(config.release_importance, "major")
+        self.assertEqual(config.github_url, "https://github.com/example/project")
+        self.assertEqual(config.changelog_url, "https://github.com/example/project/releases")
         self.assertFalse(config.release_notice_enabled)
 
-    def test_prod_uses_app_version_as_release_fallback(self) -> None:
+    def test_prod_uses_app_version_as_release_fallback_without_startup_notice(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             db_path = root / "test.db"
@@ -63,7 +71,29 @@ class ConfigTest(unittest.TestCase):
                     config = load_config()
 
         self.assertEqual(config.release_version, APP_VERSION)
-        self.assertTrue(config.release_notice_enabled)
+        self.assertFalse(config.release_notice_enabled)
+        self.assertFalse(should_send_release_notice(config))
+
+    def test_release_notice_policy_requires_enabled_major_or_critical(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            db_path = root / "test.db"
+            base_env = {
+                "ENVIRONMENT": "prod",
+                "BOT_TOKEN": "123456:test",
+                "DATABASE_PATH": str(db_path),
+                "RELEASE_NOTICE_ENABLED": "1",
+                "RELEASE_VERSION": "0.1.42-beta",
+            }
+            with patch.dict(os.environ, {**base_env, "RELEASE_IMPORTANCE": "minor"}, clear=True):
+                with patch("app.config.get_project_root", return_value=root):
+                    minor = load_config()
+            with patch.dict(os.environ, {**base_env, "RELEASE_IMPORTANCE": "major"}, clear=True):
+                with patch("app.config.get_project_root", return_value=root):
+                    major = load_config()
+
+        self.assertFalse(should_send_release_notice(minor))
+        self.assertTrue(should_send_release_notice(major))
 
 
 if __name__ == "__main__":

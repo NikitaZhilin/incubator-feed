@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import floor, isfinite
+import re
 
 from app.domain import CONTENT, FeedingAssignment, StockEstimate, StockItem
 from app.services.feed_recipes import (
@@ -207,7 +208,7 @@ class StockService:
             )
             for option in list_grain_base_options()
         )
-        return max(plans, key=lambda plan: (int(plan.max_mix_count), plan.max_mix_count))
+        return max(plans, key=_mix_plan_availability_key)
 
     def produce_mix(
         self,
@@ -313,14 +314,24 @@ class StockService:
         )
 
     def _find_stock_item_by_names(self, *, user_id: int, names: tuple[str, ...]) -> StockItem | None:
-        seen = set()
+        items = self.stock.list_items(user_id)
+        normalized_names = set()
         for name in names:
-            normalized = name.strip().lower()
-            if not normalized or normalized in seen:
+            cleaned = name.strip()
+            normalized = _normalize_stock_name(cleaned)
+            if not cleaned or normalized in normalized_names:
                 continue
-            seen.add(normalized)
-            item = self.stock.find_item_by_name(user_id=user_id, name=name)
+            normalized_names.add(normalized)
+            item = self.stock.find_item_by_name(user_id=user_id, name=cleaned)
             if item is not None:
+                return item
+        for item in items:
+            stock_name = _normalize_stock_name(item.name)
+            if stock_name in normalized_names:
+                return item
+        for item in items:
+            stock_name = _normalize_stock_name(item.name)
+            if any(_stock_names_match(alias, stock_name) for alias in normalized_names):
                 return item
         return None
 
@@ -371,3 +382,27 @@ class StockService:
                 entity_type="stock",
                 entity_id=entity_id,
             )
+
+
+def _normalize_stock_name(value: str) -> str:
+    normalized = value.strip().lower().replace("ё", "е")
+    normalized = re.sub(r"[^0-9a-zа-я]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _stock_names_match(recipe_name: str, stock_name: str) -> bool:
+    return (
+        recipe_name == stock_name
+        or recipe_name in stock_name
+        or stock_name in recipe_name
+    )
+
+
+def _mix_plan_availability_key(plan: MixPlan) -> tuple[int, float, int, float]:
+    missing = [item for item in plan.ingredients if item.missing_kg > 0]
+    return (
+        int(plan.max_mix_count),
+        plan.max_mix_count,
+        -len(missing),
+        -sum(item.missing_kg for item in missing),
+    )

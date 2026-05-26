@@ -5,8 +5,11 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from app.keyboards.menu import settings_keyboard
+from app.config import AppConfig
+from app.keyboards.menu import about_bot_keyboard, settings_keyboard
+from app.services.release_notifications import DEFAULT_TESTING_DISCLAIMER
 from app.services.incubation import IncubationService
+from app.version import APP_VERSION
 
 
 router = Router()
@@ -44,6 +47,18 @@ async def settings_toggle(callback: CallbackQuery, incubation_service: Incubatio
     )
     await callback.message.answer(_format_settings(updated), reply_markup=settings_keyboard())
     await callback.answer("Сохранено")
+
+
+@router.callback_query(F.data == "settings:about")
+async def settings_about(callback: CallbackQuery, config: AppConfig) -> None:
+    await callback.message.answer(
+        format_about_bot(config),
+        reply_markup=about_bot_keyboard(
+            github_url=config.github_url,
+            changelog_url=config.changelog_url,
+        ),
+    )
+    await callback.answer()
 
 
 @router.message(Command("timezone"))
@@ -110,3 +125,35 @@ def _format_settings(settings: dict) -> str:
         f"Сервисные: {yes(bool(settings.get('notify_service', True)))}\n\n"
         "Команды: /remind 09:00, /timezone Europe/Moscow, /farm Название, /units metric."
     )
+
+
+def format_about_bot(config: AppConfig) -> str:
+    version = config.release_version or APP_VERSION
+    notes = _release_note_items(config.release_notes)
+    lines = [
+        "ℹ️ О боте",
+        "",
+        f"Версия: {version}",
+        f"Канал: {config.release_channel}",
+        "Статус: тестовый режим",
+        "",
+        "Проект:",
+        config.github_url,
+        "",
+        "История изменений:",
+        config.changelog_url,
+    ]
+    if notes:
+        lines.extend(["", "Что нового:"])
+        lines.extend(f"- {item}" for item in notes)
+    lines.extend(["", DEFAULT_TESTING_DISCLAIMER])
+    return "\n".join(lines)
+
+
+def _release_note_items(notes: str) -> list[str]:
+    items: list[str] = []
+    for raw_line in notes.replace(";", "\n").splitlines():
+        item = raw_line.strip().lstrip("-•").strip()
+        if item:
+            items.append(item)
+    return items

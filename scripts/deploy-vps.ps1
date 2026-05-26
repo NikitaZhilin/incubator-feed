@@ -20,6 +20,10 @@ param(
 
     [string]$ReleaseNotes = "",
 
+    [string]$ReleaseImportance = "major",
+
+    [switch]$AnnounceRelease,
+
     [switch]$SkipReleaseNotice
 )
 
@@ -76,7 +80,7 @@ scp -P $Port $EnvFile "$SshTarget`:$DeployPath/.env.prod"
 $quotedImageName = ConvertTo-ShellSingleQuoted $ImageName
 $quotedContainerName = ConvertTo-ShellSingleQuoted $ContainerName
 
-if (-not $SkipReleaseNotice) {
+if ($AnnounceRelease -and -not $SkipReleaseNotice) {
     $releaseNoticeEnabled = "1"
     if ([string]::IsNullOrWhiteSpace($ReleaseVersion)) {
         $commitCount = ""
@@ -102,11 +106,13 @@ if (-not $SkipReleaseNotice) {
     $releaseNoticeEnabled = "0"
     $ReleaseVersion = ""
     $ReleaseNotes = ""
+    $ReleaseImportance = "minor"
 }
 
 $quotedReleaseNoticeEnabled = ConvertTo-ShellSingleQuoted $releaseNoticeEnabled
 $quotedReleaseVersion = ConvertTo-ShellSingleQuoted $ReleaseVersion
 $quotedReleaseNotes = ConvertTo-ShellSingleQuoted $ReleaseNotes
+$quotedReleaseImportance = ConvertTo-ShellSingleQuoted $ReleaseImportance
 
 $runCommand = @"
 set -e
@@ -116,6 +122,7 @@ CONTAINER_NAME=$quotedContainerName
 RELEASE_NOTICE_ENABLED=$quotedReleaseNoticeEnabled
 RELEASE_VERSION=$quotedReleaseVersion
 RELEASE_NOTES=$quotedReleaseNotes
+RELEASE_IMPORTANCE=$quotedReleaseImportance
 docker build -t "`$IMAGE_NAME" .
 docker run --rm --env-file .env.prod \
   -v "$DeployPath/data:/app/data" \
@@ -128,6 +135,7 @@ docker run -d --name "`$CONTAINER_NAME" --restart unless-stopped \
   -e RELEASE_NOTICE_ENABLED="`$RELEASE_NOTICE_ENABLED" \
   -e RELEASE_VERSION="`$RELEASE_VERSION" \
   -e RELEASE_NOTES="`$RELEASE_NOTES" \
+  -e RELEASE_IMPORTANCE="`$RELEASE_IMPORTANCE" \
   -v "$DeployPath/data:/app/data" \
   -v "$DeployPath/logs:/app/logs" \
   -v "$DeployPath/backups:/app/backups" \

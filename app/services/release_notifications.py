@@ -26,7 +26,7 @@ def build_release_notice(version: str, notes: str = "") -> str:
     version = version.strip()
     note_items = _normalize_notes(notes)
     lines = [
-        f"Бот обновлен до бета-версии {version} и перезапущен.",
+        f"Важное обновление бота: {version}.",
     ]
     if note_items:
         lines.extend(["", "Что изменилось:"])
@@ -34,7 +34,7 @@ def build_release_notice(version: str, notes: str = "") -> str:
     lines.extend(
         [
             "",
-            "Главное меню открыто ниже. Если кнопки не появились, отправьте /start.",
+            "Подробнее: Настройки -> О боте.",
             "",
             DEFAULT_TESTING_DISCLAIMER,
         ]

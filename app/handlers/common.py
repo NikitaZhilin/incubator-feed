@@ -82,7 +82,10 @@ async def help_command(message: Message) -> None:
 @router.message(Command("version"))
 async def version_command(message: Message, config: AppConfig) -> None:
     version = config.release_version or APP_VERSION
-    await message.answer(f"Текущая бета-версия бота: {version}")
+    await message.answer(
+        f"Текущая бета-версия бота: {version}\n"
+        "Подробнее: Настройки -> О боте."
+    )
 
 
 @router.message(Command("menu"))

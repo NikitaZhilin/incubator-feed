@@ -44,10 +44,10 @@ class ReleaseNotificationTest(unittest.IsolatedAsyncioTestCase):
             "Добавлена ссылка на web-версию; Web-ключ теперь удобно копируется",
         )
 
-        self.assertIn("Бот обновлен до бета-версии 0.1.42-beta и перезапущен.", text)
+        self.assertIn("Важное обновление бота: 0.1.42-beta.", text)
         self.assertIn("- Добавлена ссылка на web-версию", text)
         self.assertIn("- Web-ключ теперь удобно копируется", text)
-        self.assertIn("Главное меню открыто ниже", text)
+        self.assertIn("Подробнее: Настройки -> О боте.", text)
         self.assertIn("Бот находится в тестировании", text)
 
     async def test_release_notice_is_sent_once_to_active_service_users(self) -> None:

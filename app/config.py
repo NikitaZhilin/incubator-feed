@@ -20,6 +20,10 @@ class AppConfig:
     release_version: str
     release_notes: str
     release_notice_enabled: bool
+    release_channel: str
+    release_importance: str
+    github_url: str
+    changelog_url: str
     timezone: str = "Europe/Moscow"
 
 
@@ -110,11 +114,15 @@ def load_config() -> AppConfig:
     log_level = getattr(logging, log_level_name, logging.INFO)
     release_notice_enabled = _parse_bool_env(
         "RELEASE_NOTICE_ENABLED",
-        default=environment == "prod",
+        default=False,
     )
     release_version = os.getenv("RELEASE_VERSION", os.getenv("APP_VERSION", "")).strip()
-    if release_notice_enabled and not release_version and environment == "prod":
+    if not release_version and environment == "prod":
         release_version = APP_VERSION
+    release_importance = os.getenv("RELEASE_IMPORTANCE", "minor").strip().lower() or "minor"
+
+    default_github_url = "https://github.com/NikitaZhilin/incubator-feed"
+    default_changelog_url = "https://github.com/NikitaZhilin/incubator-feed/blob/main/docs/CHANGELOG.md"
 
     return AppConfig(
         bot_token=read_bot_token(root, environment=environment),
@@ -129,8 +137,19 @@ def load_config() -> AppConfig:
         release_version=release_version,
         release_notes=os.getenv("RELEASE_NOTES", "").strip(),
         release_notice_enabled=release_notice_enabled,
+        release_channel=os.getenv("RELEASE_CHANNEL", "beta").strip() or "beta",
+        release_importance=release_importance,
+        github_url=os.getenv("GITHUB_URL", default_github_url).strip() or default_github_url,
+        changelog_url=os.getenv("CHANGELOG_URL", default_changelog_url).strip()
+        or default_changelog_url,
         timezone=os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
     )
+
+
+def should_send_release_notice(config: AppConfig) -> bool:
+    if not config.release_notice_enabled or not config.release_version:
+        return False
+    return config.release_importance in {"major", "critical"}
 
 
 def _parse_admin_ids(raw: str) -> set[int]:

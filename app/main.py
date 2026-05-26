@@ -8,7 +8,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from app.config import load_config
+from app.config import load_config, should_send_release_notice
 from app.handlers import register_handlers
 from app.middlewares.callbacks import StaleCallbackMiddleware
 from app.middlewares.users import UserTrackingMiddleware
@@ -125,7 +125,7 @@ async def main() -> None:
             interval_seconds=config.reminder_interval_seconds,
         )
         reminder_runner.start()
-        if config.release_notice_enabled and config.release_version:
+        if should_send_release_notice(config):
             try:
                 result = await ReleaseNotificationService(
                     bot=bot,
