@@ -1,5 +1,7 @@
 # Server Setup
 
+Рекомендуемый production-путь проекта сейчас: GitHub Actions или ручной Docker-деплой в `/opt/incubator-feed`. systemd-шаблоны оставлены как альтернативный режим без Docker и используют путь `/opt/tg_bot_inkubator`; если используете другой путь, обновите `WorkingDirectory`, `EnvironmentFile` и `ExecStart` в unit-файлах.
+
 ## Docker Compose
 
 1. Установите Docker и Docker Compose.

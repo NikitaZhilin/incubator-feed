@@ -53,8 +53,13 @@ For a manual GitHub Actions run you can fill:
 
 ```text
 release_version=0.1.42-beta
-release_notes=Добавлена ссылка на web-версию; Web-ключ теперь удобно копируется
+release_notes=Добавлен раздел Яйца; Добавлен прогноз яйценоскости
 ```
+
+The current GitHub Actions workflow does not expose `release_importance` as an
+input. It is suitable for updating the code, version and `О боте` notes. For a
+user-visible notice, use `scripts/deploy-vps.ps1 -AnnounceRelease` or run
+`scripts/notify_release.py` from the VPS/container after deploy.
 
 The main bot process sends this notice on startup only when
 `RELEASE_NOTICE_ENABLED=1` and `RELEASE_IMPORTANCE` is `medium`, `major`, or
@@ -91,7 +96,7 @@ or `critical` for a detailed notice with release notes:
   -AnnounceRelease `
   -ReleaseVersion 0.1.42-beta `
   -ReleaseImportance major `
-  -ReleaseNotes "Добавлена ссылка на web-версию; Web-ключ теперь удобно копируется"
+  -ReleaseNotes "Добавлен раздел Яйца; Добавлен прогноз яйценоскости"
 ```
 
 Without `-AnnounceRelease`, the deploy stays silent even if it changes the
@@ -110,8 +115,23 @@ docker run --rm --env-file .env.prod \
   incubator-feed:latest \
   python -B scripts/notify_release.py \
     --version 0.1.42-beta \
-    --notes "Добавлена ссылка на web-версию; Web-ключ теперь удобно копируется"
+    --notes "Добавлен раздел Яйца; Добавлен прогноз яйценоскости"
 ```
+
+## What reaches users after deploy
+
+Regular push to `main` deploys code to the VPS but should not distract users.
+The bot updates `Настройки -> О боте` with version, GitHub/changelog links,
+deploy time and release notes.
+
+Use a user-visible release notice only for changes that users should see
+immediately:
+
+- `medium` - short "bot was updated and restarted" message plus main menu;
+- `major` - detailed release notes plus main menu;
+- `critical` - urgent detailed notice plus main menu.
+
+Minor changes should stay available only inside `Настройки -> О боте`.
 
 ## Server requirements
 
