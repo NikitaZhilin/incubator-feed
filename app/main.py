@@ -165,6 +165,12 @@ async def main() -> None:
                     started_at=config.runtime_started_at,
                     timezone_name=config.timezone,
                     mode=config.admin_startup_notice_mode,
+                    deployment_id=(
+                        config.release_commit
+                        or config.release_deployed_at
+                        or config.release_version
+                    ),
+                    commit=config.release_commit,
                 )
                 logging.info(
                     "Admin startup notice completed: sent=%s skipped=%s failed=%s",

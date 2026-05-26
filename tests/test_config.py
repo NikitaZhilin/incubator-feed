@@ -109,6 +109,7 @@ class ConfigTest(unittest.TestCase):
                     disabled = load_config()
 
         self.assertFalse(should_send_admin_startup_notice(no_admins))
+        self.assertEqual(enabled.admin_startup_notice_mode, "once_per_deploy")
         self.assertTrue(should_send_admin_startup_notice(enabled))
         self.assertFalse(should_send_admin_startup_notice(disabled))
 

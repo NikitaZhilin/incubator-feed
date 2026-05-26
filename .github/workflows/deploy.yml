@@ -118,6 +118,8 @@ jobs:
         run: |
           RELEASE_VERSION="$RELEASE_VERSION_INPUT"
           RELEASE_NOTES="$RELEASE_NOTES_INPUT"
+          RELEASE_COMMIT="${GITHUB_SHA::12}"
+          RELEASE_DEPLOYED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           if [ "$SKIP_RELEASE_NOTICE" = "true" ]; then
             RELEASE_NOTICE_ENABLED="0"
             RELEASE_VERSION=""
@@ -145,8 +147,11 @@ jobs:
           REMINDER_INTERVAL_SECONDS=60
           MIN_FREE_DISK_MB=512
           RELEASE_NOTICE_ENABLED=$RELEASE_NOTICE_ENABLED
+          ADMIN_STARTUP_NOTICE_MODE=once_per_deploy
           RELEASE_VERSION=$RELEASE_VERSION
           RELEASE_NOTES=$RELEASE_NOTES
+          RELEASE_COMMIT=$RELEASE_COMMIT
+          RELEASE_DEPLOYED_AT=$RELEASE_DEPLOYED_AT
           EOF
             sed -i 's/^          //' .env.prod.deploy
             scp -i ~/.ssh/deploy_key -P "$VPS_PORT" .env.prod.deploy "$VPS_USER@$VPS_HOST:$DEPLOY_PATH/.env.prod"
@@ -155,6 +160,8 @@ jobs:
             RELEASE_NOTICE_ENABLED_B64="$(printf '%s' "$RELEASE_NOTICE_ENABLED" | base64 -w0)"
             RELEASE_VERSION_B64="$(printf '%s' "$RELEASE_VERSION" | base64 -w0)"
             RELEASE_NOTES_B64="$(printf '%s' "$RELEASE_NOTES" | base64 -w0)"
+            RELEASE_COMMIT_B64="$(printf '%s' "$RELEASE_COMMIT" | base64 -w0)"
+            RELEASE_DEPLOYED_AT_B64="$(printf '%s' "$RELEASE_DEPLOYED_AT" | base64 -w0)"
             cat > update_env_release.py <<'PY'
           import base64
           import os
@@ -163,8 +170,11 @@ jobs:
           path = Path(os.environ['ENV_PATH'])
           updates = {
               'RELEASE_NOTICE_ENABLED': base64.b64decode(os.environ['RELEASE_NOTICE_ENABLED_B64']).decode(),
+              'ADMIN_STARTUP_NOTICE_MODE': 'once_per_deploy',
               'RELEASE_VERSION': base64.b64decode(os.environ['RELEASE_VERSION_B64']).decode(),
               'RELEASE_NOTES': base64.b64decode(os.environ['RELEASE_NOTES_B64']).decode(),
+              'RELEASE_COMMIT': base64.b64decode(os.environ['RELEASE_COMMIT_B64']).decode(),
+              'RELEASE_DEPLOYED_AT': base64.b64decode(os.environ['RELEASE_DEPLOYED_AT_B64']).decode(),
           }
           lines = path.read_text(encoding='utf-8').splitlines()
           seen = set()
@@ -193,6 +203,8 @@ jobs:
               RELEASE_NOTICE_ENABLED_B64='$RELEASE_NOTICE_ENABLED_B64' \
               RELEASE_VERSION_B64='$RELEASE_VERSION_B64' \
               RELEASE_NOTES_B64='$RELEASE_NOTES_B64' \
+              RELEASE_COMMIT_B64='$RELEASE_COMMIT_B64' \
+              RELEASE_DEPLOYED_AT_B64='$RELEASE_DEPLOYED_AT_B64' \
               ENV_PATH='$DEPLOY_PATH/.env.prod' \
               python3 '$DEPLOY_PATH/.update_env_release.py'
               rm -f '$DEPLOY_PATH/.update_env_release.py'
@@ -207,6 +219,8 @@ jobs:
             set -e
             cd '$DEPLOY_PATH'
             mkdir -p data logs backups
+            RELEASE_COMMIT=\"\$(git rev-parse --short=12 HEAD 2>/dev/null || true)\"
+            RELEASE_DEPLOYED_AT=\"\$(date -u +'%Y-%m-%dT%H:%M:%SZ')\"
             docker build -t '$IMAGE_NAME' .
             docker run --rm --env-file .env.prod \
               -v '$DEPLOY_PATH/data:/app/data' \
@@ -216,6 +230,9 @@ jobs:
             docker rm -f '$CONTAINER_NAME' >/dev/null 2>&1 || true
             docker run -d --name '$CONTAINER_NAME' --restart unless-stopped \
               --env-file '$DEPLOY_PATH/.env.prod' \
+              -e ADMIN_STARTUP_NOTICE_MODE='once_per_deploy' \
+              -e RELEASE_COMMIT=\"\$RELEASE_COMMIT\" \
+              -e RELEASE_DEPLOYED_AT=\"\$RELEASE_DEPLOYED_AT\" \
               -v '$DEPLOY_PATH/data:/app/data' \
               -v '$DEPLOY_PATH/logs:/app/logs' \
               -v '$DEPLOY_PATH/backups:/app/backups' \

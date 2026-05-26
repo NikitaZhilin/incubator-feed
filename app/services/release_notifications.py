@@ -71,11 +71,11 @@ def release_event_key(version: str, user_id: int) -> str:
     return f"service:release:{safe_version}:user_{user_id}"
 
 
-def admin_startup_event_key(version: str, admin_id: int) -> str:
-    safe_version = re.sub(r"[^0-9A-Za-z._-]+", "_", version.strip())[:120]
-    if not safe_version:
-        safe_version = "unknown"
-    return f"service:admin_startup:{safe_version}:admin_{admin_id}"
+def admin_startup_event_key(version: str, admin_id: int, deployment_id: str = "") -> str:
+    safe_deployment = re.sub(r"[^0-9A-Za-z._-]+", "_", (deployment_id or version).strip())[:120]
+    if not safe_deployment:
+        safe_deployment = "unknown"
+    return f"service:admin_startup:{safe_deployment}:admin_{admin_id}"
 
 
 def build_admin_startup_notice(
@@ -83,19 +83,25 @@ def build_admin_startup_notice(
     version: str,
     started_at: datetime,
     timezone_name: str,
+    commit: str = "",
 ) -> str:
     version = version.strip() or "не указана"
-    return "\n".join(
+    lines = [
+        "🔧 Служебное уведомление",
+        "",
+        "Обновление выкатилось, бот перезапущен и доступен.",
+        f"Версия: {version}",
+    ]
+    if commit.strip():
+        lines.append(f"Коммит: {commit.strip()[:12]}")
+    lines.extend(
         [
-            "🔧 Служебное уведомление",
-            "",
-            "Обновление выкатилось, бот перезапущен и доступен.",
-            f"Версия: {version}",
             f"Запуск: {_format_notice_time(started_at, timezone_name)}",
             "",
             "Сообщение только для администраторов.",
         ]
     )
+    return "\n".join(lines)
 
 
 class ReleaseNotificationService:
@@ -183,7 +189,9 @@ class AdminStartupNotificationService:
         version: str,
         started_at: datetime,
         timezone_name: str,
-        mode: str = "once_per_version",
+        mode: str = "once_per_deploy",
+        deployment_id: str = "",
+        commit: str = "",
         now: datetime | None = None,
     ) -> AdminStartupNoticeResult:
         sent = 0
@@ -195,10 +203,11 @@ class AdminStartupNotificationService:
             version=version,
             started_at=started_at,
             timezone_name=timezone_name,
+            commit=commit,
         )
 
         for admin_id in sorted(self.admin_ids):
-            event_key = admin_startup_event_key(version, admin_id)
+            event_key = admin_startup_event_key(version, admin_id, deployment_id)
             if mode != "always" and self.notifications.was_sent(event_key):
                 skipped += 1
                 continue

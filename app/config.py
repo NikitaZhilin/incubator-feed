@@ -26,7 +26,7 @@ class AppConfig:
     github_url: str
     changelog_url: str
     timezone: str = "Europe/Moscow"
-    admin_startup_notice_mode: str = "once_per_version"
+    admin_startup_notice_mode: str = "once_per_deploy"
     release_deployed_at: str = ""
     release_commit: str = ""
     runtime_started_at: datetime = field(default_factory=lambda: datetime.now(datetime_timezone.utc))
@@ -143,7 +143,7 @@ def load_config() -> AppConfig:
         release_notes=os.getenv("RELEASE_NOTES", "").strip(),
         release_notice_enabled=release_notice_enabled,
         admin_startup_notice_mode=_parse_admin_startup_notice_mode(
-            os.getenv("ADMIN_STARTUP_NOTICE_MODE", "once_per_version")
+            os.getenv("ADMIN_STARTUP_NOTICE_MODE", "once_per_deploy")
         ),
         release_channel=os.getenv("RELEASE_CHANNEL", "beta").strip() or "beta",
         release_importance=release_importance,
@@ -195,6 +195,8 @@ def _parse_bool_env(name: str, *, default: bool) -> bool:
 
 def _parse_admin_startup_notice_mode(raw: str) -> str:
     value = raw.strip().lower()
-    if value in {"off", "always", "once_per_version"}:
+    if value == "once_per_version":
+        return "once_per_deploy"
+    if value in {"off", "always", "once_per_deploy"}:
         return value
-    return "once_per_version"
+    return "once_per_deploy"

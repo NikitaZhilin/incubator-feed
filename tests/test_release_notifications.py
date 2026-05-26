@@ -73,11 +73,13 @@ class ReleaseNotificationTest(unittest.IsolatedAsyncioTestCase):
             version="0.1.23-beta",
             started_at=datetime(2026, 5, 26, 23, 18, tzinfo=timezone.utc),
             timezone_name="Europe/Moscow",
+            commit="abcdef1234567890",
         )
 
         self.assertIn("Служебное уведомление", text)
         self.assertIn("Обновление выкатилось, бот перезапущен и доступен.", text)
         self.assertIn("Версия: 0.1.23-beta", text)
+        self.assertIn("Коммит: abcdef123456", text)
         self.assertIn("Запуск: 27.05.2026 02:18 (Europe/Moscow)", text)
         self.assertIn("только для администраторов", text)
         self.assertNotIn("Технические изменения", text)
@@ -131,7 +133,7 @@ class ReleaseNotificationTest(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-    async def test_admin_startup_notice_is_sent_once_per_version_to_admins_only(self) -> None:
+    async def test_admin_startup_notice_is_sent_once_per_deploy_to_admins_only(self) -> None:
         bot = FakeBot()
         service = AdminStartupNotificationService(
             bot=bot,
@@ -144,14 +146,27 @@ class ReleaseNotificationTest(unittest.IsolatedAsyncioTestCase):
             version="0.1.23-beta",
             started_at=started_at,
             timezone_name="Europe/Moscow",
-            mode="once_per_version",
+            mode="once_per_deploy",
+            deployment_id="abcdef123456",
+            commit="abcdef123456",
             now=started_at,
         )
         second = await service.send_startup_notice(
             version="0.1.23-beta",
             started_at=started_at,
             timezone_name="Europe/Moscow",
-            mode="once_per_version",
+            mode="once_per_deploy",
+            deployment_id="abcdef123456",
+            commit="abcdef123456",
+            now=started_at,
+        )
+        third = await service.send_startup_notice(
+            version="0.1.23-beta",
+            started_at=started_at,
+            timezone_name="Europe/Moscow",
+            mode="once_per_deploy",
+            deployment_id="fedcba654321",
+            commit="fedcba654321",
             now=started_at,
         )
 
@@ -160,10 +175,11 @@ class ReleaseNotificationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.failed, 0)
         self.assertEqual(second.sent, 0)
         self.assertEqual(second.skipped, 2)
-        self.assertEqual([message["user_id"] for message in bot.messages], [1, 2])
+        self.assertEqual(third.sent, 2)
+        self.assertEqual([message["user_id"] for message in bot.messages], [1, 2, 1, 2])
         self.assertTrue(
             self.notifications.was_sent(
-                admin_startup_event_key("0.1.23-beta", 1)
+                admin_startup_event_key("0.1.23-beta", 1, "abcdef123456")
             )
         )
 
