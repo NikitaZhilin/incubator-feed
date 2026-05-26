@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 import sqlite3
 
-from app.domain import BirdGroup, FeedStock, FeedTransaction
+from app.domain import BirdGroup, FeedStock, FeedTransaction, Flock, FlockMember
 from app.storage.database import Database
 
 
@@ -306,6 +306,7 @@ class FeedRepository:
         bird_count: int,
         species: str | None = None,
         group_kind: str = "adult",
+        role: str = "mixed",
         hatched_at: date | None = None,
         joined_at: date | None = None,
         reserve_percent: float = 0.0,
@@ -316,9 +317,9 @@ class FeedRepository:
                 """
                 INSERT INTO bird_groups (
                     user_id, name, bird_count, species, group_kind, hatched_at,
-                    joined_at, reserve_percent, created_at, updated_at
+                    joined_at, reserve_percent, role, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user_id,
@@ -329,6 +330,7 @@ class FeedRepository:
                     hatched_at.isoformat() if hatched_at else None,
                     joined_at.isoformat() if joined_at else None,
                     reserve_percent,
+                    role,
                     now,
                     now,
                 ),
@@ -341,7 +343,7 @@ class FeedRepository:
             row = connection.execute(
                 """
                 SELECT id, user_id, name, bird_count, species, group_kind, hatched_at,
-                       joined_at, reserve_percent, is_active, created_at, updated_at
+                       joined_at, reserve_percent, role, is_active, created_at, updated_at
                 FROM bird_groups
                 WHERE id = ? AND user_id = ?
                 """,
@@ -354,7 +356,7 @@ class FeedRepository:
             rows = connection.execute(
                 """
                 SELECT id, user_id, name, bird_count, species, group_kind, hatched_at,
-                       joined_at, reserve_percent, is_active, created_at, updated_at
+                       joined_at, reserve_percent, role, is_active, created_at, updated_at
                 FROM bird_groups
                 WHERE user_id = ? AND is_active = 1
                 ORDER BY created_at DESC, id DESC
@@ -362,6 +364,190 @@ class FeedRepository:
                 (user_id,),
             ).fetchall()
         return [self._bird_group_from_row(row) for row in rows]
+
+    def update_bird_group(
+        self,
+        *,
+        group_id: int,
+        user_id: int,
+        name: str | None = None,
+        bird_count: int | None = None,
+        role: str | None = None,
+        hatched_at: date | None = None,
+        joined_at: date | None = None,
+        reserve_percent: float | None = None,
+    ) -> BirdGroup | None:
+        current = self.get_bird_group(group_id, user_id)
+        if current is None:
+            return None
+        now = datetime.now(timezone.utc).isoformat()
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                UPDATE bird_groups
+                SET name = ?,
+                    bird_count = ?,
+                    role = ?,
+                    hatched_at = ?,
+                    joined_at = ?,
+                    reserve_percent = ?,
+                    updated_at = ?
+                WHERE id = ? AND user_id = ?
+                """,
+                (
+                    name if name is not None else current.name,
+                    bird_count if bird_count is not None else current.bird_count,
+                    role if role is not None else current.role,
+                    (hatched_at if hatched_at is not None else current.hatched_at).isoformat()
+                    if (hatched_at if hatched_at is not None else current.hatched_at)
+                    else None,
+                    (joined_at if joined_at is not None else current.joined_at).isoformat()
+                    if (joined_at if joined_at is not None else current.joined_at)
+                    else None,
+                    reserve_percent if reserve_percent is not None else current.reserve_percent,
+                    now,
+                    group_id,
+                    user_id,
+                ),
+            )
+        return self.get_bird_group(group_id, user_id)
+
+    def archive_bird_group(self, group_id: int, user_id: int) -> bool:
+        now = datetime.now(timezone.utc).isoformat()
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE bird_groups
+                SET is_active = 0, updated_at = ?
+                WHERE id = ? AND user_id = ? AND is_active = 1
+                """,
+                (now, group_id, user_id),
+            )
+            connection.execute(
+                """
+                UPDATE flock_members
+                SET is_active = 0, left_at = ?
+                WHERE user_id = ? AND bird_group_id = ? AND is_active = 1
+                """,
+                (now, user_id, group_id),
+            )
+        return cursor.rowcount > 0
+
+    def create_flock(self, *, user_id: int, name: str) -> Flock:
+        now = datetime.now(timezone.utc).isoformat()
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO flocks (user_id, name, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (user_id, name, now, now),
+            )
+            flock_id = int(cursor.lastrowid)
+        return self.get_flock(flock_id, user_id)
+
+    def get_flock(self, flock_id: int, user_id: int) -> Flock | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, user_id, name, is_active, created_at, updated_at
+                FROM flocks
+                WHERE id = ? AND user_id = ?
+                """,
+                (flock_id, user_id),
+            ).fetchone()
+        return self._flock_from_row(row) if row else None
+
+    def list_flocks(self, user_id: int) -> list[Flock]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, user_id, name, is_active, created_at, updated_at
+                FROM flocks
+                WHERE user_id = ? AND is_active = 1
+                ORDER BY created_at DESC, id DESC
+                """,
+                (user_id,),
+            ).fetchall()
+        return [self._flock_from_row(row) for row in rows]
+
+    def archive_flock(self, flock_id: int, user_id: int) -> bool:
+        now = datetime.now(timezone.utc).isoformat()
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE flocks
+                SET is_active = 0, updated_at = ?
+                WHERE id = ? AND user_id = ? AND is_active = 1
+                """,
+                (now, flock_id, user_id),
+            )
+            connection.execute(
+                """
+                UPDATE flock_members
+                SET is_active = 0, left_at = ?
+                WHERE user_id = ? AND flock_id = ? AND is_active = 1
+                """,
+                (now, user_id, flock_id),
+            )
+            connection.execute(
+                """
+                UPDATE flock_feed_assignments
+                SET is_active = 0, ended_at = ?
+                WHERE user_id = ? AND flock_id = ? AND is_active = 1
+                """,
+                (now, user_id, flock_id),
+            )
+        return cursor.rowcount > 0
+
+    def add_flock_member(self, *, user_id: int, flock_id: int, bird_group_id: int) -> FlockMember | None:
+        now = datetime.now(timezone.utc).isoformat()
+        flock = self.get_flock(flock_id, user_id)
+        group = self.get_bird_group(bird_group_id, user_id)
+        if flock is None or group is None or not flock.is_active or not group.is_active:
+            return None
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO flock_members (user_id, flock_id, bird_group_id, joined_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (user_id, flock_id, bird_group_id, now),
+            )
+            connection.execute("UPDATE flocks SET updated_at = ? WHERE id = ?", (now, flock_id))
+        members = [member for member in self.list_flock_members(flock_id, user_id) if member.bird_group_id == bird_group_id]
+        return members[0] if members else None
+
+    def remove_flock_member(self, *, user_id: int, flock_id: int, bird_group_id: int) -> bool:
+        now = datetime.now(timezone.utc).isoformat()
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE flock_members
+                SET is_active = 0, left_at = ?
+                WHERE user_id = ? AND flock_id = ? AND bird_group_id = ? AND is_active = 1
+                """,
+                (now, user_id, flock_id, bird_group_id),
+            )
+            connection.execute("UPDATE flocks SET updated_at = ? WHERE id = ?", (now, flock_id))
+        return cursor.rowcount > 0
+
+    def list_flock_members(self, flock_id: int, user_id: int) -> list[FlockMember]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT fm.id, fm.user_id, fm.flock_id, fm.bird_group_id, fm.is_active,
+                       fm.joined_at, fm.left_at,
+                       bg.name AS bird_group_name, bg.bird_count, bg.group_kind, bg.role,
+                       bg.hatched_at, bg.joined_at AS group_joined_at, bg.reserve_percent
+                FROM flock_members AS fm
+                LEFT JOIN bird_groups AS bg ON bg.id = fm.bird_group_id
+                WHERE fm.user_id = ? AND fm.flock_id = ? AND fm.is_active = 1
+                ORDER BY fm.joined_at, fm.id
+                """,
+                (user_id, flock_id),
+            ).fetchall()
+        return [self._flock_member_from_row(row) for row in rows]
 
     def mark_purchase_reminded(self, feed_id: int, reminded_at: datetime) -> None:
         with self.database.connect() as connection:
@@ -470,6 +656,11 @@ class FeedRepository:
                 if "group_kind" in row.keys() and row["group_kind"] is not None
                 else "adult"
             ),
+            role=(
+                str(row["role"])
+                if "role" in row.keys() and row["role"] is not None
+                else ("chicks" if row["group_kind"] == "chicks" else "mixed")
+            ),
             hatched_at=(
                 date.fromisoformat(str(row["hatched_at"]))
                 if "hatched_at" in row.keys() and row["hatched_at"] is not None
@@ -485,4 +676,34 @@ class FeedRepository:
                 if "reserve_percent" in row.keys() and row["reserve_percent"] is not None
                 else 0.0
             ),
+        )
+
+    @staticmethod
+    def _flock_from_row(row: sqlite3.Row) -> Flock:
+        return Flock(
+            id=int(row["id"]),
+            user_id=int(row["user_id"]),
+            name=str(row["name"]),
+            is_active=bool(row["is_active"]),
+            created_at=datetime.fromisoformat(str(row["created_at"])),
+            updated_at=datetime.fromisoformat(str(row["updated_at"])),
+        )
+
+    @staticmethod
+    def _flock_member_from_row(row: sqlite3.Row) -> FlockMember:
+        return FlockMember(
+            id=int(row["id"]),
+            user_id=int(row["user_id"]),
+            flock_id=int(row["flock_id"]),
+            bird_group_id=int(row["bird_group_id"]),
+            is_active=bool(row["is_active"]),
+            joined_at=datetime.fromisoformat(str(row["joined_at"])),
+            left_at=datetime.fromisoformat(str(row["left_at"])) if row["left_at"] else None,
+            bird_group_name=str(row["bird_group_name"]) if row["bird_group_name"] else None,
+            bird_count=int(row["bird_count"] or 0),
+            group_kind=str(row["group_kind"] or "adult"),
+            role=str(row["role"] or ("chicks" if row["group_kind"] == "chicks" else "mixed")),
+            hatched_at=date.fromisoformat(str(row["hatched_at"])) if row["hatched_at"] else None,
+            group_joined_at=date.fromisoformat(str(row["group_joined_at"])) if row["group_joined_at"] else None,
+            reserve_percent=float(row["reserve_percent"] or 0),
         )

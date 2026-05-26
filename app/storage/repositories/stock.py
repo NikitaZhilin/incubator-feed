@@ -3,6 +3,7 @@ import sqlite3
 
 from app.domain import (
     FeedingAssignment,
+    FlockFeedAssignment,
     MixProduction,
     MixProductionItem,
     StockItem,
@@ -314,6 +315,102 @@ class StockRepository:
             ).fetchall()
         return [self._assignment_from_row(row) for row in rows]
 
+    def deactivate_assignments_for_groups(
+        self,
+        *,
+        user_id: int,
+        bird_group_ids: list[int],
+        ended_at: datetime | None = None,
+    ) -> None:
+        if not bird_group_ids:
+            return
+        timestamp = ended_at or datetime.now(timezone.utc)
+        placeholders = ", ".join("?" for _ in bird_group_ids)
+        with self.database.connect() as connection:
+            connection.execute(
+                f"""
+                UPDATE feeding_assignments
+                SET is_active = 0, ended_at = ?
+                WHERE user_id = ? AND bird_group_id IN ({placeholders}) AND is_active = 1
+                """,
+                (timestamp.isoformat(), user_id, *bird_group_ids),
+            )
+
+    def create_flock_assignment(
+        self,
+        *,
+        user_id: int,
+        flock_id: int,
+        stock_item_id: int,
+        share_percent: float = 100,
+        daily_per_hen_g: float = 120,
+        daily_per_rooster_g: float = 150,
+        daily_per_adult_g: float = 120,
+        reserve_percent: float = 0,
+        started_at: datetime | None = None,
+    ) -> FlockFeedAssignment:
+        timestamp = started_at or datetime.now(timezone.utc)
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                UPDATE flock_feed_assignments
+                SET is_active = 0, ended_at = ?
+                WHERE user_id = ? AND flock_id = ? AND stock_item_id = ? AND is_active = 1
+                """,
+                (timestamp.isoformat(), user_id, flock_id, stock_item_id),
+            )
+            cursor = connection.execute(
+                """
+                INSERT INTO flock_feed_assignments (
+                    user_id, flock_id, stock_item_id, share_percent,
+                    daily_per_hen_g, daily_per_rooster_g, daily_per_adult_g,
+                    reserve_percent, started_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    flock_id,
+                    stock_item_id,
+                    share_percent,
+                    daily_per_hen_g,
+                    daily_per_rooster_g,
+                    daily_per_adult_g,
+                    reserve_percent,
+                    timestamp.isoformat(),
+                ),
+            )
+            assignment_id = int(cursor.lastrowid)
+        return self.get_flock_assignment(assignment_id)
+
+    def get_flock_assignment(self, assignment_id: int) -> FlockFeedAssignment:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                self._flock_assignment_sql("ffa.id = ?"),
+                (assignment_id,),
+            ).fetchone()
+        return self._flock_assignment_from_row(row)
+
+    def list_flock_assignments(self, user_id: int, flock_id: int | None = None) -> list[FlockFeedAssignment]:
+        where = "ffa.user_id = ? AND ffa.is_active = 1"
+        params: tuple = (user_id,)
+        if flock_id is not None:
+            where += " AND ffa.flock_id = ?"
+            params = (user_id, flock_id)
+        with self.database.connect() as connection:
+            rows = connection.execute(self._flock_assignment_sql(where), params).fetchall()
+        return [self._flock_assignment_from_row(row) for row in rows]
+
+    def list_flock_assignments_for_item(self, user_id: int, stock_item_id: int) -> list[FlockFeedAssignment]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                self._flock_assignment_sql(
+                    "ffa.user_id = ? AND ffa.stock_item_id = ? AND ffa.is_active = 1"
+                ),
+                (user_id, stock_item_id),
+            ).fetchall()
+        return [self._flock_assignment_from_row(row) for row in rows]
+
     @staticmethod
     def _assignment_sql(where: str) -> str:
         return f"""
@@ -326,6 +423,21 @@ class StockRepository:
             LEFT JOIN stock_items AS si ON si.id = fa.stock_item_id
             WHERE {where}
             ORDER BY fa.started_at DESC, fa.id DESC
+        """
+
+    @staticmethod
+    def _flock_assignment_sql(where: str) -> str:
+        return f"""
+            SELECT ffa.id, ffa.user_id, ffa.flock_id, ffa.stock_item_id,
+                   ffa.is_active, ffa.share_percent, ffa.daily_per_hen_g,
+                   ffa.daily_per_rooster_g, ffa.daily_per_adult_g,
+                   ffa.reserve_percent, ffa.started_at, ffa.ended_at,
+                   f.name AS flock_name, si.name AS stock_item_name
+            FROM flock_feed_assignments AS ffa
+            LEFT JOIN flocks AS f ON f.id = ffa.flock_id
+            LEFT JOIN stock_items AS si ON si.id = ffa.stock_item_id
+            WHERE {where}
+            ORDER BY ffa.started_at DESC, ffa.id DESC
         """
 
     @staticmethod
@@ -396,5 +508,28 @@ class StockRepository:
             daily_per_bird_g=float(row["daily_per_bird_g"]),
             reserve_percent=float(row["reserve_percent"]),
             bird_group_name=str(row["bird_group_name"]) if row["bird_group_name"] else None,
+            stock_item_name=str(row["stock_item_name"]) if row["stock_item_name"] else None,
+        )
+
+    @staticmethod
+    def _flock_assignment_from_row(row: sqlite3.Row) -> FlockFeedAssignment:
+        return FlockFeedAssignment(
+            id=int(row["id"]),
+            user_id=int(row["user_id"]),
+            flock_id=int(row["flock_id"]),
+            stock_item_id=int(row["stock_item_id"]),
+            is_active=bool(row["is_active"]),
+            share_percent=float(row["share_percent"]),
+            daily_per_hen_g=float(row["daily_per_hen_g"]),
+            daily_per_rooster_g=float(row["daily_per_rooster_g"]),
+            daily_per_adult_g=float(row["daily_per_adult_g"]),
+            reserve_percent=float(row["reserve_percent"]),
+            started_at=datetime.fromisoformat(str(row["started_at"])),
+            ended_at=(
+                datetime.fromisoformat(str(row["ended_at"]))
+                if row["ended_at"] is not None
+                else None
+            ),
+            flock_name=str(row["flock_name"]) if row["flock_name"] else None,
             stock_item_name=str(row["stock_item_name"]) if row["stock_item_name"] else None,
         )

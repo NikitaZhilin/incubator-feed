@@ -3,7 +3,15 @@ from datetime import datetime, timezone
 from math import floor, isfinite
 import re
 
-from app.domain import CONTENT, FeedingAssignment, StockEstimate, StockItem
+from app.domain import (
+    CONTENT,
+    FeedingAssignment,
+    FlockFeedAssignment,
+    FlockFeedUsage,
+    FlockReport,
+    StockEstimate,
+    StockItem,
+)
 from app.services.feed_recipes import (
     DEFAULT_GRAIN_BASE,
     get_grain_base_option,
@@ -303,6 +311,87 @@ class StockService:
     def list_assignments(self, user_id: int) -> list[FeedingAssignment]:
         return self.stock.list_assignments(user_id)
 
+    def assign_flock_feed(
+        self,
+        *,
+        user_id: int,
+        flock_id: int,
+        stock_item_id: int,
+        share_percent: float = 100,
+        daily_per_hen_g: float = 120,
+        daily_per_rooster_g: float = 150,
+        daily_per_adult_g: float = 120,
+        reserve_percent: float = 0,
+    ) -> FlockFeedAssignment:
+        flock = self.feeds.get_flock(flock_id, user_id)
+        if flock is None or not flock.is_active:
+            raise ValueError("Стадо не найдено.")
+        if self.stock.get_item(stock_item_id, user_id) is None:
+            raise ValueError("Позиция склада не найдена.")
+        self._validate_amount(share_percent)
+        self._validate_amount(daily_per_hen_g)
+        self._validate_amount(daily_per_rooster_g)
+        self._validate_amount(daily_per_adult_g)
+        self._validate_amount(reserve_percent, allow_zero=True)
+        active_share = sum(
+            assignment.share_percent
+            for assignment in self.stock.list_flock_assignments(user_id, flock_id)
+            if assignment.stock_item_id != stock_item_id
+        )
+        if active_share + share_percent > 100:
+            raise ValueError("Сумма долей рациона стада не может быть больше 100%.")
+        members = self.feeds.list_flock_members(flock_id, user_id)
+        self.stock.deactivate_assignments_for_groups(
+            user_id=user_id,
+            bird_group_ids=[member.bird_group_id for member in members],
+        )
+        assignment = self.stock.create_flock_assignment(
+            user_id=user_id,
+            flock_id=flock_id,
+            stock_item_id=stock_item_id,
+            share_percent=share_percent,
+            daily_per_hen_g=daily_per_hen_g,
+            daily_per_rooster_g=daily_per_rooster_g,
+            daily_per_adult_g=daily_per_adult_g,
+            reserve_percent=reserve_percent,
+        )
+        self._track("flock_feed_assigned", user_id=user_id, entity_id=assignment.id)
+        return assignment
+
+    def list_flock_reports(
+        self,
+        user_id: int,
+        *,
+        now: datetime | None = None,
+    ) -> list[FlockReport]:
+        current = now or datetime.now(timezone.utc)
+        reports: list[FlockReport] = []
+        for flock in self.feeds.list_flocks(user_id):
+            members = tuple(self.feeds.list_flock_members(flock.id, user_id))
+            usages = []
+            for assignment in self.stock.list_flock_assignments(user_id, flock.id):
+                item = self.stock.get_item(assignment.stock_item_id, user_id)
+                remaining_kg = self.estimate_item(item, now=current).remaining_kg if item else 0
+                daily_usage_kg = self._flock_assignment_daily_usage_kg(assignment, current)
+                days_left = floor(remaining_kg / daily_usage_kg) if daily_usage_kg > 0 else None
+                usages.append(
+                    FlockFeedUsage(
+                        assignment=assignment,
+                        daily_usage_kg=daily_usage_kg,
+                        remaining_kg=remaining_kg,
+                        days_left=days_left,
+                    )
+                )
+            reports.append(
+                FlockReport(
+                    flock=flock,
+                    members=members,
+                    assignments=tuple(usages),
+                    daily_usage_kg=sum(item.daily_usage_kg for item in usages),
+                )
+            )
+        return reports
+
     def list_history(self, user_id: int, limit: int = 20):
         return self.stock.list_transactions(user_id, limit=limit)
 
@@ -344,12 +433,22 @@ class StockService:
             consumed += self._assignment_daily_usage_kg(assignment, until) * (
                 (until - start).total_seconds() / 86400
             )
+        for assignment in self.stock.list_flock_assignments_for_item(item.user_id, item.id):
+            start = max(since, assignment.started_at)
+            if until <= start:
+                continue
+            consumed += self._flock_assignment_daily_usage_kg(assignment, until) * (
+                (until - start).total_seconds() / 86400
+            )
         return consumed
 
     def _daily_usage_kg(self, item: StockItem, current: datetime) -> float:
         return sum(
             self._assignment_daily_usage_kg(assignment, current)
             for assignment in self.stock.list_assignments_for_item(item.user_id, item.id)
+        ) + sum(
+            self._flock_assignment_daily_usage_kg(assignment, current)
+            for assignment in self.stock.list_flock_assignments_for_item(item.user_id, item.id)
         )
 
     def _assignment_daily_usage_kg(
@@ -368,6 +467,32 @@ class StockService:
             return group.bird_count * FeedService.chick_daily_g(age_days) * reserve / 1000
         reserve = 1 + max(assignment.reserve_percent, 0) / 100
         return group.bird_count * assignment.daily_per_bird_g * reserve / 1000
+
+    def _flock_assignment_daily_usage_kg(
+        self,
+        assignment: FlockFeedAssignment,
+        current: datetime,
+    ) -> float:
+        members = self.feeds.list_flock_members(assignment.flock_id, assignment.user_id)
+        total_g = 0.0
+        for member in members:
+            if member.group_kind == "chicks":
+                if member.group_joined_at is not None and current.date() < member.group_joined_at:
+                    continue
+                if member.hatched_at is not None:
+                    age_days = max((current.date() - member.hatched_at).days, 0)
+                    total_g += member.bird_count * FeedService.chick_daily_g(age_days)
+                else:
+                    total_g += member.bird_count * assignment.daily_per_adult_g
+            elif member.role == "hens":
+                total_g += member.bird_count * assignment.daily_per_hen_g
+            elif member.role == "roosters":
+                total_g += member.bird_count * assignment.daily_per_rooster_g
+            else:
+                total_g += member.bird_count * assignment.daily_per_adult_g
+        share = assignment.share_percent / 100
+        reserve = 1 + max(assignment.reserve_percent, 0) / 100
+        return total_g * share * reserve / 1000
 
     @staticmethod
     def _validate_amount(value: float, *, allow_zero: bool = False) -> None:

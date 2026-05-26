@@ -225,6 +225,171 @@ class StockServiceTest(unittest.TestCase):
         self.assertEqual(round(before.daily_usage_kg, 3), 0.275)
         self.assertEqual(after.daily_usage_kg, 0)
 
+    def test_flock_assignment_uses_hens_roosters_and_chicks_after_join_date(self) -> None:
+        hens = self.feeds.create_bird_group(
+            user_id=1,
+            name="Несушки",
+            bird_count=20,
+            species="chicken",
+            role="hens",
+        )
+        roosters = self.feeds.create_bird_group(
+            user_id=1,
+            name="Петухи",
+            bird_count=2,
+            species="chicken",
+            role="roosters",
+        )
+        chicks = self.feeds.create_bird_group(
+            user_id=1,
+            name="Цыплята май",
+            bird_count=10,
+            species="chicken",
+            group_kind="chicks",
+            role="chicks",
+            hatched_at=date(2026, 5, 1),
+            joined_at=date(2026, 6, 1),
+        )
+        flock = self.feeds.create_flock(user_id=1, name="Основное стадо")
+        for group in (hens, roosters, chicks):
+            self.feeds.add_flock_member(user_id=1, flock_id=flock.id, bird_group_id=group.id)
+        estimate = self.service.add_purchase(
+            user_id=1,
+            name="Смесь для кур",
+            kind="finished_mix",
+            amount_kg=100,
+        )
+        self.service.assign_flock_feed(
+            user_id=1,
+            flock_id=flock.id,
+            stock_item_id=estimate.item.id,
+            share_percent=100,
+        )
+
+        before_join = self.service.estimate_item(
+            estimate.item,
+            now=datetime(2026, 5, 20, tzinfo=timezone.utc),
+        )
+        after_join = self.service.estimate_item(
+            estimate.item,
+            now=datetime(2026, 6, 2, tzinfo=timezone.utc),
+        )
+        reports = self.service.list_flock_reports(
+            1,
+            now=datetime(2026, 6, 2, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(round(before_join.daily_usage_kg, 2), 2.7)
+        self.assertEqual(round(after_join.daily_usage_kg, 2), 3.4)
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(round(reports[0].daily_usage_kg, 2), 3.4)
+
+    def test_archived_flock_stops_consuming_assigned_feed(self) -> None:
+        group = self.feeds.create_bird_group(
+            user_id=1,
+            name="Несушки",
+            bird_count=10,
+            species="chicken",
+            role="hens",
+        )
+        flock = self.feeds.create_flock(user_id=1, name="Основное стадо")
+        self.feeds.add_flock_member(user_id=1, flock_id=flock.id, bird_group_id=group.id)
+        estimate = self.service.add_purchase(
+            user_id=1,
+            name="Смесь для кур",
+            kind="finished_mix",
+            amount_kg=50,
+        )
+        self.service.assign_flock_feed(
+            user_id=1,
+            flock_id=flock.id,
+            stock_item_id=estimate.item.id,
+            share_percent=100,
+        )
+
+        self.assertGreater(self.service.estimate_item(estimate.item).daily_usage_kg, 0)
+
+        self.feeds.archive_flock(flock.id, 1)
+
+        self.assertEqual(self.service.estimate_item(estimate.item).daily_usage_kg, 0)
+
+    def test_flock_feed_share_cannot_exceed_full_ration(self) -> None:
+        group = self.feeds.create_bird_group(
+            user_id=1,
+            name="Несушки",
+            bird_count=10,
+            species="chicken",
+            role="hens",
+        )
+        flock = self.feeds.create_flock(user_id=1, name="Основное стадо")
+        self.feeds.add_flock_member(user_id=1, flock_id=flock.id, bird_group_id=group.id)
+        first = self.service.add_purchase(
+            user_id=1,
+            name="Смесь 1",
+            kind="finished_mix",
+            amount_kg=50,
+        )
+        second = self.service.add_purchase(
+            user_id=1,
+            name="Смесь 2",
+            kind="finished_mix",
+            amount_kg=50,
+        )
+
+        self.service.assign_flock_feed(
+            user_id=1,
+            flock_id=flock.id,
+            stock_item_id=first.item.id,
+            share_percent=70,
+        )
+
+        with self.assertRaises(ValueError):
+            self.service.assign_flock_feed(
+                user_id=1,
+                flock_id=flock.id,
+                stock_item_id=second.item.id,
+                share_percent=40,
+            )
+
+    def test_flock_assignment_replaces_direct_group_assignment(self) -> None:
+        group = self.feeds.create_bird_group(
+            user_id=1,
+            name="Несушки",
+            bird_count=10,
+            species="chicken",
+            role="hens",
+        )
+        direct = self.service.add_purchase(
+            user_id=1,
+            name="Прямой корм",
+            kind="finished_mix",
+            amount_kg=50,
+        )
+        flock_feed = self.service.add_purchase(
+            user_id=1,
+            name="Общий корм стада",
+            kind="finished_mix",
+            amount_kg=50,
+        )
+        self.service.assign_feed(
+            user_id=1,
+            bird_group_id=group.id,
+            stock_item_id=direct.item.id,
+            daily_per_bird_g=120,
+        )
+        flock = self.feeds.create_flock(user_id=1, name="Основное стадо")
+        self.feeds.add_flock_member(user_id=1, flock_id=flock.id, bird_group_id=group.id)
+
+        self.service.assign_flock_feed(
+            user_id=1,
+            flock_id=flock.id,
+            stock_item_id=flock_feed.item.id,
+            share_percent=100,
+        )
+
+        self.assertEqual(self.service.estimate_item(direct.item).daily_usage_kg, 0)
+        self.assertGreater(self.service.estimate_item(flock_feed.item).daily_usage_kg, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

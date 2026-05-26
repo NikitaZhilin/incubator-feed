@@ -90,8 +90,37 @@ class BirdGroup:
     created_at: datetime
     updated_at: datetime
     group_kind: str = "adult"
+    role: str = "mixed"
     hatched_at: date | None = None
     joined_at: date | None = None
+    reserve_percent: float = 0.0
+
+
+@dataclass(frozen=True)
+class Flock:
+    id: int
+    user_id: int
+    name: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class FlockMember:
+    id: int
+    user_id: int
+    flock_id: int
+    bird_group_id: int
+    is_active: bool
+    joined_at: datetime
+    left_at: datetime | None = None
+    bird_group_name: str | None = None
+    bird_count: int = 0
+    group_kind: str = "adult"
+    role: str = "mixed"
+    hatched_at: date | None = None
+    group_joined_at: date | None = None
     reserve_percent: float = 0.0
 
 
@@ -180,12 +209,46 @@ class FeedingAssignment:
 
 
 @dataclass(frozen=True)
+class FlockFeedAssignment:
+    id: int
+    user_id: int
+    flock_id: int
+    stock_item_id: int
+    is_active: bool
+    share_percent: float
+    daily_per_hen_g: float
+    daily_per_rooster_g: float
+    daily_per_adult_g: float
+    reserve_percent: float
+    started_at: datetime
+    ended_at: datetime | None = None
+    flock_name: str | None = None
+    stock_item_name: str | None = None
+
+
+@dataclass(frozen=True)
 class StockEstimate:
     item: StockItem
     remaining_kg: float
     daily_usage_kg: float
     days_left: int | None
     last_transaction_at: datetime | None
+
+
+@dataclass(frozen=True)
+class FlockFeedUsage:
+    assignment: FlockFeedAssignment
+    daily_usage_kg: float
+    remaining_kg: float
+    days_left: int | None
+
+
+@dataclass(frozen=True)
+class FlockReport:
+    flock: Flock
+    members: tuple[FlockMember, ...]
+    assignments: tuple[FlockFeedUsage, ...]
+    daily_usage_kg: float
 
 
 def content_path() -> Path:

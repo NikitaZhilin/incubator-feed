@@ -13,6 +13,7 @@ def feeds_menu_keyboard(feed_buttons: list[tuple[int, str]] | None = None) -> In
     )
     rows.append([InlineKeyboardButton(text="📦 Склад", callback_data="stock:menu")])
     rows.append([InlineKeyboardButton(text="🐔 Поголовье", callback_data="feeds:groups")])
+    rows.append([InlineKeyboardButton(text="📊 Расчеты", callback_data="feeds:stats")])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -120,14 +121,71 @@ def bird_group_select_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def bird_groups_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+def bird_groups_keyboard(groups=None) -> InlineKeyboardMarkup:
+    rows = []
+    for group in groups or []:
+        rows.append([InlineKeyboardButton(text=f"🐔 {group.name[:30]}", callback_data=f"feeds:group_view:{group.id}")])
+    rows.extend(
+        [
             [InlineKeyboardButton(text="➕ Создать поголовье", callback_data="feeds:group_add")],
+            [InlineKeyboardButton(text="🐔 Стада", callback_data="feeds:flocks")],
             [InlineKeyboardButton(text="⬅️ К кормам", callback_data="feeds:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
     )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def bird_group_actions_keyboard(group_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✏️ Название", callback_data=f"feeds:group_edit:{group_id}:name"),
+                InlineKeyboardButton(text="🔢 Количество", callback_data=f"feeds:group_edit:{group_id}:count"),
+            ],
+            [InlineKeyboardButton(text="🗑 Архивировать", callback_data=f"feeds:group_archive:{group_id}")],
+            [InlineKeyboardButton(text="⬅️ К поголовью", callback_data="feeds:groups")],
+        ]
+    )
+
+
+def flocks_keyboard(flocks=None) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"🐔 {flock.name[:30]}", callback_data=f"feeds:flock_view:{flock.id}")]
+        for flock in flocks or []
+    ]
+    rows.extend(
+        [
+            [InlineKeyboardButton(text="➕ Создать стадо", callback_data="feeds:flock_add")],
+            [InlineKeyboardButton(text="⬅️ К поголовью", callback_data="feeds:groups")],
+            [InlineKeyboardButton(text="🌾 К кормам", callback_data="feeds:menu")],
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def flock_actions_keyboard(flock_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="👥 Изменить состав", callback_data=f"feeds:flock_members:{flock_id}")],
+            [InlineKeyboardButton(text="🍽 Назначить корм", callback_data=f"feeds:flock_assign:{flock_id}")],
+            [InlineKeyboardButton(text="🗑 Архивировать", callback_data=f"feeds:flock_archive:{flock_id}")],
+            [InlineKeyboardButton(text="⬅️ К стадам", callback_data="feeds:flocks")],
+        ]
+    )
+
+
+def flock_member_select_keyboard(groups, selected_ids: set[int], *, flock_id: int | None = None) -> InlineKeyboardMarkup:
+    rows = []
+    for group in groups:
+        mark = "✅" if group.id in selected_ids else "⬜"
+        prefix = "feeds:flock_member_toggle" if flock_id is not None else "feeds:flock_new_toggle"
+        callback = f"{prefix}:{flock_id}:{group.id}" if flock_id is not None else f"{prefix}:{group.id}"
+        rows.append([InlineKeyboardButton(text=f"{mark} {group.name[:28]}", callback_data=callback)])
+    done_callback = f"feeds:flock_members_done:{flock_id}" if flock_id is not None else "feeds:flock_new_done"
+    rows.append([InlineKeyboardButton(text="Готово", callback_data=done_callback)])
+    rows.append([InlineKeyboardButton(text="Отмена", callback_data="feeds:flocks")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def stock_menu_keyboard() -> InlineKeyboardMarkup:

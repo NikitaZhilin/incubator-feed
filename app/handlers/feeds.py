@@ -4,12 +4,14 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import StateFilter
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from datetime import date, timedelta
 from math import isfinite
 
 from app.domain import FeedEstimate
 from app.domain import PROFILES
 from app.keyboards.feeds import (
     bird_group_select_keyboard,
+    bird_group_actions_keyboard,
     bird_groups_keyboard,
     feed_actions_keyboard,
     feed_cancel_keyboard,
@@ -17,6 +19,9 @@ from app.keyboards.feeds import (
     feed_edit_keyboard,
     feed_rate_keyboard,
     feeds_menu_keyboard,
+    flock_actions_keyboard,
+    flock_member_select_keyboard,
+    flocks_keyboard,
     stock_assign_groups_keyboard,
     stock_cancel_keyboard,
     stock_confirm_mix_keyboard,
@@ -96,6 +101,20 @@ class StockAdjustFlow(StatesGroup):
     amount = State()
 
 
+class EditBirdGroupFlow(StatesGroup):
+    value = State()
+
+
+class FlockFlow(StatesGroup):
+    name = State()
+    members = State()
+
+
+class FlockAssignFlow(StatesGroup):
+    item = State()
+    share = State()
+
+
 FEED_FLOW_STATES = (
     NewFeed.name,
     NewFeed.group,
@@ -127,6 +146,11 @@ FEED_FLOW_STATES = (
     StockAssignFlow.rate,
     StockAdjustFlow.item,
     StockAdjustFlow.amount,
+    EditBirdGroupFlow.value,
+    FlockFlow.name,
+    FlockFlow.members,
+    FlockAssignFlow.item,
+    FlockAssignFlow.share,
 )
 
 
@@ -207,7 +231,7 @@ async def bird_groups_menu(callback: CallbackQuery, state: FSMContext, feed_serv
             else:
                 lines.append(f"- #{group.id} {group.name}: {group.bird_count} птиц{species}")
         text = "\n".join(lines)
-    await callback.message.answer(text, reply_markup=bird_groups_keyboard())
+    await callback.message.answer(text, reply_markup=bird_groups_keyboard(groups))
     await callback.answer()
 
 
@@ -243,7 +267,9 @@ async def bird_group_name(
         "Что это за поголовье?",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="Куры и петухи", callback_data="feeds:group_kind:adult")],
+                [InlineKeyboardButton(text="Куры/несушки", callback_data="feeds:group_kind:hens")],
+                [InlineKeyboardButton(text="Петухи", callback_data="feeds:group_kind:roosters")],
+                [InlineKeyboardButton(text="Смешанная взрослая группа", callback_data="feeds:group_kind:adult")],
                 [InlineKeyboardButton(text="Цыплята", callback_data="feeds:group_kind:chicks")],
                 [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")],
             ]
@@ -253,8 +279,10 @@ async def bird_group_name(
 
 @router.callback_query(BirdGroupFlow.kind, F.data.startswith("feeds:group_kind:"))
 async def bird_group_kind(callback: CallbackQuery, state: FSMContext) -> None:
-    group_kind = str(callback.data).split(":", 2)[2]
-    await state.update_data(group_kind=group_kind)
+    selected = str(callback.data).split(":", 2)[2]
+    group_kind = "chicks" if selected == "chicks" else "adult"
+    role = selected if selected in {"hens", "roosters", "chicks"} else "mixed"
+    await state.update_data(group_kind=group_kind, role=role)
     await state.set_state(BirdGroupFlow.count)
     if group_kind == "chicks":
         await callback.message.answer("Сколько цыплят? Введите число.", reply_markup=feed_cancel_keyboard())
@@ -355,6 +383,7 @@ async def bird_group_joined_date(
             bird_count=int(data["bird_count"]),
             species="chicken",
             group_kind="chicks",
+            role="chicks",
             hatched_at=data["hatched_at"],
             joined_at=joined_at,
             reserve_percent=10,
@@ -368,7 +397,7 @@ async def bird_group_joined_date(
         f"Поголовье создано: #{group.id} {group.name}, {group.bird_count} цыплят.\n"
         f"Вывод: {group.hatched_at.isoformat() if group.hatched_at else '-'}, подсадка: {joined_text}.\n"
         "Расход корма будет считаться по возрасту цыплят с запасом 10%.",
-        reply_markup=bird_groups_keyboard(),
+        reply_markup=bird_groups_keyboard(feed_service.list_bird_groups(message.from_user.id)),
     )
 
 
@@ -382,11 +411,215 @@ async def bird_group_species(callback: CallbackQuery, state: FSMContext, feed_se
         bird_count=int(data["bird_count"]),
         species=None if species == "none" else species,
         group_kind="adult",
+        role=str(data.get("role") or "mixed"),
     )
     await state.clear()
     await callback.message.answer(
         f"Поголовье создано: #{group.id} {group.name}, {group.bird_count} птиц.",
-        reply_markup=bird_groups_keyboard(),
+        reply_markup=bird_groups_keyboard(feed_service.list_bird_groups(callback.from_user.id)),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("feeds:group_view:"))
+async def bird_group_view(callback: CallbackQuery, feed_service: FeedService) -> None:
+    group_id = int(str(callback.data).rsplit(":", 1)[1])
+    group = feed_service.get_bird_group(group_id, callback.from_user.id)
+    if group is None:
+        await callback.message.answer("Поголовье не найдено.", reply_markup=bird_groups_keyboard())
+    else:
+        await callback.message.answer(_format_bird_group(group), reply_markup=bird_group_actions_keyboard(group.id))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("feeds:group_edit:"))
+async def bird_group_edit(callback: CallbackQuery, state: FSMContext) -> None:
+    _, _, group_id_text, field = str(callback.data).split(":", 3)
+    await state.clear()
+    await state.update_data(group_id=int(group_id_text), field=field)
+    await state.set_state(EditBirdGroupFlow.value)
+    prompt = "Введите новое название поголовья." if field == "name" else "Введите новое количество птиц."
+    await callback.message.answer(prompt, reply_markup=feed_cancel_keyboard())
+    await callback.answer()
+
+
+@router.message(EditBirdGroupFlow.value)
+async def bird_group_edit_value(message: Message, state: FSMContext, feed_service: FeedService) -> None:
+    data = await state.get_data()
+    field = str(data["field"])
+    value = (message.text or "").strip()
+    kwargs = {}
+    if field == "name":
+        kwargs["name"] = value
+    else:
+        if not value.isdigit() or int(value) <= 0:
+            await message.answer("Введите количество птиц числом больше нуля.")
+            return
+        kwargs["bird_count"] = int(value)
+    try:
+        group = feed_service.update_bird_group(
+            group_id=int(data["group_id"]),
+            user_id=message.from_user.id,
+            **kwargs,
+        )
+    except ValueError as exc:
+        await message.answer(str(exc))
+        return
+    await state.clear()
+    if group is None:
+        await message.answer("Поголовье не найдено.", reply_markup=bird_groups_keyboard())
+    else:
+        await message.answer("Поголовье обновлено.\n\n" + _format_bird_group(group), reply_markup=bird_group_actions_keyboard(group.id))
+
+
+@router.callback_query(F.data.startswith("feeds:group_archive:"))
+async def bird_group_archive(callback: CallbackQuery, feed_service: FeedService) -> None:
+    group_id = int(str(callback.data).rsplit(":", 1)[1])
+    deleted = feed_service.archive_bird_group(group_id, callback.from_user.id)
+    groups = feed_service.list_bird_groups(callback.from_user.id)
+    await callback.message.answer(
+        "Поголовье архивировано." if deleted else "Поголовье не найдено.",
+        reply_markup=bird_groups_keyboard(groups),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "feeds:flocks")
+async def flocks_menu(callback: CallbackQuery, state: FSMContext, feed_service: FeedService) -> None:
+    await state.clear()
+    flocks = feed_service.list_flocks(callback.from_user.id)
+    text = "🐔 Стада\n\n"
+    text += "Стад пока нет." if not flocks else "\n".join(f"- #{flock.id} {flock.name}" for flock in flocks)
+    await callback.message.answer(text, reply_markup=flocks_keyboard(flocks))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "feeds:flock_add")
+async def flock_add(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await state.set_state(FlockFlow.name)
+    await callback.message.answer("Введите название стада, например Основное стадо.", reply_markup=feed_cancel_keyboard())
+    await callback.answer()
+
+
+@router.message(FlockFlow.name)
+async def flock_name(message: Message, state: FSMContext, feed_service: FeedService) -> None:
+    name = (message.text or "").strip()
+    if len(name) < 2:
+        await message.answer("Введите название стада минимум из двух символов.")
+        return
+    groups = feed_service.list_bird_groups(message.from_user.id)
+    if not groups:
+        await state.clear()
+        await message.answer("Сначала добавьте поголовье, затем создайте стадо.", reply_markup=bird_groups_keyboard(groups))
+        return
+    await state.update_data(name=name, selected_group_ids=[])
+    await state.set_state(FlockFlow.members)
+    await message.answer(
+        "Выберите группы, которые входят в стадо.",
+        reply_markup=flock_member_select_keyboard(groups, set()),
+    )
+
+
+@router.callback_query(FlockFlow.members, F.data.startswith("feeds:flock_new_toggle:"))
+async def flock_new_toggle(callback: CallbackQuery, state: FSMContext, feed_service: FeedService) -> None:
+    group_id = int(str(callback.data).rsplit(":", 1)[1])
+    data = await state.get_data()
+    selected = set(int(item) for item in data.get("selected_group_ids", []))
+    if group_id in selected:
+        selected.remove(group_id)
+    else:
+        selected.add(group_id)
+    await state.update_data(selected_group_ids=sorted(selected))
+    groups = feed_service.list_bird_groups(callback.from_user.id)
+    await callback.message.answer(
+        "Выберите группы, которые входят в стадо.",
+        reply_markup=flock_member_select_keyboard(groups, selected),
+    )
+    await callback.answer()
+
+
+@router.callback_query(FlockFlow.members, F.data == "feeds:flock_new_done")
+async def flock_new_done(callback: CallbackQuery, state: FSMContext, feed_service: FeedService) -> None:
+    data = await state.get_data()
+    selected = [int(item) for item in data.get("selected_group_ids", [])]
+    if not selected:
+        await callback.answer("Выберите хотя бы одну группу", show_alert=True)
+        return
+    try:
+        flock = feed_service.create_flock(
+            user_id=callback.from_user.id,
+            name=str(data["name"]),
+            member_group_ids=selected,
+        )
+    except ValueError as exc:
+        await callback.message.answer(str(exc), reply_markup=flocks_keyboard(feed_service.list_flocks(callback.from_user.id)))
+        await callback.answer()
+        return
+    await state.clear()
+    await _send_flock_detail(callback.message, callback.from_user.id, flock.id, feed_service)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("feeds:flock_view:"))
+async def flock_view(callback: CallbackQuery, state: FSMContext, feed_service: FeedService) -> None:
+    await state.clear()
+    flock_id = int(str(callback.data).rsplit(":", 1)[1])
+    await _send_flock_detail(callback.message, callback.from_user.id, flock_id, feed_service)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("feeds:flock_members:"))
+async def flock_members_edit(callback: CallbackQuery, state: FSMContext, feed_service: FeedService) -> None:
+    flock_id = int(str(callback.data).rsplit(":", 1)[1])
+    await state.clear()
+    groups = feed_service.list_bird_groups(callback.from_user.id)
+    selected = {member.bird_group_id for member in feed_service.list_flock_members(flock_id, callback.from_user.id)}
+    await callback.message.answer(
+        "Выберите состав стада.",
+        reply_markup=flock_member_select_keyboard(groups, selected, flock_id=flock_id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("feeds:flock_member_toggle:"))
+async def flock_member_toggle(callback: CallbackQuery, feed_service: FeedService) -> None:
+    _, flock_id_text, group_id_text = str(callback.data).rsplit(":", 2)
+    flock_id = int(flock_id_text)
+    group_id = int(group_id_text)
+    selected = {member.bird_group_id for member in feed_service.list_flock_members(flock_id, callback.from_user.id)}
+    if group_id in selected:
+        feed_service.remove_flock_member(user_id=callback.from_user.id, flock_id=flock_id, bird_group_id=group_id)
+    else:
+        try:
+            feed_service.add_flock_member(user_id=callback.from_user.id, flock_id=flock_id, bird_group_id=group_id)
+        except ValueError as exc:
+            await callback.answer(str(exc), show_alert=True)
+            return
+    groups = feed_service.list_bird_groups(callback.from_user.id)
+    selected = {member.bird_group_id for member in feed_service.list_flock_members(flock_id, callback.from_user.id)}
+    await callback.message.answer(
+        "Выберите состав стада.",
+        reply_markup=flock_member_select_keyboard(groups, selected, flock_id=flock_id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("feeds:flock_members_done:"))
+async def flock_members_done(callback: CallbackQuery, feed_service: FeedService) -> None:
+    flock_id = int(str(callback.data).rsplit(":", 1)[1])
+    await _send_flock_detail(callback.message, callback.from_user.id, flock_id, feed_service)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("feeds:flock_archive:"))
+async def flock_archive(callback: CallbackQuery, feed_service: FeedService) -> None:
+    flock_id = int(str(callback.data).rsplit(":", 1)[1])
+    deleted = feed_service.archive_flock(flock_id, callback.from_user.id)
+    flocks = feed_service.list_flocks(callback.from_user.id)
+    await callback.message.answer(
+        "Стадо архивировано." if deleted else "Стадо не найдено.",
+        reply_markup=flocks_keyboard(flocks),
     )
     await callback.answer()
 
@@ -771,6 +1004,80 @@ async def stock_adjust_amount(message: Message, state: FSMContext, stock_service
         "Фактический остаток обновлен.\n\n" + _format_stock_estimate(estimate),
         reply_markup=stock_menu_keyboard(),
     )
+
+
+@router.callback_query(F.data.startswith("feeds:flock_assign:"))
+async def flock_assign_start(callback: CallbackQuery, state: FSMContext, stock_service: StockService) -> None:
+    flock_id = int(str(callback.data).rsplit(":", 1)[1])
+    await state.clear()
+    items = stock_service.stock.list_items(callback.from_user.id)
+    if not items:
+        await callback.message.answer("На складе пока нет позиций. Сначала добавьте корм или смесь.", reply_markup=stock_menu_keyboard())
+        await callback.answer()
+        return
+    await state.update_data(flock_id=flock_id)
+    await state.set_state(FlockAssignFlow.item)
+    await callback.message.answer(
+        "Выберите корм или смесь для стада.",
+        reply_markup=stock_items_keyboard(
+            items,
+            prefix="feeds:flock_assign_item",
+            back_callback=f"feeds:flock_view:{flock_id}",
+            back_text="⬅️ К стаду",
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(FlockAssignFlow.item, F.data.startswith("feeds:flock_assign_item:"))
+async def flock_assign_item(callback: CallbackQuery, state: FSMContext) -> None:
+    item_id = int(str(callback.data).rsplit(":", 1)[1])
+    await state.update_data(stock_item_id=item_id)
+    data = await state.get_data()
+    flock_id = int(data["flock_id"])
+    await state.set_state(FlockAssignFlow.share)
+    await callback.message.answer(
+        "Какую долю рациона занимает этот корм? Введите процент, например 100 или 50.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ К стаду", callback_data=f"feeds:flock_view:{flock_id}")],
+                [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")],
+            ]
+        ),
+    )
+    await callback.answer()
+
+
+@router.message(FlockAssignFlow.share)
+async def flock_assign_share(message: Message, state: FSMContext, stock_service: StockService) -> None:
+    try:
+        share = _parse_float(message.text)
+    except ValueError:
+        await message.answer("Введите процент числом, например 100 или 50.")
+        return
+    data = await state.get_data()
+    try:
+        assignment = stock_service.assign_flock_feed(
+            user_id=message.from_user.id,
+            flock_id=int(data["flock_id"]),
+            stock_item_id=int(data["stock_item_id"]),
+            share_percent=share,
+        )
+    except ValueError as exc:
+        await message.answer(str(exc))
+        return
+    await state.clear()
+    await message.answer(
+        f"Рацион стада задан: {assignment.flock_name} -> {assignment.stock_item_name}, {share:g}%.",
+        reply_markup=flock_actions_keyboard(assignment.flock_id),
+    )
+
+
+@router.callback_query(F.data == "feeds:stats")
+async def feed_stats(callback: CallbackQuery, stock_service: StockService) -> None:
+    reports = stock_service.list_flock_reports(callback.from_user.id)
+    await callback.message.answer(_format_flock_reports(reports), reply_markup=feeds_menu_keyboard())
+    await callback.answer()
 
 
 @router.callback_query(F.data == "feeds:mix")
@@ -1534,6 +1841,96 @@ async def _answer_mix_dashboard(message: Message, user_id: int, stock_service: S
             int(selected_plan.max_mix_count),
         ),
     )
+
+
+async def _send_flock_detail(message: Message, user_id: int, flock_id: int, feed_service: FeedService) -> None:
+    flock = feed_service.get_flock(flock_id, user_id)
+    if flock is None:
+        await message.answer("Стадо не найдено.", reply_markup=flocks_keyboard(feed_service.list_flocks(user_id)))
+        return
+    members = feed_service.list_flock_members(flock_id, user_id)
+    await message.answer(_format_flock(flock, members), reply_markup=flock_actions_keyboard(flock.id))
+
+
+def _format_bird_group(group) -> str:
+    role_labels = {
+        "hens": "куры/несушки",
+        "roosters": "петухи",
+        "chicks": "цыплята",
+        "mixed": "смешанная взрослая группа",
+    }
+    lines = [
+        f"🐔 {group.name}",
+        f"Количество: {group.bird_count}",
+        f"Тип: {role_labels.get(group.role, group.role)}",
+    ]
+    if group.hatched_at:
+        lines.append(f"Дата вывода: {group.hatched_at.isoformat()}")
+    if group.joined_at:
+        lines.append(f"Дата подсадки: {group.joined_at.isoformat()}")
+    return "\n".join(lines)
+
+
+def _format_flock(flock, members) -> str:
+    lines = [f"🐔 Стадо: {flock.name}", ""]
+    if not members:
+        lines.append("Состав пока пустой.")
+    else:
+        lines.append("Состав:")
+        for member in members:
+            role = {
+                "hens": "куры/несушки",
+                "roosters": "петухи",
+                "chicks": "цыплята",
+                "mixed": "смешанная группа",
+            }.get(member.role, member.role)
+            suffix = ""
+            if member.group_joined_at:
+                suffix = f", подсадка {member.group_joined_at.isoformat()}"
+            lines.append(f"- {member.bird_group_name}: {member.bird_count} ({role}{suffix})")
+    return "\n".join(lines)
+
+
+def _format_flock_reports(reports) -> str:
+    if not reports:
+        return (
+            "📊 Расчеты\n\n"
+            "Стад пока нет. Создайте поголовье, объедините его в стадо и назначьте корм со склада."
+        )
+    lines = ["📊 Расчеты по стадам"]
+    for report in reports:
+        lines.extend(["", report.flock.name])
+        if report.members:
+            lines.append("Состав:")
+            for member in report.members:
+                role = {
+                    "hens": "куры",
+                    "roosters": "петухи",
+                    "chicks": "цыплята",
+                    "mixed": "птицы",
+                }.get(member.role, "птицы")
+                lines.append(f"- {role}: {member.bird_count}")
+        else:
+            lines.append("Состав не задан.")
+        if not report.assignments:
+            lines.append("Рацион не задан.")
+            continue
+        lines.append(f"Расход: примерно {report.daily_usage_kg:.2f} кг/день")
+        for usage in report.assignments:
+            assignment = usage.assignment
+            days = "неизвестно" if usage.days_left is None else f"{usage.days_left} дн."
+            purchase_hint = ""
+            if usage.days_left is not None:
+                purchase_date = date.today() + timedelta(days=usage.days_left)
+                purchase_hint = f", докупить примерно к {purchase_date.isoformat()}"
+            suggested_kg = max(usage.daily_usage_kg * 30, 1)
+            lines.append(
+                f"- {assignment.stock_item_name}: {usage.daily_usage_kg:.2f} кг/день, "
+                f"остаток {usage.remaining_kg:.1f} кг, хватит на {days}{purchase_hint}"
+            )
+            if usage.daily_usage_kg > 0:
+                lines.append(f"  Докупить: около {suggested_kg:.1f} кг на 30 дней.")
+    return "\n".join(lines)
 
 
 def _format_feed_stock_summary(stock_estimates, plan) -> str:

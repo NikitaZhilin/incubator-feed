@@ -1,7 +1,7 @@
 from datetime import datetime, time, timedelta, timezone
 from math import floor, isfinite
 
-from app.domain import BirdGroup, FeedEstimate, FeedStock, FeedTransaction
+from app.domain import BirdGroup, FeedEstimate, FeedStock, FeedTransaction, Flock, FlockMember
 from app.storage.repositories.feeds import FeedRepository
 from app.storage.repositories.analytics import AnalyticsRepository
 
@@ -265,6 +265,7 @@ class FeedService:
         bird_count: int,
         species: str | None = None,
         group_kind: str = "adult",
+        role: str | None = None,
         hatched_at=None,
         joined_at=None,
         reserve_percent: float = 0.0,
@@ -276,6 +277,11 @@ class FeedService:
             raise ValueError("Количество птиц должно быть больше нуля.")
         if group_kind not in {"adult", "chicks"}:
             raise ValueError("Неизвестный тип поголовья.")
+        clean_role = role or ("chicks" if group_kind == "chicks" else "mixed")
+        if clean_role not in {"hens", "roosters", "chicks", "mixed"}:
+            raise ValueError("Неизвестная роль поголовья.")
+        if group_kind == "chicks":
+            clean_role = "chicks"
         if group_kind == "chicks" and hatched_at is None:
             raise ValueError("Для цыплят нужна дата вывода.")
         if joined_at is not None and hatched_at is not None and joined_at < hatched_at:
@@ -288,6 +294,7 @@ class FeedService:
             bird_count=bird_count,
             species=species,
             group_kind=group_kind,
+            role=clean_role,
             hatched_at=hatched_at,
             joined_at=joined_at,
             reserve_percent=reserve_percent,
@@ -298,6 +305,74 @@ class FeedService:
 
     def get_bird_group(self, group_id: int, user_id: int) -> BirdGroup | None:
         return self.feeds.get_bird_group(group_id, user_id)
+
+    def update_bird_group(
+        self,
+        *,
+        group_id: int,
+        user_id: int,
+        name: str | None = None,
+        bird_count: int | None = None,
+    ) -> BirdGroup | None:
+        if name is not None:
+            name = name.strip()[:255]
+            if not name:
+                raise ValueError("Название поголовья не может быть пустым.")
+        if bird_count is not None and bird_count <= 0:
+            raise ValueError("Количество птиц должно быть больше нуля.")
+        return self.feeds.update_bird_group(
+            group_id=group_id,
+            user_id=user_id,
+            name=name,
+            bird_count=bird_count,
+        )
+
+    def archive_bird_group(self, group_id: int, user_id: int) -> bool:
+        return self.feeds.archive_bird_group(group_id, user_id)
+
+    def create_flock(self, *, user_id: int, name: str, member_group_ids: list[int]) -> Flock:
+        clean_name = name.strip()[:255]
+        if not clean_name:
+            raise ValueError("Название стада не может быть пустым.")
+        if not member_group_ids:
+            raise ValueError("В стаде должна быть хотя бы одна группа поголовья.")
+        for group_id in member_group_ids:
+            group = self.feeds.get_bird_group(group_id, user_id)
+            if group is None or not group.is_active:
+                raise ValueError("Поголовье для стада не найдено.")
+        flock = self.feeds.create_flock(user_id=user_id, name=clean_name)
+        for group_id in member_group_ids:
+            self.add_flock_member(user_id=user_id, flock_id=flock.id, bird_group_id=group_id)
+        return flock
+
+    def list_flocks(self, user_id: int) -> list[Flock]:
+        return self.feeds.list_flocks(user_id)
+
+    def get_flock(self, flock_id: int, user_id: int) -> Flock | None:
+        return self.feeds.get_flock(flock_id, user_id)
+
+    def archive_flock(self, flock_id: int, user_id: int) -> bool:
+        return self.feeds.archive_flock(flock_id, user_id)
+
+    def add_flock_member(self, *, user_id: int, flock_id: int, bird_group_id: int) -> FlockMember:
+        member = self.feeds.add_flock_member(
+            user_id=user_id,
+            flock_id=flock_id,
+            bird_group_id=bird_group_id,
+        )
+        if member is None:
+            raise ValueError("Стадо или поголовье не найдено.")
+        return member
+
+    def remove_flock_member(self, *, user_id: int, flock_id: int, bird_group_id: int) -> bool:
+        return self.feeds.remove_flock_member(
+            user_id=user_id,
+            flock_id=flock_id,
+            bird_group_id=bird_group_id,
+        )
+
+    def list_flock_members(self, flock_id: int, user_id: int) -> list[FlockMember]:
+        return self.feeds.list_flock_members(flock_id, user_id)
 
     def _track(self, event_name: str, *, user_id: int, feed_id: int) -> None:
         if self.analytics is not None:

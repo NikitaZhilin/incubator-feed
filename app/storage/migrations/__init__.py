@@ -15,6 +15,7 @@ MIGRATIONS = (
     "007_feed_gender_counts",
     "008_bird_group_lifecycle",
     "009_stock_warehouse",
+    "010_flocks",
 )
 
 
