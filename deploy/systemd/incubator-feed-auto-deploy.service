@@ -1,0 +1,13 @@
+[Unit]
+Description=Incubator Feed auto deploy
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/incubator-feed
+Environment=DEPLOY_PATH=/opt/incubator-feed
+Environment=BRANCH=main
+Environment=IMAGE_NAME=incubator-feed:latest
+Environment=CONTAINER_NAME=incubator-feed-bot
+ExecStart=/opt/incubator-feed/scripts/server-auto-deploy.sh

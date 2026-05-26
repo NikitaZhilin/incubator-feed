@@ -122,3 +122,28 @@ The VPS must have:
 - Docker.
 
 Runtime state is stored on the VPS in `data/`, `logs/`, and `backups/`.
+
+## VPS auto deploy fallback
+
+GitHub Actions remains the primary deployment path. If pushes from a local
+tooling environment do not trigger Actions, the VPS can also poll `origin/main`
+and deploy only when a new commit appears.
+
+Install the fallback timer on the VPS after the project has been cloned to
+`/opt/incubator-feed`:
+
+```bash
+cd /opt/incubator-feed
+chmod +x scripts/server-auto-deploy.sh
+cp deploy/systemd/incubator-feed-auto-deploy.service /etc/systemd/system/
+cp deploy/systemd/incubator-feed-auto-deploy.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now incubator-feed-auto-deploy.timer
+```
+
+Check it with:
+
+```bash
+systemctl list-timers incubator-feed-auto-deploy.timer
+journalctl -u incubator-feed-auto-deploy.service -n 100 --no-pager
+```

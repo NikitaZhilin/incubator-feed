@@ -1,0 +1,11 @@
+[Unit]
+Description=Check GitHub for Incubator Feed updates
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=30s
+Unit=incubator-feed-auto-deploy.service
+
+[Install]
+WantedBy=timers.target
