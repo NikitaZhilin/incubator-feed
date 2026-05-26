@@ -390,6 +390,31 @@ class StockServiceTest(unittest.TestCase):
         self.assertEqual(self.service.estimate_item(direct.item).daily_usage_kg, 0)
         self.assertGreater(self.service.estimate_item(flock_feed.item).daily_usage_kg, 0)
 
+    def test_flock_assignment_accepts_only_finished_mix(self) -> None:
+        group = self.feeds.create_bird_group(
+            user_id=1,
+            name="Несушки",
+            bird_count=10,
+            species="chicken",
+            role="hens",
+        )
+        flock = self.feeds.create_flock(user_id=1, name="Основное стадо")
+        self.feeds.add_flock_member(user_id=1, flock_id=flock.id, bird_group_id=group.id)
+        ingredient = self.service.add_purchase(
+            user_id=1,
+            name="Кукуруза",
+            kind="ingredient",
+            amount_kg=50,
+        )
+
+        with self.assertRaises(ValueError):
+            self.service.assign_flock_feed(
+                user_id=1,
+                flock_id=flock.id,
+                stock_item_id=ingredient.item.id,
+                share_percent=100,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

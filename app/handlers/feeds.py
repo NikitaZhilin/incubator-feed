@@ -211,8 +211,8 @@ async def bird_groups_menu(callback: CallbackQuery, state: FSMContext, feed_serv
     if not groups:
         text = (
             "Поголовье пока не задано.\n\n"
-            "Можно добавить основное стадо или цыплят. Потом корм привязывается к поголовью, "
-            "и расход считается понятнее."
+            "Добавьте отдельные группы птиц: несушки, петухи, цыплята. "
+            "Потом из них можно собрать стадо в отдельном разделе."
         )
     else:
         lines = ["Поголовье:"]
@@ -240,7 +240,7 @@ async def bird_group_add(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await state.set_state(BirdGroupFlow.name)
     await callback.message.answer(
-        "Введите название поголовья, например Основное стадо или Цыплята май.",
+        "Введите название поголовья, например Несушки, Петухи или Цыплята май.",
         reply_markup=feed_cancel_keyboard(),
     )
     await callback.answer()
@@ -288,7 +288,7 @@ async def bird_group_kind(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.message.answer("Сколько цыплят? Введите число.", reply_markup=feed_cancel_keyboard())
     else:
         await callback.message.answer(
-            "Сколько всего птиц в основном стаде? Куры и петухи считаются вместе.",
+            "Сколько птиц в этой группе? Введите число.",
             reply_markup=feed_cancel_keyboard(),
         )
     await callback.answer()
@@ -489,7 +489,11 @@ async def flocks_menu(callback: CallbackQuery, state: FSMContext, feed_service: 
     await state.clear()
     flocks = feed_service.list_flocks(callback.from_user.id)
     text = "🐔 Стада\n\n"
-    text += "Стад пока нет." if not flocks else "\n".join(f"- #{flock.id} {flock.name}" for flock in flocks)
+    text += (
+        "Стад пока нет. Создайте стадо из уже добавленного поголовья."
+        if not flocks
+        else "\n".join(f"- #{flock.id} {flock.name}" for flock in flocks)
+    )
     await callback.message.answer(text, reply_markup=flocks_keyboard(flocks))
     await callback.answer()
 
@@ -1010,15 +1014,23 @@ async def stock_adjust_amount(message: Message, state: FSMContext, stock_service
 async def flock_assign_start(callback: CallbackQuery, state: FSMContext, stock_service: StockService) -> None:
     flock_id = int(str(callback.data).rsplit(":", 1)[1])
     await state.clear()
-    items = stock_service.stock.list_items(callback.from_user.id)
+    items = [
+        item
+        for item in stock_service.stock.list_items(callback.from_user.id)
+        if item.kind == "finished_mix"
+    ]
     if not items:
-        await callback.message.answer("На складе пока нет позиций. Сначала добавьте корм или смесь.", reply_markup=stock_menu_keyboard())
+        await callback.message.answer(
+            "Для стада выбирается готовая смесь со склада.\n\n"
+            "Сейчас готовой смеси нет. Сначала сделайте замес из ингредиентов или добавьте покупку как «Готовая смесь».",
+            reply_markup=stock_menu_keyboard(),
+        )
         await callback.answer()
         return
     await state.update_data(flock_id=flock_id)
     await state.set_state(FlockAssignFlow.item)
     await callback.message.answer(
-        "Выберите корм или смесь для стада.",
+        "Выберите готовую смесь для стада.",
         reply_markup=stock_items_keyboard(
             items,
             prefix="feeds:flock_assign_item",

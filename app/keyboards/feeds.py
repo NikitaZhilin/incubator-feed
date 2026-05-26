@@ -12,7 +12,12 @@ def feeds_menu_keyboard(feed_buttons: list[tuple[int, str]] | None = None) -> In
         ]
     )
     rows.append([InlineKeyboardButton(text="📦 Склад", callback_data="stock:menu")])
-    rows.append([InlineKeyboardButton(text="🐔 Поголовье", callback_data="feeds:groups")])
+    rows.append(
+        [
+            InlineKeyboardButton(text="🐔 Поголовье", callback_data="feeds:groups"),
+            InlineKeyboardButton(text="🐓 Стада", callback_data="feeds:flocks"),
+        ]
+    )
     rows.append([InlineKeyboardButton(text="📊 Расчеты", callback_data="feeds:stats")])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -128,7 +133,6 @@ def bird_groups_keyboard(groups=None) -> InlineKeyboardMarkup:
     rows.extend(
         [
             [InlineKeyboardButton(text="➕ Создать поголовье", callback_data="feeds:group_add")],
-            [InlineKeyboardButton(text="🐔 Стада", callback_data="feeds:flocks")],
             [InlineKeyboardButton(text="⬅️ К кормам", callback_data="feeds:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
@@ -157,7 +161,7 @@ def flocks_keyboard(flocks=None) -> InlineKeyboardMarkup:
     rows.extend(
         [
             [InlineKeyboardButton(text="➕ Создать стадо", callback_data="feeds:flock_add")],
-            [InlineKeyboardButton(text="⬅️ К поголовью", callback_data="feeds:groups")],
+            [InlineKeyboardButton(text="🐔 Поголовье", callback_data="feeds:groups")],
             [InlineKeyboardButton(text="🌾 К кормам", callback_data="feeds:menu")],
         ]
     )
@@ -168,7 +172,7 @@ def flock_actions_keyboard(flock_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="👥 Изменить состав", callback_data=f"feeds:flock_members:{flock_id}")],
-            [InlineKeyboardButton(text="🍽 Назначить корм", callback_data=f"feeds:flock_assign:{flock_id}")],
+            [InlineKeyboardButton(text="🍽 Назначить смесь", callback_data=f"feeds:flock_assign:{flock_id}")],
             [InlineKeyboardButton(text="🗑 Архивировать", callback_data=f"feeds:flock_archive:{flock_id}")],
             [InlineKeyboardButton(text="⬅️ К стадам", callback_data="feeds:flocks")],
         ]

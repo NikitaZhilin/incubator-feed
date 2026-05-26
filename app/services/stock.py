@@ -294,7 +294,8 @@ class StockService:
     ) -> FeedingAssignment:
         if self.feeds.get_bird_group(bird_group_id, user_id) is None:
             raise ValueError("Поголовье не найдено.")
-        if self.stock.get_item(stock_item_id, user_id) is None:
+        stock_item = self.stock.get_item(stock_item_id, user_id)
+        if stock_item is None:
             raise ValueError("Позиция склада не найдена.")
         self._validate_amount(daily_per_bird_g)
         self._validate_amount(reserve_percent, allow_zero=True)
@@ -326,8 +327,11 @@ class StockService:
         flock = self.feeds.get_flock(flock_id, user_id)
         if flock is None or not flock.is_active:
             raise ValueError("Стадо не найдено.")
-        if self.stock.get_item(stock_item_id, user_id) is None:
+        stock_item = self.stock.get_item(stock_item_id, user_id)
+        if stock_item is None:
             raise ValueError("Позиция склада не найдена.")
+        if stock_item.kind != "finished_mix":
+            raise ValueError("Стаду можно назначить только готовую смесь.")
         self._validate_amount(share_percent)
         self._validate_amount(daily_per_hen_g)
         self._validate_amount(daily_per_rooster_g)
