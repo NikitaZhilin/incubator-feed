@@ -188,6 +188,7 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("➕ Создать стадо", _keyboard_texts(livestock_menu_keyboard()))
         self.assertNotIn("🐔 Стада", _keyboard_texts(bird_groups_keyboard()))
         self.assertIn("⬅️ Поголовье и стада", _keyboard_texts(bird_groups_keyboard()))
+        self.assertNotIn("🐔 Поголовье", _keyboard_texts(flocks_keyboard()))
         self.assertIn("⬅️ Поголовье и стада", _keyboard_texts(flocks_keyboard()))
         self.assertIn("🍽 Назначить смесь", _keyboard_texts(flock_actions_keyboard(1)))
 

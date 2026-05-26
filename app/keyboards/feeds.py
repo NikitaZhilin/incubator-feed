@@ -171,7 +171,6 @@ def flocks_keyboard(flocks=None) -> InlineKeyboardMarkup:
     rows.extend(
         [
             [InlineKeyboardButton(text="➕ Создать стадо", callback_data="feeds:flock_add")],
-            [InlineKeyboardButton(text="🐔 Поголовье", callback_data="feeds:groups")],
             [InlineKeyboardButton(text="⬅️ Поголовье и стада", callback_data="feeds:livestock")],
             [InlineKeyboardButton(text="🌾 К кормам", callback_data="feeds:menu")],
         ]
