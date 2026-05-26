@@ -247,6 +247,15 @@ class FlockFeedUsage:
     grain_base_label: str | None = None
     limiting_ingredient_name: str | None = None
     missing_ingredient_names: tuple[str, ...] = ()
+    ingredient_forecasts: tuple["FlockIngredientForecast", ...] = ()
+
+
+@dataclass(frozen=True)
+class FlockIngredientForecast:
+    name: str
+    available_kg: float
+    daily_usage_kg: float
+    days_left: int | None
 
 
 @dataclass(frozen=True)

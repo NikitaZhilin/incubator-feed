@@ -8,6 +8,7 @@ from app.domain import (
     FeedingAssignment,
     FlockFeedAssignment,
     FlockFeedUsage,
+    FlockIngredientForecast,
     FlockReport,
     StockEstimate,
     StockItem,
@@ -387,6 +388,11 @@ class StockService:
                     else None
                 )
                 limiting_ingredient = self._mix_limit_ingredient(mix_plan)
+                ingredient_forecasts = self._ingredient_forecasts_for_mix_plan(
+                    mix_plan,
+                    daily_mix_usage_kg=daily_usage_kg,
+                    ready_mix_days_left=days_left,
+                )
                 usages.append(
                     FlockFeedUsage(
                         assignment=assignment,
@@ -405,6 +411,7 @@ class StockService:
                             for ingredient in mix_plan.ingredients
                             if ingredient.missing_kg > 0
                         ),
+                        ingredient_forecasts=tuple(ingredient_forecasts),
                     )
                 )
             reports.append(
@@ -433,6 +440,42 @@ class StockService:
         if not candidates:
             return None
         return min(candidates, key=lambda item: item.available_kg / item.required_kg)
+
+    @staticmethod
+    def _ingredient_forecasts_for_mix_plan(
+        plan: MixPlan,
+        *,
+        daily_mix_usage_kg: float,
+        ready_mix_days_left: int | None,
+    ) -> list[FlockIngredientForecast]:
+        if plan.output_kg <= 0 or daily_mix_usage_kg <= 0:
+            return []
+        ready_mix_delay_days = max(ready_mix_days_left or 0, 0)
+        forecasts: list[FlockIngredientForecast] = []
+        for ingredient in plan.ingredients:
+            daily_usage_kg = daily_mix_usage_kg * ingredient.required_kg / plan.output_kg
+            ingredient_days_left = (
+                floor(ingredient.available_kg / daily_usage_kg)
+                if daily_usage_kg > 0
+                else None
+            )
+            days_left = (
+                ready_mix_delay_days + ingredient_days_left
+                if ingredient_days_left is not None
+                else None
+            )
+            forecasts.append(
+                FlockIngredientForecast(
+                    name=ingredient.name,
+                    available_kg=ingredient.available_kg,
+                    daily_usage_kg=daily_usage_kg,
+                    days_left=days_left,
+                )
+            )
+        return sorted(
+            forecasts,
+            key=lambda item: item.days_left if item.days_left is not None else 10**9,
+        )
 
     def _find_stock_item_by_names(self, *, user_id: int, names: tuple[str, ...]) -> StockItem | None:
         items = self.stock.list_items(user_id)

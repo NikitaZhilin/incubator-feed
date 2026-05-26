@@ -5,12 +5,14 @@ from pathlib import Path
 from app.config import AppConfig
 from app.handlers.common import build_share_text
 from app.handlers.incubation import _adjust_number
+from app.handlers.feeds import _format_flock_reports
 from app.handlers.settings import (
     _format_sections,
     _format_settings,
     _parse_notification_time,
     format_about_bot,
 )
+from app.domain import Flock, FlockFeedAssignment, FlockFeedUsage, FlockIngredientForecast, FlockReport
 from app.keyboards.feeds import (
     bird_groups_keyboard,
     feed_actions_keyboard,
@@ -209,6 +211,57 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("⬅️ К кормам", texts)
         self.assertNotIn("➕ Добавить корм", texts)
         self.assertNotIn("📊 Расчеты", texts)
+
+    def test_flock_report_formats_purchase_forecast_with_spacing(self) -> None:
+        now = datetime(2026, 5, 26, 9, 0, tzinfo=timezone.utc)
+        report = FlockReport(
+            flock=Flock(
+                id=1,
+                user_id=1,
+                name="Основное",
+                is_active=True,
+                created_at=now,
+                updated_at=now,
+            ),
+            members=(),
+            assignments=(
+                FlockFeedUsage(
+                    assignment=FlockFeedAssignment(
+                        id=1,
+                        user_id=1,
+                        flock_id=1,
+                        stock_item_id=1,
+                        is_active=True,
+                        share_percent=100,
+                        daily_per_hen_g=120,
+                        daily_per_rooster_g=150,
+                        daily_per_adult_g=120,
+                        reserve_percent=0,
+                        started_at=now,
+                        stock_item_name="Смесь для кур",
+                    ),
+                    daily_usage_kg=2,
+                    remaining_kg=10,
+                    days_left=5,
+                    producible_mix_count=4,
+                    producible_mix_kg=100,
+                    total_days_left=55,
+                    ingredient_forecasts=(
+                        FlockIngredientForecast("Пшеница", 20, 1, 20),
+                        FlockIngredientForecast("Кукуруза", 40, 1, 40),
+                    ),
+                ),
+            ),
+            daily_usage_kg=2,
+        )
+
+        text = _format_flock_reports([report])
+
+        self.assertIn("\n\nСмесь: Смесь для кур", text)
+        self.assertIn("Закупки по ингредиентам:", text)
+        self.assertIn("первым докупить: Пшеница", text)
+        self.assertIn("Остальные ингредиенты:", text)
+        self.assertIn("Кукуруза", text)
 
     def test_stock_selection_keyboards_cancel_to_stock_menu(self) -> None:
         class Item:

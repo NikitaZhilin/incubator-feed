@@ -1928,7 +1928,7 @@ def _format_flock_reports(reports) -> str:
         )
     lines = ["📊 Расчеты по стадам"]
     for report in reports:
-        lines.extend(["", report.flock.name])
+        lines.extend(["", f"🐔 {report.flock.name}", ""])
         if report.members:
             lines.append("Состав:")
             for member in report.members:
@@ -1942,40 +1942,68 @@ def _format_flock_reports(reports) -> str:
         else:
             lines.append("Состав не задан.")
         if not report.assignments:
-            lines.append("Смесь не назначена.")
+            lines.extend(["", "Смесь не назначена."])
             continue
-        lines.append(f"Расход: примерно {report.daily_usage_kg:.2f} кг/день")
+        lines.extend(["", f"Расход стада: примерно {report.daily_usage_kg:.2f} кг/день"])
         for usage in report.assignments:
             assignment = usage.assignment
             days = "неизвестно" if usage.days_left is None else f"{usage.days_left} дн."
-            mix_hint = ""
+            lines.extend(["", f"Смесь: {assignment.stock_item_name}"])
             if usage.days_left is not None:
                 mix_date = date.today() + timedelta(days=usage.days_left)
-                mix_hint = f", следующий замес примерно {mix_date.isoformat()}"
-            lines.append(
-                f"- {assignment.stock_item_name}: расход {usage.daily_usage_kg:.2f} кг/день, "
-                f"готовой смеси {usage.remaining_kg:.1f} кг, хватит на {days}{mix_hint}"
-            )
+                lines.append(
+                    f"- готовой смеси {usage.remaining_kg:.1f} кг, хватит на {days}"
+                )
+                lines.append(f"- следующий замес: примерно {mix_date.isoformat()}")
+            else:
+                lines.append(
+                    f"- готовой смеси {usage.remaining_kg:.1f} кг, хватит на {days}"
+                )
             if usage.producible_mix_count > 0:
                 lines.append(
-                    f"  Из текущих ингредиентов можно сделать еще: "
+                    f"- из текущих ингредиентов можно сделать еще: "
                     f"{usage.producible_mix_count} замесов, около {usage.producible_mix_kg:.1f} кг."
                 )
                 if usage.total_days_left is not None:
                     total_date = date.today() + timedelta(days=usage.total_days_left)
                     lines.append(
-                        f"  Всего с учетом склада ингредиентов хватит примерно на "
+                        f"- всего с учетом склада ингредиентов хватит примерно на "
                         f"{usage.total_days_left} дн., до {total_date.isoformat()}."
                     )
-                if usage.limiting_ingredient_name:
-                    lines.append(f"  Потом первым докупить: {usage.limiting_ingredient_name}.")
             elif usage.missing_ingredient_names:
                 lines.append(
-                    "  Для следующего замеса нужно докупить: "
+                    "- для следующего замеса нужно докупить: "
                     + ", ".join(usage.missing_ingredient_names[:5])
                     + "."
                 )
+            if usage.ingredient_forecasts:
+                lines.extend(["", "Закупки по ингредиентам:"])
+                first = usage.ingredient_forecasts[0]
+                lines.append(
+                    f"- первым докупить: {first.name} - до {_purchase_notice_date(first.days_left)}"
+                )
+                lines.append("Остальные ингредиенты:")
+                for forecast in usage.ingredient_forecasts:
+                    end_date = _end_date(forecast.days_left)
+                    purchase_date = _purchase_notice_date(forecast.days_left)
+                    days_text = "неизвестно" if forecast.days_left is None else f"{forecast.days_left} дн."
+                    lines.append(
+                        f"- {forecast.name}: остаток {forecast.available_kg:.1f} кг, "
+                        f"хватит на {days_text}, купить до {purchase_date}, закончится около {end_date}"
+                    )
     return "\n".join(lines)
+
+
+def _purchase_notice_date(days_left: int | None) -> str:
+    if days_left is None:
+        return "неизвестно"
+    return (date.today() + timedelta(days=max(days_left - 7, 0))).isoformat()
+
+
+def _end_date(days_left: int | None) -> str:
+    if days_left is None:
+        return "неизвестно"
+    return (date.today() + timedelta(days=days_left)).isoformat()
 
 
 def _format_feed_stock_summary(stock_estimates, plan) -> str:

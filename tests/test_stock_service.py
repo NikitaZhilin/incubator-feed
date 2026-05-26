@@ -459,6 +459,14 @@ class StockServiceTest(unittest.TestCase):
         self.assertGreater(usage.producible_mix_count, 0)
         self.assertGreater(usage.producible_mix_kg, 0)
         self.assertGreater(usage.total_days_left, usage.days_left)
+        self.assertTrue(usage.ingredient_forecasts)
+        self.assertTrue(
+            all(item.daily_usage_kg > 0 for item in usage.ingredient_forecasts)
+        )
+        self.assertEqual(
+            usage.ingredient_forecasts,
+            tuple(sorted(usage.ingredient_forecasts, key=lambda item: item.days_left)),
+        )
 
 
 if __name__ == "__main__":
