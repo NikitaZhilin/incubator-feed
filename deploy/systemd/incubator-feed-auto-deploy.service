@@ -10,4 +10,4 @@ Environment=DEPLOY_PATH=/opt/incubator-feed
 Environment=BRANCH=main
 Environment=IMAGE_NAME=incubator-feed:latest
 Environment=CONTAINER_NAME=incubator-feed-bot
-ExecStart=/opt/incubator-feed/scripts/server-auto-deploy.sh
+ExecStart=/bin/bash /opt/incubator-feed/scripts/server-auto-deploy.sh
