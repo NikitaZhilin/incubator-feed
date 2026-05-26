@@ -38,7 +38,6 @@ from app.services.stock import STOCK_KIND_LABELS, StockService
 from app.services.feed_recipes import (
     DEFAULT_GRAIN_BASE,
     get_grain_base_option,
-    load_chicken_mix_recipe,
     parse_feed_amount,
 )
 from app.utils.dates import DATE_FORMAT_HINT, parse_user_date
@@ -2308,7 +2307,6 @@ def _format_mix_plan(
     total = total_cycles or _parse_mix_cycle_count(plan.mix_count)
     current = current_cycle or 1
     checked = checked_indices or set()
-    recipe = load_chicken_mix_recipe(grain_base=plan.grain_base_code)
     one_cycle_output_kg = plan.output_kg / total
     lines = [
         f"🧮 {plan.title}",
@@ -2320,11 +2318,8 @@ def _format_mix_plan(
         "Формула на 1 замес:",
         "1 часть = 1 литровая кружка.",
     ]
-    for ingredient, recipe_item in zip(plan.ingredients, recipe):
-        one_cycle_kg = ingredient.required_kg / total
-        lines.append(
-            f"- {ingredient.name}: {recipe_item.parts:g} части, примерно {_format_mix_amount(one_cycle_kg)}"
-        )
+    for ingredient in plan.ingredients:
+        lines.append(f"- {ingredient.name}: {_format_mix_parts(ingredient.parts)}")
     lines.extend(
         [
             f"Выход 1 замеса: около {one_cycle_output_kg:.1f} кг.",
@@ -2350,7 +2345,7 @@ def _format_mix_plan(
         )
         for index, ingredient in enumerate(plan.ingredients):
             mark = "✅" if index in checked else "⬜"
-            lines.append(f"{mark} {ingredient.name}")
+            lines.append(f"{mark} {ingredient.name}: {_format_mix_parts(ingredient.parts)}")
         if current < total:
             lines.append("")
             lines.append("Когда текущий замес готов, бот откроет чеклист следующего замеса.")
@@ -2363,10 +2358,9 @@ def _format_mix_plan(
     return "\n".join(lines)
 
 
-def _format_mix_amount(kg: float) -> str:
-    if kg < 1:
-        return f"{kg * 1000:.0f} г"
-    return f"{kg:.2f} кг"
+def _format_mix_parts(parts: float) -> str:
+    unit = "часть" if parts == 1 else "части"
+    return f"{parts:g} {unit}"
 
 
 def _format_mix_created(plan) -> str:

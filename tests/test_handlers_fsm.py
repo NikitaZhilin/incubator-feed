@@ -310,6 +310,8 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         await stock_mix_plan(callback, state, self.stock_service)
 
         self.assertIn("Формула на 1 замес", callback.message.answers[-1][0])
+        self.assertIn("Кукуруза: 3.5 части", callback.message.answers[-1][0])
+        self.assertIn("Пшеница: 2.5 части", callback.message.answers[-1][0])
         self.assertIn("Текущий замес: 1 из 2", callback.message.answers[-1][0])
         self.assertEqual(
             [

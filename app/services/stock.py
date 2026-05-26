@@ -36,6 +36,7 @@ STOCK_KIND_LABELS = {
 @dataclass(frozen=True)
 class RequiredIngredient:
     name: str
+    parts: float
     required_kg: float
     available_kg: float
     stock_item_id: int | None
@@ -185,6 +186,7 @@ class StockService:
             ingredients.append(
                 RequiredIngredient(
                     name=ingredient.name,
+                    parts=ingredient.parts,
                     required_kg=required_kg,
                     available_kg=available_kg,
                     stock_item_id=item.id if item else None,

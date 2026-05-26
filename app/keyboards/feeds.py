@@ -272,15 +272,13 @@ def stock_mix_checklist_keyboard(
 ) -> InlineKeyboardMarkup:
     checked = checked_indices or set()
     total = total_cycles or int(plan.mix_count)
-    one_cycle_multiplier = plan.mix_count if plan.mix_count > 0 else 1
     rows = []
     for index, ingredient in enumerate(plan.ingredients):
         mark = "✅" if index in checked else "⬜"
-        one_cycle_kg = ingredient.required_kg / one_cycle_multiplier
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"{mark} {ingredient.name[:24]} {one_cycle_kg:.2f} кг",
+                    text=f"{mark} {ingredient.name[:22]}: {_format_mix_parts(ingredient.parts)}",
                     callback_data=f"stock:mix_toggle:{index}",
                 )
             ]
@@ -304,6 +302,11 @@ def stock_mix_checklist_keyboard(
     rows.append([InlineKeyboardButton(text="⬅️ К смеси", callback_data="stock:mix")])
     rows.append([InlineKeyboardButton(text="📦 К складу", callback_data="stock:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _format_mix_parts(parts: float) -> str:
+    unit = "часть" if parts == 1 else "части"
+    return f"{parts:g} {unit}"
 
 
 def stock_mix_quick_keyboard(grain_base: str, max_mix_count: int) -> InlineKeyboardMarkup:

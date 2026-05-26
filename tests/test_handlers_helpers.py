@@ -193,22 +193,22 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("⬅️ К складу", _keyboard_texts(stock_mix_quick_keyboard("wheat", 3)))
         self.assertIn("Отмена", _keyboard_texts(stock_cancel_keyboard()))
 
-    def test_mix_checklist_keyboard_uses_one_cycle_amounts(self) -> None:
+    def test_mix_checklist_keyboard_uses_recipe_parts(self) -> None:
         plan = SimpleNamespace(
             mix_count=2,
             grain_base_code="wheat",
             can_produce=True,
             ingredients=(
-                SimpleNamespace(name="Кукуруза", required_kg=5.04),
-                SimpleNamespace(name="Премикс", required_kg=0.15),
+                SimpleNamespace(name="Кукуруза", parts=3.5, required_kg=5.04),
+                SimpleNamespace(name="Премикс", parts=0.1, required_kg=0.15),
             ),
         )
 
         keyboard = stock_mix_checklist_keyboard(plan, checked_indices={0}, current_cycle=1, total_cycles=2)
         texts = _keyboard_texts(keyboard)
 
-        self.assertIn("✅ Кукуруза 2.52 кг", texts)
-        self.assertIn("⬜ Премикс 0.07 кг", texts)
+        self.assertIn("✅ Кукуруза: 3.5 части", texts)
+        self.assertIn("⬜ Премикс: 0.1 части", texts)
         self.assertIn("Продолжить после отметок", texts)
 
     def test_mix_quick_buttons_open_plan_before_writeoff(self) -> None:
