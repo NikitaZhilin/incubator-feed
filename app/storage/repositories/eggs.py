@@ -259,6 +259,16 @@ class EggRepository:
         precipitation_mm: float | None = None,
         condition: str = "",
         provider: str = "open-meteo",
+        day_temperature_min_c: float | None = None,
+        day_temperature_max_c: float | None = None,
+        day_condition: str = "",
+        night_temperature_min_c: float | None = None,
+        night_temperature_max_c: float | None = None,
+        night_condition: str = "",
+        tomorrow_date: date | None = None,
+        tomorrow_temperature_min_c: float | None = None,
+        tomorrow_temperature_max_c: float | None = None,
+        tomorrow_condition: str = "",
     ) -> DailyWeather:
         now = datetime.now(timezone.utc).isoformat()
         with self.database.connect() as connection:
@@ -267,9 +277,13 @@ class EggRepository:
                 INSERT INTO daily_weather (
                     user_id, weather_date, city, temperature_avg_c,
                     temperature_min_c, temperature_max_c, humidity_avg_percent,
-                    precipitation_mm, condition, provider, created_at
+                    precipitation_mm, condition, provider, created_at,
+                    day_temperature_min_c, day_temperature_max_c, day_condition,
+                    night_temperature_min_c, night_temperature_max_c, night_condition,
+                    tomorrow_date, tomorrow_temperature_min_c, tomorrow_temperature_max_c,
+                    tomorrow_condition
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id, weather_date) DO UPDATE SET
                     city = excluded.city,
                     temperature_avg_c = excluded.temperature_avg_c,
@@ -279,7 +293,17 @@ class EggRepository:
                     precipitation_mm = excluded.precipitation_mm,
                     condition = excluded.condition,
                     provider = excluded.provider,
-                    created_at = excluded.created_at
+                    created_at = excluded.created_at,
+                    day_temperature_min_c = excluded.day_temperature_min_c,
+                    day_temperature_max_c = excluded.day_temperature_max_c,
+                    day_condition = excluded.day_condition,
+                    night_temperature_min_c = excluded.night_temperature_min_c,
+                    night_temperature_max_c = excluded.night_temperature_max_c,
+                    night_condition = excluded.night_condition,
+                    tomorrow_date = excluded.tomorrow_date,
+                    tomorrow_temperature_min_c = excluded.tomorrow_temperature_min_c,
+                    tomorrow_temperature_max_c = excluded.tomorrow_temperature_max_c,
+                    tomorrow_condition = excluded.tomorrow_condition
                 """,
                 (
                     user_id,
@@ -293,6 +317,16 @@ class EggRepository:
                     condition[:120],
                     provider[:80],
                     now,
+                    day_temperature_min_c,
+                    day_temperature_max_c,
+                    day_condition[:120],
+                    night_temperature_min_c,
+                    night_temperature_max_c,
+                    night_condition[:120],
+                    tomorrow_date.isoformat() if tomorrow_date else None,
+                    tomorrow_temperature_min_c,
+                    tomorrow_temperature_max_c,
+                    tomorrow_condition[:120],
                 ),
             )
         return self.get_daily_weather(user_id=user_id, weather_date=weather_date)
@@ -303,7 +337,11 @@ class EggRepository:
                 """
                 SELECT id, user_id, weather_date, city, temperature_avg_c,
                        temperature_min_c, temperature_max_c, humidity_avg_percent,
-                       precipitation_mm, condition, provider, created_at
+                       precipitation_mm, condition, provider, created_at,
+                       day_temperature_min_c, day_temperature_max_c, day_condition,
+                       night_temperature_min_c, night_temperature_max_c, night_condition,
+                       tomorrow_date, tomorrow_temperature_min_c, tomorrow_temperature_max_c,
+                       tomorrow_condition
                 FROM daily_weather
                 WHERE user_id = ? AND weather_date = ?
                 """,
@@ -393,4 +431,46 @@ class EggRepository:
             condition=str(row["condition"] or ""),
             provider=str(row["provider"]),
             created_at=datetime.fromisoformat(str(row["created_at"])),
+            day_temperature_min_c=(
+                float(row["day_temperature_min_c"])
+                if "day_temperature_min_c" in row.keys() and row["day_temperature_min_c"] is not None
+                else None
+            ),
+            day_temperature_max_c=(
+                float(row["day_temperature_max_c"])
+                if "day_temperature_max_c" in row.keys() and row["day_temperature_max_c"] is not None
+                else None
+            ),
+            day_condition=str(row["day_condition"] or "") if "day_condition" in row.keys() else "",
+            night_temperature_min_c=(
+                float(row["night_temperature_min_c"])
+                if "night_temperature_min_c" in row.keys() and row["night_temperature_min_c"] is not None
+                else None
+            ),
+            night_temperature_max_c=(
+                float(row["night_temperature_max_c"])
+                if "night_temperature_max_c" in row.keys() and row["night_temperature_max_c"] is not None
+                else None
+            ),
+            night_condition=str(row["night_condition"] or "") if "night_condition" in row.keys() else "",
+            tomorrow_date=(
+                date.fromisoformat(str(row["tomorrow_date"]))
+                if "tomorrow_date" in row.keys() and row["tomorrow_date"]
+                else None
+            ),
+            tomorrow_temperature_min_c=(
+                float(row["tomorrow_temperature_min_c"])
+                if "tomorrow_temperature_min_c" in row.keys()
+                and row["tomorrow_temperature_min_c"] is not None
+                else None
+            ),
+            tomorrow_temperature_max_c=(
+                float(row["tomorrow_temperature_max_c"])
+                if "tomorrow_temperature_max_c" in row.keys()
+                and row["tomorrow_temperature_max_c"] is not None
+                else None
+            ),
+            tomorrow_condition=(
+                str(row["tomorrow_condition"] or "") if "tomorrow_condition" in row.keys() else ""
+            ),
         )

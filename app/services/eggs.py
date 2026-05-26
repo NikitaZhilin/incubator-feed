@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from app.domain import DailyWeather, EggEntry, EggStats, HenLayingExclusion, WeatherSettings
 from app.storage.repositories.eggs import EggRepository
@@ -216,7 +216,34 @@ class EggService:
             precipitation_mm=weather_day.precipitation_mm,
             condition=weather_day.condition,
             provider=weather_day.provider,
+            day_temperature_min_c=weather_day.day_temperature_min_c,
+            day_temperature_max_c=weather_day.day_temperature_max_c,
+            day_condition=weather_day.day_condition,
+            night_temperature_min_c=weather_day.night_temperature_min_c,
+            night_temperature_max_c=weather_day.night_temperature_max_c,
+            night_condition=weather_day.night_condition,
+            tomorrow_date=weather_day.tomorrow_date,
+            tomorrow_temperature_min_c=weather_day.tomorrow_temperature_min_c,
+            tomorrow_temperature_max_c=weather_day.tomorrow_temperature_max_c,
+            tomorrow_condition=weather_day.tomorrow_condition,
         )
+
+    def weather_needs_refresh(
+        self,
+        user_id: int,
+        *,
+        today: date | None = None,
+        max_age: timedelta = timedelta(hours=6),
+    ) -> bool:
+        current_date = today or date.today()
+        settings = self.eggs.get_weather_settings(user_id)
+        stored = self.eggs.get_daily_weather(user_id=user_id, weather_date=current_date)
+        if stored is None or stored.city != settings.city:
+            return True
+        created_at = stored.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) - created_at > max_age
 
     def total_laying_hens(self, user_id: int) -> int:
         return sum(

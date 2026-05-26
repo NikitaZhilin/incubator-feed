@@ -17,6 +17,7 @@ MIGRATIONS = (
     "009_stock_warehouse",
     "010_flocks",
     "011_eggs",
+    "012_weather_parts",
 )
 
 

@@ -320,6 +320,16 @@ class DailyWeather:
     condition: str
     provider: str
     created_at: datetime
+    day_temperature_min_c: float | None = None
+    day_temperature_max_c: float | None = None
+    day_condition: str = ""
+    night_temperature_min_c: float | None = None
+    night_temperature_max_c: float | None = None
+    night_condition: str = ""
+    tomorrow_date: date | None = None
+    tomorrow_temperature_min_c: float | None = None
+    tomorrow_temperature_max_c: float | None = None
+    tomorrow_condition: str = ""
 
 
 @dataclass(frozen=True)

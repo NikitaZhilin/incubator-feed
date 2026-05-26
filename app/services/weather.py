@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta
 import json
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -25,6 +25,23 @@ class WeatherDay:
     precipitation_mm: float | None
     condition: str
     provider: str = "open-meteo"
+    day_temperature_min_c: float | None = None
+    day_temperature_max_c: float | None = None
+    day_condition: str = ""
+    night_temperature_min_c: float | None = None
+    night_temperature_max_c: float | None = None
+    night_condition: str = ""
+    tomorrow_date: date | None = None
+    tomorrow_temperature_min_c: float | None = None
+    tomorrow_temperature_max_c: float | None = None
+    tomorrow_condition: str = ""
+
+
+@dataclass(frozen=True)
+class WeatherPart:
+    temperature_min_c: float | None = None
+    temperature_max_c: float | None = None
+    condition: str = ""
 
 
 class OpenMeteoWeatherClient:
@@ -60,6 +77,7 @@ class OpenMeteoWeatherClient:
                 "latitude": f"{latitude:.6f}",
                 "longitude": f"{longitude:.6f}",
                 "daily": "weather_code,temperature_2m_max,temperature_2m_min,temperature_2m_mean,precipitation_sum",
+                "hourly": "temperature_2m,weather_code,precipitation",
                 "timezone": "auto",
                 "forecast_days": 3,
             },
@@ -72,6 +90,10 @@ class OpenMeteoWeatherClient:
             index = dates.index(today)
         except ValueError:
             index = 0
+        hourly = payload.get("hourly") or {}
+        day_part = _hourly_part(hourly, target_date=dates[index], start_hour=8, end_hour=20)
+        night_part = _night_hourly_part(hourly, target_date=dates[index])
+        tomorrow_index = index + 1 if index + 1 < len(dates) else None
         return WeatherDay(
             date=dates[index],
             temperature_avg_c=_float_at(daily.get("temperature_2m_mean"), index),
@@ -80,6 +102,28 @@ class OpenMeteoWeatherClient:
             precipitation_mm=_float_at(daily.get("precipitation_sum"), index),
             condition=_weather_code_label(_int_at(daily.get("weather_code"), index)),
             provider="open-meteo",
+            day_temperature_min_c=day_part.temperature_min_c,
+            day_temperature_max_c=day_part.temperature_max_c,
+            day_condition=day_part.condition,
+            night_temperature_min_c=night_part.temperature_min_c,
+            night_temperature_max_c=night_part.temperature_max_c,
+            night_condition=night_part.condition,
+            tomorrow_date=dates[tomorrow_index] if tomorrow_index is not None else None,
+            tomorrow_temperature_min_c=(
+                _float_at(daily.get("temperature_2m_min"), tomorrow_index)
+                if tomorrow_index is not None
+                else None
+            ),
+            tomorrow_temperature_max_c=(
+                _float_at(daily.get("temperature_2m_max"), tomorrow_index)
+                if tomorrow_index is not None
+                else None
+            ),
+            tomorrow_condition=(
+                _weather_code_label(_int_at(daily.get("weather_code"), tomorrow_index))
+                if tomorrow_index is not None
+                else ""
+            ),
         )
 
     def forecast_today_by_city(self, *, city: str, today: date) -> WeatherDay:
@@ -108,10 +152,21 @@ class OpenMeteoWeatherClient:
         )
         current = (payload.get("current_condition") or [{}])[0]
         weather = (payload.get("weather") or [{}])[0]
+        tomorrow = (payload.get("weather") or [{}, {}])[1] if len(payload.get("weather") or []) > 1 else {}
         condition_items = current.get("lang_ru") or current.get("weatherDesc") or []
         condition = ""
         if condition_items:
             condition = str(condition_items[0].get("value") or "")
+        day_part = _wttr_part(weather, "day")
+        night_part = _wttr_part(weather, "night")
+        tomorrow_condition = ""
+        tomorrow_hourly = tomorrow.get("hourly") or []
+        if tomorrow_hourly:
+            condition_items = tomorrow_hourly[len(tomorrow_hourly) // 2].get("lang_ru") or tomorrow_hourly[
+                len(tomorrow_hourly) // 2
+            ].get("weatherDesc") or []
+            if condition_items:
+                tomorrow_condition = str(condition_items[0].get("value") or "")
         avg = _float_value(weather.get("avgtempC"))
         if avg is None:
             avg = _float_value(current.get("temp_C"))
@@ -123,6 +178,20 @@ class OpenMeteoWeatherClient:
             precipitation_mm=_float_value(current.get("precipMM")),
             condition=_normalize_condition(condition),
             provider="wttr.in",
+            day_temperature_min_c=day_part.temperature_min_c,
+            day_temperature_max_c=day_part.temperature_max_c,
+            day_condition=day_part.condition,
+            night_temperature_min_c=night_part.temperature_min_c,
+            night_temperature_max_c=night_part.temperature_max_c,
+            night_condition=night_part.condition,
+            tomorrow_date=(
+                date.fromisoformat(str(tomorrow.get("date")))
+                if tomorrow and tomorrow.get("date")
+                else today + timedelta(days=1)
+            ),
+            tomorrow_temperature_min_c=_float_value(tomorrow.get("mintempC")),
+            tomorrow_temperature_max_c=_float_value(tomorrow.get("maxtempC")),
+            tomorrow_condition=_normalize_condition(tomorrow_condition),
         )
 
     def _get_json(self, base_url: str, params: dict[str, object]) -> dict:
@@ -148,6 +217,96 @@ def _int_at(values, index: int) -> int | None:
     if not values or index >= len(values) or values[index] is None:
         return None
     return int(values[index])
+
+
+def _hourly_part(hourly: dict, *, target_date: date, start_hour: int, end_hour: int) -> WeatherPart:
+    samples = []
+    times = hourly.get("time") or []
+    temperatures = hourly.get("temperature_2m") or []
+    codes = hourly.get("weather_code") or []
+    for index, raw_time in enumerate(times):
+        try:
+            moment = datetime.fromisoformat(str(raw_time))
+        except ValueError:
+            continue
+        if moment.date() != target_date or not (start_hour <= moment.hour < end_hour):
+            continue
+        temperature = _float_at(temperatures, index)
+        code = _int_at(codes, index)
+        samples.append((temperature, code))
+    return _weather_part_from_samples(samples)
+
+
+def _night_hourly_part(hourly: dict, *, target_date: date) -> WeatherPart:
+    samples = []
+    times = hourly.get("time") or []
+    temperatures = hourly.get("temperature_2m") or []
+    codes = hourly.get("weather_code") or []
+    for index, raw_time in enumerate(times):
+        try:
+            moment = datetime.fromisoformat(str(raw_time))
+        except ValueError:
+            continue
+        is_target_late = moment.date() == target_date and moment.hour >= 20
+        is_next_early = moment.date() == target_date + timedelta(days=1) and moment.hour < 8
+        if not (is_target_late or is_next_early):
+            continue
+        temperature = _float_at(temperatures, index)
+        code = _int_at(codes, index)
+        samples.append((temperature, code))
+    return _weather_part_from_samples(samples)
+
+
+def _weather_part_from_samples(samples: list[tuple[float | None, int | None]]) -> WeatherPart:
+    temperatures = [temperature for temperature, _ in samples if temperature is not None]
+    codes = [code for _, code in samples if code is not None]
+    return WeatherPart(
+        temperature_min_c=min(temperatures) if temperatures else None,
+        temperature_max_c=max(temperatures) if temperatures else None,
+        condition=_weather_code_label(_dominant_weather_code(codes)),
+    )
+
+
+def _dominant_weather_code(codes: list[int]) -> int | None:
+    if not codes:
+        return None
+    counts = {code: codes.count(code) for code in set(codes)}
+    return max(counts, key=lambda code: (counts[code], _weather_code_priority(code)))
+
+
+def _weather_code_priority(code: int) -> int:
+    if code in {95, 96, 99}:
+        return 5
+    if code in {61, 63, 65, 66, 67, 71, 73, 75, 80, 81, 82, 85, 86}:
+        return 4
+    if code in {45, 48, 51, 53, 55, 56, 57, 77}:
+        return 3
+    if code in {1, 2, 3}:
+        return 2
+    return 1
+
+
+def _wttr_part(weather: dict, part: str) -> WeatherPart:
+    hourly = weather.get("hourly") or []
+    if not hourly:
+        return WeatherPart()
+    if part == "day":
+        candidates = hourly[len(hourly) // 3 : 2 * len(hourly) // 3] or hourly
+    else:
+        candidates = hourly[: len(hourly) // 3] + hourly[2 * len(hourly) // 3 :]
+    temperatures = [_float_value(item.get("tempC")) for item in candidates]
+    condition = ""
+    for item in candidates:
+        condition_items = item.get("lang_ru") or item.get("weatherDesc") or []
+        if condition_items:
+            condition = str(condition_items[0].get("value") or "")
+            break
+    clean_temperatures = [value for value in temperatures if value is not None]
+    return WeatherPart(
+        temperature_min_c=min(clean_temperatures) if clean_temperatures else None,
+        temperature_max_c=max(clean_temperatures) if clean_temperatures else None,
+        condition=_normalize_condition(condition),
+    )
 
 
 def _weather_code_label(code: int | None) -> str:

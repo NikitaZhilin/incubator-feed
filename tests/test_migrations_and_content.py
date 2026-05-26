@@ -24,6 +24,10 @@ class MigrationsAndContentTest(unittest.TestCase):
                     row["name"]
                     for row in connection.execute("PRAGMA table_info(bird_groups)").fetchall()
                 }
+                weather_columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(daily_weather)").fetchall()
+                }
 
         self.assertIn("schema_migrations", tables)
         self.assertIn("notification_log", tables)
@@ -40,6 +44,9 @@ class MigrationsAndContentTest(unittest.TestCase):
         self.assertIn("group_kind", bird_group_columns)
         self.assertIn("hatched_at", bird_group_columns)
         self.assertIn("joined_at", bird_group_columns)
+        self.assertIn("day_temperature_min_c", weather_columns)
+        self.assertIn("night_temperature_min_c", weather_columns)
+        self.assertIn("tomorrow_condition", weather_columns)
 
     def test_existing_database_is_migrated_without_dropping_data(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

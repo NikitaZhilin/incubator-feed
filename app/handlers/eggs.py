@@ -2,6 +2,7 @@ import asyncio
 from datetime import date, timedelta
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -39,10 +40,7 @@ class EggWeatherFlow(StatesGroup):
 @router.callback_query(F.data == "eggs:menu")
 async def eggs_menu(callback: CallbackQuery, state: FSMContext, egg_service: EggService) -> None:
     await state.clear()
-    await callback.message.answer(
-        _format_eggs_menu(_safe_stats(egg_service, callback.from_user.id)),
-        reply_markup=eggs_menu_keyboard(),
-    )
+    await _answer_eggs_menu(callback.message, callback.from_user.id, egg_service)
     await callback.answer()
 
 
@@ -205,16 +203,15 @@ async def eggs_exclude_finish(callback: CallbackQuery, egg_service: EggService) 
 async def eggs_weather(callback: CallbackQuery, egg_service: EggService) -> None:
     weather = egg_service.get_daily_weather(callback.from_user.id)
     settings = egg_service.get_weather_settings(callback.from_user.id)
-    await callback.message.answer(
-        "🌦 Город и погода\n\n"
-        f"Город: {settings.city}\n"
-        f"{_format_weather(weather)}"
-        "\n\n"
-        "Погодная поправка в расчетах ориентировочная: бот смотрит уличную погоду, "
-        "а яйценоскость сильнее зависит от фактических условий в курятнике.\n\n"
-        "Для загрузки свежих данных нажмите Обновить погоду.",
+    needs_refresh = egg_service.weather_needs_refresh(callback.from_user.id)
+    sent_message = await callback.message.answer(
+        _format_weather_screen(settings.city, weather, updating=needs_refresh),
         reply_markup=weather_keyboard(),
     )
+    if needs_refresh and sent_message is not None:
+        asyncio.create_task(
+            _refresh_and_edit_weather_screen(sent_message, callback.from_user.id, egg_service)
+        )
     await callback.answer()
 
 
@@ -293,6 +290,60 @@ async def eggs_weather_city_save(message: Message, state: FSMContext, egg_servic
 
 
 def _format_eggs_menu(stats: EggStats) -> str:
+    return _format_eggs_menu_text(stats)
+
+
+async def _answer_eggs_menu(message: Message, user_id: int, egg_service: EggService) -> None:
+    stats = _safe_stats(egg_service, user_id)
+    needs_refresh = egg_service.weather_needs_refresh(user_id)
+    sent_message = await message.answer(
+        _format_eggs_menu_text(stats, weather_updating=needs_refresh),
+        reply_markup=eggs_menu_keyboard(),
+    )
+    if needs_refresh and sent_message is not None:
+        asyncio.create_task(_refresh_and_edit_eggs_menu(sent_message, user_id, egg_service))
+
+
+async def _refresh_and_edit_eggs_menu(message: Message, user_id: int, egg_service: EggService) -> None:
+    try:
+        await asyncio.to_thread(egg_service.refresh_weather, user_id, force=True)
+        stats = _safe_stats(egg_service, user_id)
+        text = _format_eggs_menu_text(stats)
+    except Exception as exc:
+        stats = _safe_stats(egg_service, user_id)
+        text = (
+            _format_eggs_menu_text(stats)
+            + "\n\n"
+            + f"Погоду сейчас не удалось обновить: {_format_weather_error(exc)}"
+        )
+    try:
+        await message.edit_text(text, reply_markup=eggs_menu_keyboard())
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc).lower():
+            raise
+
+
+async def _refresh_and_edit_weather_screen(message: Message, user_id: int, egg_service: EggService) -> None:
+    try:
+        weather = await asyncio.to_thread(egg_service.refresh_weather, user_id, force=True)
+        settings = egg_service.get_weather_settings(user_id)
+        text = _format_weather_screen(settings.city, weather)
+    except Exception as exc:
+        settings = egg_service.get_weather_settings(user_id)
+        weather = egg_service.get_daily_weather(user_id)
+        text = (
+            _format_weather_screen(settings.city, weather)
+            + "\n\n"
+            + f"Погоду сейчас не удалось обновить: {_format_weather_error(exc)}"
+        )
+    try:
+        await message.edit_text(text, reply_markup=weather_keyboard())
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc).lower():
+            raise
+
+
+def _format_eggs_menu_text(stats: EggStats, *, weather_updating: bool = False) -> str:
     return (
         "🥚 Яйца\n\n"
         "Здесь учитываем ежедневный сбор яиц и считаем прогноз только по взрослым несушкам.\n\n"
@@ -300,7 +351,7 @@ def _format_eggs_menu(stats: EggStats) -> str:
         f"Несутся сейчас: {stats.active_hens_count} из {stats.total_hens_count}\n"
         f"Прогноз на 7 дней: примерно {stats.next_week_forecast} шт.\n"
         f"{_format_weather_forecast_line(stats)}\n\n"
-        f"{_format_weather_brief(stats.weather)}"
+        f"{_format_weather_brief(stats.weather, updating=weather_updating)}"
     )
 
 
@@ -394,36 +445,76 @@ def _format_weather_forecast_line(stats: EggStats) -> str:
 
 def _format_weather(weather: DailyWeather | None) -> str:
     if weather is None:
-        return "Погода за сегодня еще не загружена. Нажмите Обновить погоду."
-    temp = "нет данных"
-    if weather.temperature_avg_c is not None:
-        temp = f"{weather.temperature_avg_c:.1f} °C"
-        if weather.temperature_min_c is not None and weather.temperature_max_c is not None:
-            temp += f" ({weather.temperature_min_c:.0f}...{weather.temperature_max_c:.0f} °C)"
+        return "Погода за сегодня еще не загружена."
     precipitation = (
         "нет данных"
         if weather.precipitation_mm is None
         else f"{weather.precipitation_mm:.1f} мм"
     )
-    condition = _display_weather_condition(weather.condition) or "нет данных"
     return (
         f"Погода на {weather.weather_date.isoformat()}:\n"
-        f"- температура: {temp}\n"
+        f"- день: {_format_weather_part(weather.day_temperature_min_c, weather.day_temperature_max_c, weather.day_condition)}\n"
+        f"- ночь: {_format_weather_part(weather.night_temperature_min_c, weather.night_temperature_max_c, weather.night_condition)}\n"
+        f"- завтра: {_format_tomorrow_weather(weather)}\n"
         f"- осадки: {precipitation}\n"
-        f"- состояние: {condition}\n"
         f"- источник: {weather.provider}"
     )
 
 
-def _format_weather_brief(weather: DailyWeather | None) -> str:
+def _format_weather_screen(city: str, weather: DailyWeather | None, *, updating: bool = False) -> str:
+    update_line = "Погода обновляется..." if updating else "Погода загружена из кеша."
+    return (
+        "🌦 Город и погода\n\n"
+        f"Город: {city}\n"
+        f"{update_line}\n\n"
+        f"{_format_weather(weather)}"
+        "\n\n"
+        "Погодная поправка в расчетах ориентировочная: бот смотрит уличную погоду, "
+        "а яйценоскость сильнее зависит от фактических условий в курятнике."
+    )
+
+
+def _format_weather_brief(weather: DailyWeather | None, *, updating: bool = False) -> str:
+    if updating:
+        if weather is None:
+            return "Погода: обновляется..."
+        return "Погода: обновляется, пока показаны последние сохраненные данные.\n" + _format_weather_brief(weather)
     if weather is None:
-        return "Погода: не загружена. Откройте Город и погода -> Обновить погоду."
-    temp = "нет данных"
-    if weather.temperature_avg_c is not None:
-        temp = f"{weather.temperature_avg_c:.1f} °C"
-    condition_text = _display_weather_condition(weather.condition)
-    condition = f", {condition_text}" if condition_text else ""
-    return f"Погода: {temp}{condition}, {_display_city(weather.city)}."
+        return "Погода: не загружена."
+    return (
+        f"Погода, {_display_city(weather.city)}:\n"
+        f"День: {_format_weather_part(weather.day_temperature_min_c, weather.day_temperature_max_c, weather.day_condition)}\n"
+        f"Ночь: {_format_weather_part(weather.night_temperature_min_c, weather.night_temperature_max_c, weather.night_condition)}\n"
+        f"Завтра: {_format_tomorrow_weather(weather)}"
+    )
+
+
+def _format_weather_part(
+    temperature_min_c: float | None,
+    temperature_max_c: float | None,
+    condition: str,
+) -> str:
+    if temperature_min_c is None and temperature_max_c is None:
+        temperature = "температура нет данных"
+    elif temperature_min_c is None:
+        temperature = f"до {temperature_max_c:.0f} °C"
+    elif temperature_max_c is None:
+        temperature = f"от {temperature_min_c:.0f} °C"
+    elif round(temperature_min_c) == round(temperature_max_c):
+        temperature = f"{temperature_max_c:.0f} °C"
+    else:
+        temperature = f"{temperature_min_c:.0f}...{temperature_max_c:.0f} °C"
+    condition_text = _display_weather_condition(condition) or "состояние не уточнено"
+    return f"{temperature}, {condition_text}"
+
+
+def _format_tomorrow_weather(weather: DailyWeather) -> str:
+    prefix = f"{weather.tomorrow_date.isoformat()}: " if weather.tomorrow_date else ""
+    return prefix + _format_weather_part(
+        weather.tomorrow_temperature_min_c,
+        weather.tomorrow_temperature_max_c,
+        weather.tomorrow_condition,
+    )
 
 
 def _format_weather_error(exc: Exception) -> str:

@@ -7,7 +7,7 @@ from app.services.eggs import EggService
 from app.services.feeds import FeedService
 from app.services.weather import GeocodedLocation, WeatherDay
 from app.services.weather import OpenMeteoWeatherClient
-from app.handlers.eggs import _display_city, _display_weather_condition
+from app.handlers.eggs import _display_city, _display_weather_condition, _format_weather_brief
 from app.storage.database import Database
 from app.storage.repositories.eggs import EggRepository
 from app.storage.repositories.feeds import FeedRepository
@@ -188,6 +188,73 @@ class EggServiceTest(unittest.TestCase):
     def test_weather_display_is_russian_for_cached_english_values(self) -> None:
         self.assertEqual(_display_weather_condition("Patchy rain nearby"), "местами дождь поблизости")
         self.assertEqual(_display_city("Курск, Курская Область"), "Курск, Курская область")
+
+    def test_open_meteo_forecast_parses_day_night_and_tomorrow(self) -> None:
+        class FakeOpenMeteoClient(OpenMeteoWeatherClient):
+            def _get_json(self, base_url: str, params: dict[str, object]) -> dict:
+                return {
+                    "daily": {
+                        "time": ["2026-05-27", "2026-05-28"],
+                        "weather_code": [3, 61],
+                        "temperature_2m_max": [22, 23],
+                        "temperature_2m_min": [10, 11],
+                        "temperature_2m_mean": [16, 17],
+                        "precipitation_sum": [0.5, 2.0],
+                    },
+                    "hourly": {
+                        "time": [
+                            "2026-05-27T08:00",
+                            "2026-05-27T14:00",
+                            "2026-05-27T21:00",
+                            "2026-05-28T03:00",
+                        ],
+                        "temperature_2m": [14, 22, 15, 10],
+                        "weather_code": [2, 3, 0, 0],
+                        "precipitation": [0, 0, 0, 0],
+                    },
+                }
+
+        weather = FakeOpenMeteoClient().forecast_today(
+            latitude=51.73,
+            longitude=36.19,
+            today=date(2026, 5, 27),
+        )
+
+        self.assertEqual(weather.day_temperature_min_c, 14)
+        self.assertEqual(weather.day_temperature_max_c, 22)
+        self.assertEqual(weather.night_temperature_min_c, 10)
+        self.assertEqual(weather.night_temperature_max_c, 15)
+        self.assertEqual(weather.tomorrow_date, date(2026, 5, 28))
+        self.assertEqual(weather.tomorrow_condition, "дождь")
+
+    def test_weather_brief_formats_day_night_and_tomorrow(self) -> None:
+        weather = self.egg_service.eggs.upsert_daily_weather(
+            user_id=1,
+            weather_date=date(2026, 5, 27),
+            city="Курск, Курская область",
+            temperature_avg_c=16,
+            temperature_min_c=10,
+            temperature_max_c=22,
+            precipitation_mm=0,
+            condition="переменная облачность",
+            provider="open-meteo",
+            day_temperature_min_c=14,
+            day_temperature_max_c=22,
+            day_condition="переменная облачность",
+            night_temperature_min_c=10,
+            night_temperature_max_c=15,
+            night_condition="ясно",
+            tomorrow_date=date(2026, 5, 28),
+            tomorrow_temperature_min_c=11,
+            tomorrow_temperature_max_c=23,
+            tomorrow_condition="дождь",
+        )
+
+        text = _format_weather_brief(weather)
+
+        self.assertIn("День: 14...22 °C", text)
+        self.assertIn("Ночь: 10...15 °C", text)
+        self.assertIn("Завтра: 2026-05-28: 11...23 °C, дождь", text)
 
 
 if __name__ == "__main__":
