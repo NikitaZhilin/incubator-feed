@@ -17,6 +17,7 @@ from app.keyboards.feeds import (
     feed_edit_keyboard,
     feed_rate_keyboard,
     feeds_menu_keyboard,
+    grain_base_keyboard,
     stock_assign_groups_keyboard,
     stock_confirm_mix_keyboard,
     stock_items_keyboard,
@@ -27,8 +28,10 @@ from app.services.feeds import FeedService
 from app.services.incubation import IncubationService
 from app.services.stock import STOCK_KIND_LABELS, StockService
 from app.services.feed_recipes import (
+    DEFAULT_GRAIN_BASE,
     calculate_chicken_mix,
     format_chicken_mix,
+    get_grain_base_option,
     parse_feed_amount,
 )
 from app.utils.dates import DATE_FORMAT_HINT, parse_user_date
@@ -51,6 +54,7 @@ class NewFeed(StatesGroup):
 
 
 class FeedMix(StatesGroup):
+    grain_base = State()
     amount = State()
 
 
@@ -83,6 +87,7 @@ class StockPurchaseFlow(StatesGroup):
 
 
 class StockMixFlow(StatesGroup):
+    grain_base = State()
     count = State()
 
 
@@ -108,6 +113,7 @@ FEED_FLOW_STATES = (
     NewFeed.hen_rate,
     NewFeed.rooster_rate,
     NewFeed.threshold,
+    FeedMix.grain_base,
     FeedMix.amount,
     RestockFeed.amount,
     ChangeFeed.amount,
@@ -123,6 +129,7 @@ FEED_FLOW_STATES = (
     StockPurchaseFlow.kind,
     StockPurchaseFlow.amount,
     StockMixFlow.count,
+    StockMixFlow.grain_base,
     StockAssignFlow.group,
     StockAssignFlow.item,
     StockAssignFlow.rate,
@@ -468,12 +475,36 @@ async def stock_purchase_amount(
 
 
 @router.callback_query(F.data == "stock:mix")
-async def stock_mix_start(callback: CallbackQuery, state: FSMContext, stock_service: StockService) -> None:
+async def stock_mix_start(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await state.set_state(StockMixFlow.count)
-    one_cycle = stock_service.one_chicken_mix_cycle_kg()
+    await state.set_state(StockMixFlow.grain_base)
     await callback.message.answer(
-        f"Сколько замесов смеси сделать?\n\nОдин замес по рецепту ≈ {one_cycle:.1f} кг готовой смеси.",
+        "Что использовать в рецепте на месте пшеницы?",
+        reply_markup=grain_base_keyboard("stock:mix_grain"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(StockMixFlow.grain_base, F.data.startswith("stock:mix_grain:"))
+async def stock_mix_grain_base(
+    callback: CallbackQuery,
+    state: FSMContext,
+    stock_service: StockService,
+) -> None:
+    grain_base = str(callback.data).rsplit(":", 1)[1]
+    try:
+        option = get_grain_base_option(grain_base)
+    except ValueError as exc:
+        await callback.message.answer(str(exc), reply_markup=stock_menu_keyboard())
+        await callback.answer()
+        return
+    await state.update_data(grain_base=option.code)
+    await state.set_state(StockMixFlow.count)
+    one_cycle = stock_service.one_chicken_mix_cycle_kg(grain_base=option.code)
+    await callback.message.answer(
+        f"Сколько замесов смеси сделать?\n\n"
+        f"Зерновая основа: {option.label}.\n"
+        f"Один замес по рецепту ≈ {one_cycle:.1f} кг готовой смеси.",
         reply_markup=feed_cancel_keyboard(),
     )
     await callback.answer()
@@ -496,19 +527,39 @@ async def stock_mix_count(
         )
         await message.answer("Введите количество замесов числом, например 3.")
         return
-    plan = stock_service.plan_mix(user_id=message.from_user.id, mix_count=mix_count)
+    data = await state.get_data()
+    grain_base = str(data.get("grain_base") or DEFAULT_GRAIN_BASE)
+    plan = stock_service.plan_mix(
+        user_id=message.from_user.id,
+        mix_count=mix_count,
+        grain_base=grain_base,
+    )
     await state.clear()
     await message.answer(
         _format_mix_plan(plan),
-        reply_markup=stock_confirm_mix_keyboard(mix_count) if plan.can_produce else stock_menu_keyboard(),
+        reply_markup=(
+            stock_confirm_mix_keyboard(mix_count, grain_base)
+            if plan.can_produce
+            else stock_menu_keyboard()
+        ),
     )
 
 
 @router.callback_query(F.data.startswith("stock:mix_confirm:"))
 async def stock_mix_confirm(callback: CallbackQuery, stock_service: StockService) -> None:
-    mix_count = float(str(callback.data).rsplit(":", 1)[1])
+    parts = str(callback.data).split(":")
+    if len(parts) == 4:
+        grain_base = parts[2]
+        mix_count = float(parts[3])
+    else:
+        grain_base = DEFAULT_GRAIN_BASE
+        mix_count = float(parts[-1])
     try:
-        plan = stock_service.produce_mix(user_id=callback.from_user.id, mix_count=mix_count)
+        plan = stock_service.produce_mix(
+            user_id=callback.from_user.id,
+            mix_count=mix_count,
+            grain_base=grain_base,
+        )
     except ValueError as exc:
         await callback.message.answer(str(exc), reply_markup=stock_menu_keyboard())
         await callback.answer()
@@ -698,9 +749,28 @@ async def stock_adjust_amount(message: Message, state: FSMContext, stock_service
 @router.callback_query(F.data == "feeds:mix")
 async def feed_mix_start(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
+    await state.set_state(FeedMix.grain_base)
+    await callback.message.answer(
+        "Что использовать в рецепте на месте пшеницы?",
+        reply_markup=grain_base_keyboard("feeds:mix_grain"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(FeedMix.grain_base, F.data.startswith("feeds:mix_grain:"))
+async def feed_mix_grain_base(callback: CallbackQuery, state: FSMContext) -> None:
+    grain_base = str(callback.data).rsplit(":", 1)[1]
+    try:
+        option = get_grain_base_option(grain_base)
+    except ValueError as exc:
+        await callback.message.answer(str(exc), reply_markup=feeds_menu_keyboard())
+        await callback.answer()
+        return
+    await state.update_data(grain_base=option.code)
     await state.set_state(FeedMix.amount)
     await callback.message.answer(
         "Сколько готовой смеси рассчитать?\n\n"
+        f"Зерновая основа: {option.label}.\n"
         "Можно написать: 25, 25 кг, 1 мешок, 2 мешка по 25.\n"
         "По умолчанию 1 мешок = 25 кг.",
         reply_markup=feed_cancel_keyboard(),
@@ -716,8 +786,10 @@ async def feed_mix_amount(message: Message, state: FSMContext) -> None:
         await message.answer(str(exc))
         return
 
+    data = await state.get_data()
+    grain_base = str(data.get("grain_base") or DEFAULT_GRAIN_BASE)
     await state.clear()
-    calculation = calculate_chicken_mix(target_kg)
+    calculation = calculate_chicken_mix(target_kg, grain_base=grain_base)
     await message.answer(
         format_chicken_mix(calculation),
         reply_markup=feeds_menu_keyboard(),
@@ -1508,6 +1580,7 @@ def _format_mix_plan(plan) -> str:
     lines = [
         f"🧮 {plan.title}",
         "",
+        f"Зерновая основа: {plan.grain_base_label}",
         f"Замесов: {plan.mix_count:g}",
         f"Будет получено примерно: {plan.output_kg:.1f} кг.",
         "",

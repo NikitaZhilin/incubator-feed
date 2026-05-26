@@ -42,6 +42,18 @@ def feed_cancel_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def grain_base_keyboard(prefix: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Пшеница", callback_data=f"{prefix}:wheat"),
+                InlineKeyboardButton(text="Зерносмесь", callback_data=f"{prefix}:layer_grain_mix"),
+            ],
+            [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")],
+        ]
+    )
+
+
 def feed_actions_keyboard(feed_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -156,10 +168,15 @@ def stock_items_keyboard(items, *, prefix: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def stock_confirm_mix_keyboard(mix_count: float) -> InlineKeyboardMarkup:
+def stock_confirm_mix_keyboard(mix_count: float, grain_base: str = "wheat") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Создать замес", callback_data=f"stock:mix_confirm:{mix_count:g}")],
+            [
+                InlineKeyboardButton(
+                    text="✅ Создать замес",
+                    callback_data=f"stock:mix_confirm:{grain_base}:{mix_count:g}",
+                )
+            ],
             [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")],
         ]
     )

@@ -3,7 +3,11 @@ from datetime import datetime, timezone
 from math import floor, isfinite
 
 from app.domain import CONTENT, FeedingAssignment, StockEstimate, StockItem
-from app.services.feed_recipes import CHICKEN_MIX_RECIPE
+from app.services.feed_recipes import (
+    DEFAULT_GRAIN_BASE,
+    get_grain_base_option,
+    load_chicken_mix_recipe,
+)
 from app.services.feeds import FeedService
 from app.storage.repositories.feeds import FeedRepository
 from app.storage.repositories.stock import StockRepository
@@ -36,6 +40,8 @@ class MixPlan:
     recipe_version: str
     title: str
     mix_count: float
+    grain_base_code: str
+    grain_base_label: str
     output_name: str
     output_kg: float
     ingredients: tuple[RequiredIngredient, ...]
@@ -148,16 +154,22 @@ class StockService:
         *,
         user_id: int,
         mix_count: float,
+        grain_base: str = DEFAULT_GRAIN_BASE,
         now: datetime | None = None,
     ) -> MixPlan:
         self._validate_amount(mix_count)
+        grain_base_option = get_grain_base_option(grain_base)
+        recipe = load_chicken_mix_recipe(grain_base=grain_base_option.code)
         recipe_payload = CONTENT["feed_recipes"]["chicken_mix"]
-        one_cycle_kg = self.one_chicken_mix_cycle_kg()
+        one_cycle_kg = self.one_chicken_mix_cycle_kg(grain_base=grain_base_option.code)
         ingredients = []
         current = now or datetime.now(timezone.utc)
-        for ingredient in CHICKEN_MIX_RECIPE:
+        for ingredient in recipe:
             required_kg = ingredient.parts * ingredient.density_kg_per_l * mix_count
-            item = self.stock.find_item_by_name(user_id=user_id, name=ingredient.name)
+            item = self._find_stock_item_by_names(
+                user_id=user_id,
+                names=(ingredient.name, *ingredient.aliases),
+            )
             available_kg = self.estimate_item(item, now=current).remaining_kg if item else 0
             ingredients.append(
                 RequiredIngredient(
@@ -169,9 +181,11 @@ class StockService:
             )
         return MixPlan(
             recipe_code="chicken_mix",
-            recipe_version=str(recipe_payload["version"]),
+            recipe_version=f"{recipe_payload['version']}; grain_base={grain_base_option.code}",
             title=str(recipe_payload["title"]),
             mix_count=mix_count,
+            grain_base_code=grain_base_option.code,
+            grain_base_label=grain_base_option.label,
             output_name=str(recipe_payload["title"]),
             output_kg=one_cycle_kg * mix_count,
             ingredients=tuple(ingredients),
@@ -182,8 +196,9 @@ class StockService:
         *,
         user_id: int,
         mix_count: float,
+        grain_base: str = DEFAULT_GRAIN_BASE,
     ) -> MixPlan:
-        plan = self.plan_mix(user_id=user_id, mix_count=mix_count)
+        plan = self.plan_mix(user_id=user_id, mix_count=mix_count, grain_base=grain_base)
         if not plan.can_produce:
             raise ValueError("Недостаточно ингредиентов для замеса.")
         output = self.stock.get_or_create_item(
@@ -200,11 +215,16 @@ class StockService:
             output_kg=plan.output_kg,
         )
         for required in plan.ingredients:
-            ingredient_item = self.stock.get_or_create_item(
-                user_id=user_id,
-                name=required.name,
-                kind="ingredient",
-            )
+            if required.stock_item_id is None:
+                ingredient_item = self.stock.get_or_create_item(
+                    user_id=user_id,
+                    name=required.name,
+                    kind="ingredient",
+                )
+            else:
+                ingredient_item = self.stock.get_item(required.stock_item_id, user_id)
+                if ingredient_item is None:
+                    raise ValueError("Позиция склада не найдена.")
             current = self.estimate_item(ingredient_item, now=mix.created_at)
             self.stock.add_mix_item(
                 mix_production_id=mix.id,
@@ -268,8 +288,23 @@ class StockService:
         return self.stock.list_transactions(user_id, limit=limit)
 
     @staticmethod
-    def one_chicken_mix_cycle_kg() -> float:
-        return sum(item.parts * item.density_kg_per_l for item in CHICKEN_MIX_RECIPE)
+    def one_chicken_mix_cycle_kg(grain_base: str = DEFAULT_GRAIN_BASE) -> float:
+        return sum(
+            item.parts * item.density_kg_per_l
+            for item in load_chicken_mix_recipe(grain_base=grain_base)
+        )
+
+    def _find_stock_item_by_names(self, *, user_id: int, names: tuple[str, ...]) -> StockItem | None:
+        seen = set()
+        for name in names:
+            normalized = name.strip().lower()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            item = self.stock.find_item_by_name(user_id=user_id, name=name)
+            if item is not None:
+                return item
+        return None
 
     def _consumed_since(self, item: StockItem, since: datetime, until: datetime) -> float:
         consumed = 0.0

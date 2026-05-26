@@ -13,6 +13,7 @@ class MixIngredient:
     parts: float
     density_kg_per_l: float
     group: str
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -28,19 +29,88 @@ class MixCalculation:
     one_cycle_liters: float
     one_cycle_kg: float
     scale: float
+    grain_base_code: str
+    grain_base_label: str
+    grain_base_note: str
     ingredients: tuple[MixIngredientAmount, ...]
 
 
-def _load_recipe(code: str) -> tuple[MixIngredient, ...]:
-    return tuple(
-        MixIngredient(
-            name=str(item["name"]),
-            parts=float(item["parts"]),
-            density_kg_per_l=float(item["density_kg_per_l"]),
-            group=str(item["group"]),
-        )
-        for item in CONTENT["feed_recipes"][code]["ingredients"]
+@dataclass(frozen=True)
+class GrainBaseOption:
+    code: str
+    label: str
+    name: str
+    parts: float
+    density_kg_per_l: float
+    group: str
+    aliases: tuple[str, ...]
+    note: str
+
+
+DEFAULT_GRAIN_BASE = "wheat"
+
+
+def _grain_base_payload(code: str) -> dict:
+    variants = CONTENT["feed_recipes"]["chicken_mix"]["ingredient_variants"]["grain_base"]
+    for option in variants["options"]:
+        if str(option["code"]) == code:
+            return option
+    raise ValueError("Неизвестный вариант зерновой основы.")
+
+
+def get_grain_base_option(code: str = DEFAULT_GRAIN_BASE) -> GrainBaseOption:
+    payload = _grain_base_payload(code)
+    return GrainBaseOption(
+        code=str(payload["code"]),
+        label=str(payload["label"]),
+        name=str(payload["name"]),
+        parts=float(payload["parts"]),
+        density_kg_per_l=float(payload["density_kg_per_l"]),
+        group=str(payload["group"]),
+        aliases=tuple(str(item) for item in payload.get("aliases", [])),
+        note=str(payload.get("note", "")),
     )
+
+
+def list_grain_base_options() -> tuple[GrainBaseOption, ...]:
+    variants = CONTENT["feed_recipes"]["chicken_mix"]["ingredient_variants"]["grain_base"]
+    return tuple(get_grain_base_option(str(option["code"])) for option in variants["options"])
+
+
+def _ingredient_from_payload(item: dict) -> MixIngredient:
+    return MixIngredient(
+        name=str(item["name"]),
+        parts=float(item["parts"]),
+        density_kg_per_l=float(item["density_kg_per_l"]),
+        group=str(item["group"]),
+        aliases=tuple(str(alias) for alias in item.get("aliases", [])),
+    )
+
+
+def _load_recipe(code: str, *, grain_base: str = DEFAULT_GRAIN_BASE) -> tuple[MixIngredient, ...]:
+    selected_grain_base = get_grain_base_option(grain_base)
+    ingredients = []
+    for item in CONTENT["feed_recipes"][code]["ingredients"]:
+        if item.get("variant_group") == "grain_base":
+            ingredients.append(
+                MixIngredient(
+                    name=selected_grain_base.name,
+                    parts=selected_grain_base.parts,
+                    density_kg_per_l=selected_grain_base.density_kg_per_l,
+                    group=selected_grain_base.group,
+                    aliases=selected_grain_base.aliases,
+                )
+            )
+        else:
+            ingredients.append(_ingredient_from_payload(item))
+    return tuple(ingredients)
+
+
+def load_chicken_mix_recipe(
+    *,
+    grain_base: str = DEFAULT_GRAIN_BASE,
+) -> tuple[MixIngredient, ...]:
+    return _load_recipe("chicken_mix", grain_base=grain_base)
 
 
 CHICKEN_MIX_RECIPE: tuple[MixIngredient, ...] = _load_recipe("chicken_mix")
@@ -65,12 +135,18 @@ def parse_feed_amount(value: str, *, default_bag_kg: float = DEFAULT_BAG_KG) -> 
     return kg
 
 
-def calculate_chicken_mix(target_kg: float) -> MixCalculation:
+def calculate_chicken_mix(
+    target_kg: float,
+    *,
+    grain_base: str = DEFAULT_GRAIN_BASE,
+) -> MixCalculation:
     if target_kg <= 0:
         raise ValueError("Вес смеси должен быть больше нуля.")
 
-    one_cycle_liters = sum(item.parts for item in CHICKEN_MIX_RECIPE)
-    one_cycle_kg = sum(item.parts * item.density_kg_per_l for item in CHICKEN_MIX_RECIPE)
+    grain_base_option = get_grain_base_option(grain_base)
+    recipe = load_chicken_mix_recipe(grain_base=grain_base_option.code)
+    one_cycle_liters = sum(item.parts for item in recipe)
+    one_cycle_kg = sum(item.parts * item.density_kg_per_l for item in recipe)
     scale = target_kg / one_cycle_kg
     ingredients = tuple(
         MixIngredientAmount(
@@ -78,13 +154,16 @@ def calculate_chicken_mix(target_kg: float) -> MixCalculation:
             liters=item.parts * scale,
             kg=item.parts * item.density_kg_per_l * scale,
         )
-        for item in CHICKEN_MIX_RECIPE
+        for item in recipe
     )
     return MixCalculation(
         target_kg=target_kg,
         one_cycle_liters=one_cycle_liters,
         one_cycle_kg=one_cycle_kg,
         scale=scale,
+        grain_base_code=grain_base_option.code,
+        grain_base_label=grain_base_option.label,
+        grain_base_note=grain_base_option.note,
         ingredients=ingredients,
     )
 
@@ -95,6 +174,7 @@ def format_chicken_mix(calculation: MixCalculation) -> str:
         "",
         f"Готовая смесь: {calculation.target_kg:.1f} кг",
         str(CONTENT["feed_recipes"]["chicken_mix"]["description"]),
+        f"Зерновая основа вместо пшеницы: {calculation.grain_base_label}.",
         (
             f"Базовый замес: {calculation.one_cycle_liters:g} кружек "
             f"≈ {calculation.one_cycle_kg:.2f} кг."
@@ -116,6 +196,7 @@ def format_chicken_mix(calculation: MixCalculation) -> str:
     lines.extend(
         [
             "",
+            calculation.grain_base_note,
             "Расчет по кг примерный: части заданы объемом, а вес зависит от фракции и влажности сырья.",
         ]
     )

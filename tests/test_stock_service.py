@@ -57,6 +57,38 @@ class StockServiceTest(unittest.TestCase):
         self.assertGreater(estimates["Смесь для кур"].remaining_kg, 20)
         self.assertLess(estimates["Кукуруза"].remaining_kg, 100)
 
+    def test_mix_can_use_layer_grain_mix_instead_of_wheat(self) -> None:
+        for name in [
+            "Кукуруза",
+            "Зерносмесь",
+            "Ячмень",
+            "Комбикорм",
+            "Мясокостная мука",
+            "Рыбная мука",
+            "Ракушка",
+            "Премикс",
+        ]:
+            self.service.add_purchase(
+                user_id=1,
+                name=name,
+                kind="ingredient",
+                amount_kg=100,
+            )
+
+        default_plan = self.service.plan_mix(user_id=1, mix_count=3)
+        grain_mix_plan = self.service.produce_mix(
+            user_id=1,
+            mix_count=3,
+            grain_base="layer_grain_mix",
+        )
+        estimates = {item.item.name: item for item in self.service.list_estimates(1)}
+
+        self.assertFalse(default_plan.can_produce)
+        self.assertTrue(grain_mix_plan.can_produce)
+        self.assertEqual(grain_mix_plan.grain_base_label, "Зерносмесь")
+        self.assertLess(estimates["Зерносмесь"].remaining_kg, 100)
+        self.assertNotIn("Пшеница", estimates)
+
     def test_mix_reports_missing_ingredients(self) -> None:
         self.service.add_purchase(
             user_id=1,

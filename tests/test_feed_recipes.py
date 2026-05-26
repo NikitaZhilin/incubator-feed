@@ -18,6 +18,15 @@ class FeedRecipesTest(unittest.TestCase):
         self.assertEqual(calculation.ingredients[0].ingredient.name, "Кукуруза")
         self.assertEqual(calculation.ingredients[-1].ingredient.name, "Премикс")
 
+    def test_chicken_mix_can_replace_wheat_with_layer_grain_mix(self) -> None:
+        calculation = calculate_chicken_mix(25, grain_base="layer_grain_mix")
+        grain_mix = calculation.ingredients[1]
+
+        self.assertEqual(grain_mix.ingredient.name, "Зерновая смесь для кур несушек")
+        self.assertAlmostEqual(grain_mix.liters, 9.34, places=2)
+        self.assertAlmostEqual(grain_mix.kg, 6.72, places=2)
+        self.assertAlmostEqual(sum(item.kg for item in calculation.ingredients), 25, places=6)
+
 
 if __name__ == "__main__":
     unittest.main()
