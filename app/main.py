@@ -19,6 +19,7 @@ from app.services.stock import StockService
 from app.services.admin import AdminService
 from app.services.release_notifications import ReleaseNotificationService
 from app.services.reminders import ReminderRunner
+from app.services.weather import OpenMeteoWeatherClient
 from app.storage.database import Database
 from app.storage.repositories.analytics import AnalyticsRepository
 from app.storage.repositories.batches import BatchRepository
@@ -93,7 +94,11 @@ async def main() -> None:
         )
         feed_repository = FeedRepository(database)
         feed_service = FeedService(feed_repository, analytics)
-        egg_service = EggService(EggRepository(database), feed_repository)
+        egg_service = EggService(
+            EggRepository(database),
+            feed_repository,
+            OpenMeteoWeatherClient(),
+        )
         stock_service = StockService(StockRepository(database), feed_repository, analytics)
         admin_service = AdminService(
             database=database,

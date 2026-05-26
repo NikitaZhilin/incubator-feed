@@ -70,6 +70,7 @@ def exclusions_keyboard(exclusions) -> InlineKeyboardMarkup:
 def weather_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Обновить погоду", callback_data="eggs:weather_refresh")],
             [InlineKeyboardButton(text="✏️ Изменить город", callback_data="eggs:weather_city")],
             [InlineKeyboardButton(text="⬅️ К яйцам", callback_data="eggs:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],

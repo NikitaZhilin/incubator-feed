@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 import sqlite3
 
-from app.domain import EggEntry, HenLayingExclusion, WeatherSettings
+from app.domain import DailyWeather, EggEntry, HenLayingExclusion, WeatherSettings
 from app.storage.database import Database
 
 
@@ -218,21 +218,98 @@ class EggRepository:
                 ).fetchone()
         return self._weather_from_row(row)
 
-    def update_weather_city(self, *, user_id: int, city: str) -> WeatherSettings:
+    def update_weather_city(
+        self,
+        *,
+        user_id: int,
+        city: str,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        provider: str = "manual",
+    ) -> WeatherSettings:
         now = datetime.now(timezone.utc).isoformat()
         with self.database.connect() as connection:
             connection.execute(
                 """
-                INSERT INTO weather_settings (user_id, city, provider, updated_at)
-                VALUES (?, ?, 'manual', ?)
+                INSERT INTO weather_settings (
+                    user_id, city, latitude, longitude, provider, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     city = excluded.city,
+                    latitude = excluded.latitude,
+                    longitude = excluded.longitude,
                     provider = excluded.provider,
                     updated_at = excluded.updated_at
                 """,
-                (user_id, city[:120], now),
+                (user_id, city[:120], latitude, longitude, provider[:80], now),
             )
         return self.get_weather_settings(user_id)
+
+    def upsert_daily_weather(
+        self,
+        *,
+        user_id: int,
+        weather_date: date,
+        city: str,
+        temperature_avg_c: float | None,
+        temperature_min_c: float | None,
+        temperature_max_c: float | None,
+        humidity_avg_percent: float | None = None,
+        precipitation_mm: float | None = None,
+        condition: str = "",
+        provider: str = "open-meteo",
+    ) -> DailyWeather:
+        now = datetime.now(timezone.utc).isoformat()
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO daily_weather (
+                    user_id, weather_date, city, temperature_avg_c,
+                    temperature_min_c, temperature_max_c, humidity_avg_percent,
+                    precipitation_mm, condition, provider, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, weather_date) DO UPDATE SET
+                    city = excluded.city,
+                    temperature_avg_c = excluded.temperature_avg_c,
+                    temperature_min_c = excluded.temperature_min_c,
+                    temperature_max_c = excluded.temperature_max_c,
+                    humidity_avg_percent = excluded.humidity_avg_percent,
+                    precipitation_mm = excluded.precipitation_mm,
+                    condition = excluded.condition,
+                    provider = excluded.provider,
+                    created_at = excluded.created_at
+                """,
+                (
+                    user_id,
+                    weather_date.isoformat(),
+                    city[:120],
+                    temperature_avg_c,
+                    temperature_min_c,
+                    temperature_max_c,
+                    humidity_avg_percent,
+                    precipitation_mm,
+                    condition[:120],
+                    provider[:80],
+                    now,
+                ),
+            )
+        return self.get_daily_weather(user_id=user_id, weather_date=weather_date)
+
+    def get_daily_weather(self, *, user_id: int, weather_date: date) -> DailyWeather | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, user_id, weather_date, city, temperature_avg_c,
+                       temperature_min_c, temperature_max_c, humidity_avg_percent,
+                       precipitation_mm, condition, provider, created_at
+                FROM daily_weather
+                WHERE user_id = ? AND weather_date = ?
+                """,
+                (user_id, weather_date.isoformat()),
+            ).fetchone()
+        return self._daily_weather_from_row(row) if row else None
 
     @staticmethod
     def _exclusion_select_sql(where_sql: str) -> str:
@@ -289,4 +366,31 @@ class EggRepository:
             longitude=float(row["longitude"]) if row["longitude"] is not None else None,
             provider=str(row["provider"]),
             updated_at=datetime.fromisoformat(str(row["updated_at"])),
+        )
+
+    @staticmethod
+    def _daily_weather_from_row(row: sqlite3.Row) -> DailyWeather:
+        return DailyWeather(
+            id=int(row["id"]),
+            user_id=int(row["user_id"]),
+            weather_date=date.fromisoformat(str(row["weather_date"])),
+            city=str(row["city"]),
+            temperature_avg_c=(
+                float(row["temperature_avg_c"]) if row["temperature_avg_c"] is not None else None
+            ),
+            temperature_min_c=(
+                float(row["temperature_min_c"]) if row["temperature_min_c"] is not None else None
+            ),
+            temperature_max_c=(
+                float(row["temperature_max_c"]) if row["temperature_max_c"] is not None else None
+            ),
+            humidity_avg_percent=(
+                float(row["humidity_avg_percent"]) if row["humidity_avg_percent"] is not None else None
+            ),
+            precipitation_mm=(
+                float(row["precipitation_mm"]) if row["precipitation_mm"] is not None else None
+            ),
+            condition=str(row["condition"] or ""),
+            provider=str(row["provider"]),
+            created_at=datetime.fromisoformat(str(row["created_at"])),
         )

@@ -307,6 +307,22 @@ class WeatherSettings:
 
 
 @dataclass(frozen=True)
+class DailyWeather:
+    id: int
+    user_id: int
+    weather_date: date
+    city: str
+    temperature_avg_c: float | None
+    temperature_min_c: float | None
+    temperature_max_c: float | None
+    humidity_avg_percent: float | None
+    precipitation_mm: float | None
+    condition: str
+    provider: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
 class EggStats:
     today: date
     total_hens_count: int
@@ -319,6 +335,10 @@ class EggStats:
     month_average: float
     eggs_per_active_hen: float | None
     next_week_forecast: int
+    weather_adjusted_week_forecast: int | None
+    weather_impact_percent: int
+    weather_note: str
+    weather: DailyWeather | None
     active_exclusions: tuple[HenLayingExclusion, ...]
     weather_city: str
 

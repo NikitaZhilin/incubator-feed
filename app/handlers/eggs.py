@@ -3,7 +3,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
-from app.domain import EggStats, HenLayingExclusion
+from app.domain import DailyWeather, EggStats, HenLayingExclusion
 from app.keyboards.eggs import (
     eggs_back_keyboard,
     eggs_cancel_keyboard,
@@ -36,7 +36,7 @@ class EggWeatherFlow(StatesGroup):
 async def eggs_menu(callback: CallbackQuery, state: FSMContext, egg_service: EggService) -> None:
     await state.clear()
     await callback.message.answer(
-        _format_eggs_menu(egg_service.stats(callback.from_user.id)),
+        _format_eggs_menu(_safe_stats(egg_service, callback.from_user.id, refresh_weather=True)),
         reply_markup=eggs_menu_keyboard(),
     )
     await callback.answer()
@@ -74,7 +74,7 @@ async def eggs_count(message: Message, state: FSMContext, egg_service: EggServic
 @router.callback_query(F.data == "eggs:stats")
 async def eggs_stats(callback: CallbackQuery, egg_service: EggService) -> None:
     await callback.message.answer(
-        _format_stats(egg_service.stats(callback.from_user.id)),
+        _format_stats(_safe_stats(egg_service, callback.from_user.id, refresh_weather=True)),
         reply_markup=eggs_back_keyboard(),
     )
     await callback.answer()
@@ -180,12 +180,38 @@ async def eggs_exclude_finish(callback: CallbackQuery, egg_service: EggService) 
 
 @router.callback_query(F.data == "eggs:weather")
 async def eggs_weather(callback: CallbackQuery, egg_service: EggService) -> None:
+    weather_error = ""
+    try:
+        weather = egg_service.refresh_weather(callback.from_user.id)
+    except Exception as exc:
+        weather = egg_service.get_daily_weather(callback.from_user.id)
+        weather_error = f"\n\nПогоду сейчас не удалось обновить: {exc}"
     settings = egg_service.get_weather_settings(callback.from_user.id)
     await callback.message.answer(
         "🌦 Город и погода\n\n"
         f"Город: {settings.city}\n"
-        "Город сохранен для погодной привязки расчетов яйценоскости. "
-        "Автоматический погодный коэффициент будет включен после подключения источника погоды.",
+        f"{_format_weather(weather)}"
+        f"{weather_error}\n\n"
+        "Погодная поправка в расчетах ориентировочная: бот смотрит уличную погоду, "
+        "а яйценоскость сильнее зависит от фактических условий в курятнике.",
+        reply_markup=weather_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "eggs:weather_refresh")
+async def eggs_weather_refresh(callback: CallbackQuery, egg_service: EggService) -> None:
+    try:
+        weather = egg_service.refresh_weather(callback.from_user.id, force=True)
+    except Exception as exc:
+        await callback.message.answer(
+            f"Погоду сейчас не удалось обновить: {exc}",
+            reply_markup=weather_keyboard(),
+        )
+        await callback.answer()
+        return
+    await callback.message.answer(
+        "Погода обновлена.\n\n" + _format_weather(weather),
         reply_markup=weather_keyboard(),
     )
     await callback.answer()
@@ -208,8 +234,30 @@ async def eggs_weather_city_save(message: Message, state: FSMContext, egg_servic
     except ValueError as exc:
         await message.answer(str(exc), reply_markup=eggs_cancel_keyboard())
         return
+    except Exception as exc:
+        await state.clear()
+        await message.answer(
+            f"Город сейчас не удалось проверить: {exc}",
+            reply_markup=weather_keyboard(),
+        )
+        return
+    try:
+        weather = egg_service.refresh_weather(message.from_user.id, force=True)
+    except ValueError as exc:
+        await message.answer(str(exc), reply_markup=eggs_cancel_keyboard())
+        return
+    except Exception as exc:
+        await state.clear()
+        await message.answer(
+            f"Город сохранен: {settings.city}\n\nПогоду сейчас не удалось загрузить: {exc}",
+            reply_markup=weather_keyboard(),
+        )
+        return
     await state.clear()
-    await message.answer(f"Город сохранен: {settings.city}", reply_markup=weather_keyboard())
+    await message.answer(
+        f"Город сохранен: {settings.city}\n\n" + _format_weather(weather),
+        reply_markup=weather_keyboard(),
+    )
 
 
 def _format_eggs_menu(stats: EggStats) -> str:
@@ -218,7 +266,8 @@ def _format_eggs_menu(stats: EggStats) -> str:
         "Здесь учитываем ежедневный сбор яиц и считаем прогноз только по взрослым несушкам.\n\n"
         f"Сегодня: {stats.today_eggs} шт.\n"
         f"Несутся сейчас: {stats.active_hens_count} из {stats.total_hens_count}\n"
-        f"Прогноз на 7 дней: примерно {stats.next_week_forecast} шт."
+        f"Прогноз на 7 дней: примерно {stats.next_week_forecast} шт.\n"
+        f"{_format_weather_forecast_line(stats)}"
     )
 
 
@@ -243,7 +292,11 @@ def _format_stats(stats: EggStats) -> str:
         f"На одну активную несушку: {per_hen}",
         "",
         f"Прогноз на следующую неделю: примерно {stats.next_week_forecast} шт.",
+        _format_weather_forecast_line(stats),
+        "",
         f"Город для погодной привязки: {stats.weather_city}",
+        _format_weather(stats.weather),
+        f"Погодная поправка: {stats.weather_impact_percent:+d}%. {stats.weather_note}",
     ]
     if stats.active_exclusions:
         lines.extend(["", "Не учитываются сейчас:"])
@@ -272,3 +325,44 @@ def _format_exclusion(exclusion: HenLayingExclusion) -> str:
     reason = EXCLUSION_REASON_LABELS.get(exclusion.reason, exclusion.reason)
     until = f" до {exclusion.expected_until.isoformat()}" if exclusion.expected_until else " без даты окончания"
     return f"#{exclusion.id}: {exclusion.hens_count} кур., {reason}{until}"
+
+
+def _safe_stats(egg_service: EggService, user_id: int, *, refresh_weather: bool) -> EggStats:
+    try:
+        return egg_service.stats(user_id, refresh_weather=refresh_weather)
+    except Exception:
+        return egg_service.stats(user_id, refresh_weather=False)
+
+
+def _format_weather_forecast_line(stats: EggStats) -> str:
+    if stats.weather_adjusted_week_forecast is None:
+        return "Погодная поправка: нет данных за сегодня."
+    if stats.weather_impact_percent == 0:
+        return f"С погодой: без поправки, примерно {stats.weather_adjusted_week_forecast} шт."
+    return (
+        f"С погодой: примерно {stats.weather_adjusted_week_forecast} шт. "
+        f"({stats.weather_impact_percent:+d}%)."
+    )
+
+
+def _format_weather(weather: DailyWeather | None) -> str:
+    if weather is None:
+        return "Погода за сегодня еще не загружена."
+    temp = "нет данных"
+    if weather.temperature_avg_c is not None:
+        temp = f"{weather.temperature_avg_c:.1f} °C"
+        if weather.temperature_min_c is not None and weather.temperature_max_c is not None:
+            temp += f" ({weather.temperature_min_c:.0f}...{weather.temperature_max_c:.0f} °C)"
+    precipitation = (
+        "нет данных"
+        if weather.precipitation_mm is None
+        else f"{weather.precipitation_mm:.1f} мм"
+    )
+    condition = weather.condition or "нет данных"
+    return (
+        f"Погода на {weather.weather_date.isoformat()}:\n"
+        f"- температура: {temp}\n"
+        f"- осадки: {precipitation}\n"
+        f"- состояние: {condition}\n"
+        f"- источник: Open-Meteo"
+    )

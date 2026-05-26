@@ -5,6 +5,7 @@ import unittest
 
 from app.services.eggs import EggService
 from app.services.feeds import FeedService
+from app.services.weather import GeocodedLocation, WeatherDay
 from app.storage.database import Database
 from app.storage.repositories.eggs import EggRepository
 from app.storage.repositories.feeds import FeedRepository
@@ -82,6 +83,43 @@ class EggServiceTest(unittest.TestCase):
         rows = self.egg_service.history(1, days=3, today=date(2026, 5, 26))
 
         self.assertEqual(rows, [(date(2026, 5, 26), 0), (date(2026, 5, 25), 0), (date(2026, 5, 24), 0)])
+
+    def test_weather_is_loaded_and_applied_to_forecast(self) -> None:
+        class FakeWeatherClient:
+            def geocode(self, city: str) -> GeocodedLocation:
+                return GeocodedLocation(name="Курск", admin1="Курская область", latitude=51.73, longitude=36.19)
+
+            def forecast_today(self, *, latitude: float, longitude: float, today: date) -> WeatherDay:
+                return WeatherDay(
+                    date=today,
+                    temperature_avg_c=33.0,
+                    temperature_min_c=27.0,
+                    temperature_max_c=36.0,
+                    precipitation_mm=0.0,
+                    condition="ясно",
+                )
+
+        service = EggService(EggRepository(self.database), self.feed_repository, FakeWeatherClient())
+        self.feed_service.create_bird_group(
+            user_id=1,
+            name="Несушки",
+            bird_count=10,
+            species="chicken",
+            role="hens",
+        )
+        for _ in range(7):
+            service.record_today(1, 10, today=date(2026, 5, 26))
+
+        settings = service.update_weather_city(user_id=1, city="Курск")
+        weather = service.refresh_weather(1, today=date(2026, 5, 26), force=True)
+        stats = service.stats(1, today=date(2026, 5, 26), refresh_weather=True)
+
+        self.assertEqual(settings.city, "Курск, Курская область")
+        self.assertEqual(weather.temperature_avg_c, 33.0)
+        self.assertEqual(stats.next_week_forecast, 70)
+        self.assertEqual(stats.weather_impact_percent, -15)
+        self.assertEqual(stats.weather_adjusted_week_forecast, 60)
+        self.assertIn("жары", stats.weather_note)
 
 
 if __name__ == "__main__":
