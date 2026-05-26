@@ -9,8 +9,10 @@ from app.handlers.eggs import EggEntryFlow, eggs_add, eggs_add_date, eggs_count 
 from app.handlers.feeds import (
     ChangeFeed,
     EditFeed,
+    BirdGroupFlow,
     NewFeed,
     StockPurchaseFlow,
+    bird_group_count,
     feed_amount,
     feed_change_amount,
     feed_command,
@@ -236,6 +238,21 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.state, NewFeed.rooster_rate)
         self.assertEqual(state.data["bird_count"], 3)
         self.assertIn("Кур/несушек нет", roosters_message.answers[-1][0])
+
+    async def test_adult_bird_group_defaults_to_chickens_after_count(self) -> None:
+        state = FakeState()
+        await state.update_data(name="Несушки", group_kind="adult", role="hens")
+        await state.set_state(BirdGroupFlow.count)
+        message = FakeMessage("12")
+
+        await bird_group_count(message, state, self.feed_service, self.incubation)
+
+        self.assertTrue(state.cleared)
+        self.assertIn("Поголовье создано", message.answers[-1][0])
+        self.assertIn("Вид: куры", message.answers[-1][0])
+        groups = self.feed_service.list_bird_groups(1)
+        self.assertEqual(groups[0].species, "chicken")
+        self.assertEqual(groups[0].role, "hens")
 
     async def test_feed_restock_writeoff_and_edit_handlers(self) -> None:
         feed = self.feed_service.create_feed(

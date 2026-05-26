@@ -311,6 +311,7 @@ async def bird_group_kind(callback: CallbackQuery, state: FSMContext) -> None:
 async def bird_group_count(
     message: Message,
     state: FSMContext,
+    feed_service: FeedService,
     incubation_service: IncubationService,
 ) -> None:
     if not message.text or not message.text.strip().isdigit() or int(message.text.strip()) <= 0:
@@ -330,16 +331,23 @@ async def bird_group_count(
             reply_markup=feed_cancel_keyboard(),
         )
         return
-    await state.set_state(BirdGroupFlow.species)
-    rows = [
-        [InlineKeyboardButton(text=profile.title, callback_data=f"feeds:group_species:{code}")]
-        for code, profile in PROFILES.items()
-    ]
-    rows.append([InlineKeyboardButton(text="Без вида", callback_data="feeds:group_species:none")])
-    rows.append([InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")])
+    try:
+        group = feed_service.create_bird_group(
+            user_id=message.from_user.id,
+            name=str(data["name"]),
+            bird_count=int(data["bird_count"]),
+            species="chicken",
+            group_kind="adult",
+            role=str(data.get("role") or "mixed"),
+        )
+    except ValueError as exc:
+        await message.answer(str(exc))
+        return
+    await state.clear()
     await message.answer(
-        "Выберите вид птицы для поголовья или оставьте без вида.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        f"Поголовье создано: #{group.id} {group.name}, {group.bird_count} птиц.\n"
+        "Вид: куры.",
+        reply_markup=bird_groups_keyboard(feed_service.list_bird_groups(message.from_user.id)),
     )
 
 
