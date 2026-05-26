@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 import json
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 
@@ -84,8 +84,23 @@ class OpenMeteoWeatherClient:
 
     def forecast_today_by_city(self, *, city: str, today: date) -> WeatherDay:
         clean_city = city.split(",", 1)[0].strip() or city.strip()
+        return self._forecast_today_from_wttr(location=quote(clean_city, safe=""), today=today)
+
+    def forecast_today_by_coordinates(
+        self,
+        *,
+        latitude: float,
+        longitude: float,
+        today: date,
+    ) -> WeatherDay:
+        return self._forecast_today_from_wttr(
+            location=f"{latitude:.6f},{longitude:.6f}",
+            today=today,
+        )
+
+    def _forecast_today_from_wttr(self, *, location: str, today: date) -> WeatherDay:
         payload = self._get_json(
-            f"https://wttr.in/{clean_city}",
+            f"https://wttr.in/{location}",
             {
                 "format": "j1",
                 "lang": "ru",

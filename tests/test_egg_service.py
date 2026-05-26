@@ -6,6 +6,7 @@ import unittest
 from app.services.eggs import EggService
 from app.services.feeds import FeedService
 from app.services.weather import GeocodedLocation, WeatherDay
+from app.services.weather import OpenMeteoWeatherClient
 from app.storage.database import Database
 from app.storage.repositories.eggs import EggRepository
 from app.storage.repositories.feeds import FeedRepository
@@ -130,6 +131,9 @@ class EggServiceTest(unittest.TestCase):
                 raise TimeoutError("open-meteo timeout")
 
             def forecast_today_by_city(self, *, city: str, today: date) -> WeatherDay:
+                raise AssertionError("Fallback must use coordinates to avoid Cyrillic URL issues.")
+
+            def forecast_today_by_coordinates(self, *, latitude: float, longitude: float, today: date) -> WeatherDay:
                 return WeatherDay(
                     date=today,
                     temperature_avg_c=18.0,
@@ -147,6 +151,38 @@ class EggServiceTest(unittest.TestCase):
 
         self.assertEqual(weather.provider, "wttr.in")
         self.assertEqual(weather.temperature_avg_c, 18.0)
+
+    def test_wttr_city_url_encodes_cyrillic_city(self) -> None:
+        class CapturingWeatherClient(OpenMeteoWeatherClient):
+            def __init__(self) -> None:
+                super().__init__()
+                self.request_url = ""
+
+            def _get_json(self, base_url: str, params: dict[str, object]) -> dict:
+                self.request_url = base_url
+                return {
+                    "current_condition": [
+                        {
+                            "temp_C": "18",
+                            "precipMM": "0",
+                            "lang_ru": [{"value": "ясно"}],
+                        }
+                    ],
+                    "weather": [
+                        {
+                            "avgtempC": "18",
+                            "mintempC": "12",
+                            "maxtempC": "23",
+                        }
+                    ],
+                }
+
+        client = CapturingWeatherClient()
+
+        weather = client.forecast_today_by_city(city="Курск, Курская область", today=date(2026, 5, 26))
+
+        self.assertIn("%D0%9A%D1%83%D1%80%D1%81%D0%BA", client.request_url)
+        self.assertEqual(weather.provider, "wttr.in")
 
 
 if __name__ == "__main__":

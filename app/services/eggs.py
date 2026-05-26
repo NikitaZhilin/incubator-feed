@@ -196,8 +196,9 @@ class EggService:
             )
         except Exception as primary_exc:
             try:
-                weather_day = self.weather_client.forecast_today_by_city(
-                    city=settings.city,
+                weather_day = self.weather_client.forecast_today_by_coordinates(
+                    latitude=settings.latitude,
+                    longitude=settings.longitude,
                     today=current_date,
                 )
             except Exception as fallback_exc:
