@@ -24,10 +24,11 @@ class WeatherDay:
     temperature_max_c: float | None
     precipitation_mm: float | None
     condition: str
+    provider: str = "open-meteo"
 
 
 class OpenMeteoWeatherClient:
-    def __init__(self, *, timeout_seconds: float = 3.0) -> None:
+    def __init__(self, *, timeout_seconds: float = 5.0) -> None:
         self.timeout_seconds = timeout_seconds
 
     def geocode(self, city: str) -> GeocodedLocation:
@@ -78,6 +79,35 @@ class OpenMeteoWeatherClient:
             temperature_max_c=_float_at(daily.get("temperature_2m_max"), index),
             precipitation_mm=_float_at(daily.get("precipitation_sum"), index),
             condition=_weather_code_label(_int_at(daily.get("weather_code"), index)),
+            provider="open-meteo",
+        )
+
+    def forecast_today_by_city(self, *, city: str, today: date) -> WeatherDay:
+        clean_city = city.split(",", 1)[0].strip() or city.strip()
+        payload = self._get_json(
+            f"https://wttr.in/{clean_city}",
+            {
+                "format": "j1",
+                "lang": "ru",
+            },
+        )
+        current = (payload.get("current_condition") or [{}])[0]
+        weather = (payload.get("weather") or [{}])[0]
+        condition_items = current.get("lang_ru") or current.get("weatherDesc") or []
+        condition = ""
+        if condition_items:
+            condition = str(condition_items[0].get("value") or "")
+        avg = _float_value(weather.get("avgtempC"))
+        if avg is None:
+            avg = _float_value(current.get("temp_C"))
+        return WeatherDay(
+            date=today,
+            temperature_avg_c=avg,
+            temperature_min_c=_float_value(weather.get("mintempC")),
+            temperature_max_c=_float_value(weather.get("maxtempC")),
+            precipitation_mm=_float_value(current.get("precipMM")),
+            condition=condition,
+            provider="wttr.in",
         )
 
     def _get_json(self, base_url: str, params: dict[str, object]) -> dict:
@@ -91,6 +121,12 @@ def _float_at(values, index: int) -> float | None:
     if not values or index >= len(values) or values[index] is None:
         return None
     return float(values[index])
+
+
+def _float_value(value) -> float | None:
+    if value is None or value == "":
+        return None
+    return float(value)
 
 
 def _int_at(values, index: int) -> int | None:

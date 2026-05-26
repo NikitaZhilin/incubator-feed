@@ -188,11 +188,23 @@ class EggService:
                 longitude=location.longitude,
                 provider="open-meteo",
             )
-        weather_day = self.weather_client.forecast_today(
-            latitude=settings.latitude,
-            longitude=settings.longitude,
-            today=current_date,
-        )
+        try:
+            weather_day = self.weather_client.forecast_today(
+                latitude=settings.latitude,
+                longitude=settings.longitude,
+                today=current_date,
+            )
+        except Exception as primary_exc:
+            try:
+                weather_day = self.weather_client.forecast_today_by_city(
+                    city=settings.city,
+                    today=current_date,
+                )
+            except Exception as fallback_exc:
+                raise RuntimeError(
+                    "погодные сервисы не ответили. "
+                    f"Open-Meteo: {primary_exc}; wttr.in: {fallback_exc}"
+                ) from fallback_exc
         return self.eggs.upsert_daily_weather(
             user_id=user_id,
             weather_date=weather_day.date,
@@ -202,7 +214,7 @@ class EggService:
             temperature_max_c=weather_day.temperature_max_c,
             precipitation_mm=weather_day.precipitation_mm,
             condition=weather_day.condition,
-            provider="open-meteo",
+            provider=weather_day.provider,
         )
 
     def total_laying_hens(self, user_id: int) -> int:

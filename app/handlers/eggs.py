@@ -373,7 +373,7 @@ def _format_weather(weather: DailyWeather | None) -> str:
         f"- температура: {temp}\n"
         f"- осадки: {precipitation}\n"
         f"- состояние: {condition}\n"
-        f"- источник: Open-Meteo"
+        f"- источник: {weather.provider}"
     )
 
 
@@ -391,7 +391,9 @@ def _format_weather_error(exc: Exception) -> str:
     text = str(exc).strip()
     lowered = text.lower()
     if "timed out" in lowered or "timeout" in lowered:
-        return "погодный сервис не ответил за 3 секунды. Попробуйте обновить позже."
+        return "погодные сервисы не ответили за отведенное время. Попробуйте обновить позже."
+    if "погодные сервисы не ответили" in lowered:
+        return text
     if "urlopen error" in lowered:
         return "нет соединения с погодным сервисом. Попробуйте позже."
     return text or "неизвестная ошибка погодного сервиса."

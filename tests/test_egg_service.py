@@ -121,6 +121,33 @@ class EggServiceTest(unittest.TestCase):
         self.assertEqual(stats.weather_adjusted_week_forecast, 60)
         self.assertIn("жары", stats.weather_note)
 
+    def test_weather_falls_back_to_city_provider(self) -> None:
+        class FallbackWeatherClient:
+            def geocode(self, city: str) -> GeocodedLocation:
+                return GeocodedLocation(name="Курск", admin1="Курская область", latitude=51.73, longitude=36.19)
+
+            def forecast_today(self, *, latitude: float, longitude: float, today: date) -> WeatherDay:
+                raise TimeoutError("open-meteo timeout")
+
+            def forecast_today_by_city(self, *, city: str, today: date) -> WeatherDay:
+                return WeatherDay(
+                    date=today,
+                    temperature_avg_c=18.0,
+                    temperature_min_c=12.0,
+                    temperature_max_c=23.0,
+                    precipitation_mm=1.0,
+                    condition="облачно",
+                    provider="wttr.in",
+                )
+
+        service = EggService(EggRepository(self.database), self.feed_repository, FallbackWeatherClient())
+        service.update_weather_city(user_id=1, city="Курск")
+
+        weather = service.refresh_weather(1, today=date(2026, 5, 26), force=True)
+
+        self.assertEqual(weather.provider, "wttr.in")
+        self.assertEqual(weather.temperature_avg_c, 18.0)
+
 
 if __name__ == "__main__":
     unittest.main()
