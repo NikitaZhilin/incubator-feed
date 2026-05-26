@@ -33,7 +33,7 @@ async def start(message: Message, state: FSMContext, incubation_service: Incubat
     await message.answer(
         "Я помогу вести инкубацию яиц и контролировать запас кормов.\n\n"
         "Выберите раздел в меню ниже.",
-        reply_markup=main_menu_keyboard(),
+        reply_markup=main_menu_keyboard(incubation_service.get_user_settings(message.from_user.id)),
     )
 
 
@@ -89,15 +89,23 @@ async def version_command(message: Message, config: AppConfig) -> None:
 
 
 @router.message(Command("menu"))
-async def menu(message: Message, state: FSMContext) -> None:
+async def menu(message: Message, state: FSMContext, incubation_service: IncubationService) -> None:
     await state.clear()
-    await message.answer("Главное меню:", reply_markup=main_menu_keyboard())
+    await message.answer(
+        "Главное меню:",
+        reply_markup=main_menu_keyboard(incubation_service.get_user_settings(message.from_user.id)),
+    )
 
 
 @router.message(Command("cancel"))
-async def cancel_any(message: Message, state: FSMContext) -> None:
+async def cancel_any(
+    message: Message,
+    state: FSMContext,
+    incubation_service: IncubationService | None = None,
+) -> None:
     await state.clear()
-    await message.answer("Действие отменено. Главное меню:", reply_markup=main_menu_keyboard())
+    settings = incubation_service.get_user_settings(message.from_user.id) if incubation_service else None
+    await message.answer("Действие отменено. Главное меню:", reply_markup=main_menu_keyboard(settings))
 
 
 async def _get_bot_username(message: Message) -> str | None:

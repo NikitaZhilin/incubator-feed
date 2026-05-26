@@ -110,7 +110,7 @@ class ReleaseNotificationService:
                 await self.bot.send_message(
                     user_id,
                     text,
-                    reply_markup=main_menu_keyboard(),
+                    reply_markup=main_menu_keyboard(settings),
                 )
             except Exception as exc:
                 error_code = classify_telegram_error(exc)

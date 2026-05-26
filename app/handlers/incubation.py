@@ -53,15 +53,22 @@ async def noop_number_button(callback: CallbackQuery) -> None:
 
 
 @router.message(Command("cancel"))
-async def cancel_command(message: Message, state: FSMContext) -> None:
+async def cancel_command(message: Message, state: FSMContext, incubation_service: IncubationService) -> None:
     await state.clear()
-    await message.answer("Действие отменено.", reply_markup=incubation_menu_keyboard())
+    await message.answer(
+        "Действие отменено.",
+        reply_markup=incubation_menu_keyboard(incubation_service.get_user_settings(message.from_user.id)),
+    )
 
 
 @router.callback_query(StateFilter("*"), F.data == "flow:cancel")
-async def cancel_callback(callback: CallbackQuery, state: FSMContext) -> None:
+async def cancel_callback(callback: CallbackQuery, state: FSMContext, incubation_service: IncubationService) -> None:
     await state.clear()
-    await _answer_callback_message(callback, "Действие отменено.", reply_markup=incubation_menu_keyboard())
+    await _answer_callback_message(
+        callback,
+        "Действие отменено.",
+        reply_markup=incubation_menu_keyboard(incubation_service.get_user_settings(callback.from_user.id)),
+    )
     await callback.answer()
 
 
@@ -73,16 +80,24 @@ async def new_batch(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data == "menu:home")
-async def menu_home(callback: CallbackQuery, state: FSMContext) -> None:
+async def menu_home(callback: CallbackQuery, state: FSMContext, incubation_service: IncubationService) -> None:
     await state.clear()
-    await _answer_callback_message(callback, "Главное меню:", reply_markup=main_menu_keyboard())
+    await _answer_callback_message(
+        callback,
+        "Главное меню:",
+        reply_markup=main_menu_keyboard(incubation_service.get_user_settings(callback.from_user.id)),
+    )
     await callback.answer()
 
 
 @router.callback_query(F.data == "menu:incubation")
-async def menu_incubation(callback: CallbackQuery, state: FSMContext) -> None:
+async def menu_incubation(callback: CallbackQuery, state: FSMContext, incubation_service: IncubationService) -> None:
     await state.clear()
-    await _answer_callback_message(callback, "🥚 Инкубация:", reply_markup=incubation_menu_keyboard())
+    await _answer_callback_message(
+        callback,
+        "🥚 Инкубация:",
+        reply_markup=incubation_menu_keyboard(incubation_service.get_user_settings(callback.from_user.id)),
+    )
     await callback.answer()
 
 
@@ -1254,6 +1269,6 @@ async def unknown_callback(callback: CallbackQuery, incubation_service: Incubati
     await _answer_callback_message(
         callback,
         "Это действие уже недоступно. Откройте нужный раздел заново.",
-        reply_markup=main_menu_keyboard(),
+        reply_markup=main_menu_keyboard(incubation_service.get_user_settings(callback.from_user.id)),
     )
     await callback.answer()

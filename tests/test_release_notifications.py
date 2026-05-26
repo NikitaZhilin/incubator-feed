@@ -67,6 +67,7 @@ class ReleaseNotificationTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_release_notice_is_sent_once_to_active_service_users(self) -> None:
         self.users.upsert(user_id=1, username="active")
+        self.users.update_settings(user_id=1, notify_feed=False)
         self.users.upsert(user_id=2, username="disabled")
         self.users.update_settings(user_id=2, notify_service=False)
         self.users.upsert(user_id=3, username="inactive")
@@ -99,6 +100,13 @@ class ReleaseNotificationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.skipped, 3)
         self.assertEqual([message["user_id"] for message in bot.messages], [1])
         self.assertIsNotNone(bot.messages[0]["reply_markup"])
+        menu_texts = [
+            button.text
+            for row in bot.messages[0]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertNotIn("🌾 Корма", menu_texts)
+        self.assertIn("🥚 Инкубация", menu_texts)
         self.assertTrue(
             self.notifications.was_sent(
                 release_event_key("0.1.42-beta", 1)
