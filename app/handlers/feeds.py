@@ -873,11 +873,6 @@ async def stock_mix_check_all(callback: CallbackQuery, state: FSMContext, stock_
     await callback.answer()
 
 
-@router.callback_query(F.data == "stock:mix_not_ready")
-async def stock_mix_not_ready(callback: CallbackQuery) -> None:
-    await callback.answer("Отметьте ингредиенты текущего замеса.", show_alert=True)
-
-
 @router.callback_query(F.data == "stock:mix_cycle_done")
 async def stock_mix_cycle_done(callback: CallbackQuery, state: FSMContext, stock_service: StockService) -> None:
     plan = await _mix_plan_from_state(callback.from_user.id, state, stock_service)
@@ -937,8 +932,8 @@ async def stock_mix_confirm(callback: CallbackQuery, state: FSMContext, stock_se
     current_cycle = int(data.get("mix_current_cycle", 1))
     total_cycles = int(data.get("mix_total_cycles", int(mix_count)))
     if current_cycle < total_cycles or len(checked) < len(state_plan.ingredients):
-        await callback.answer("Сначала завершите чеклист всех замесов.", show_alert=True)
-        return
+            await callback.answer("Сначала отметьте ингредиенты всех замесов.", show_alert=True)
+            return
     try:
         plan = stock_service.produce_mix(
             user_id=callback.from_user.id,
