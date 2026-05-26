@@ -37,6 +37,18 @@ def eggs_cancel_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def egg_entry_date_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Сегодня", callback_data="eggs:add_date:today"),
+                InlineKeyboardButton(text="Вчера", callback_data="eggs:add_date:yesterday"),
+            ],
+            [InlineKeyboardButton(text="Отмена", callback_data="eggs:menu")],
+        ]
+    )
+
+
 def exclusion_reason_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[

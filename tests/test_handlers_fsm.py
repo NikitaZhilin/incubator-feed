@@ -1,9 +1,11 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from app.handlers.common import cancel_any
+from app.handlers.eggs import EggEntryFlow, eggs_add, eggs_add_date, eggs_count as egg_entry_count
 from app.handlers.feeds import (
     ChangeFeed,
     EditFeed,
@@ -29,11 +31,13 @@ from app.handlers.feeds import (
 )
 from app.handlers.incubation import NewBatch, enter_eggs_count
 from app.services.feeds import FeedService
+from app.services.eggs import EggService
 from app.services.incubation import IncubationService
 from app.services.stock import StockService
 from app.storage.database import Database
 from app.storage.repositories.analytics import AnalyticsRepository
 from app.storage.repositories.batches import BatchRepository
+from app.storage.repositories.eggs import EggRepository
 from app.storage.repositories.feeds import FeedRepository
 from app.storage.repositories.reminders import ReminderRepository
 from app.storage.repositories.stock import StockRepository
@@ -108,6 +112,7 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
             self.analytics,
         )
         self.feed_service = FeedService(FeedRepository(self.database), self.analytics)
+        self.egg_service = EggService(EggRepository(self.database), FeedRepository(self.database))
         self.stock_service = StockService(
             StockRepository(self.database),
             FeedRepository(self.database),
@@ -141,6 +146,36 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(state.cleared)
         self.assertIn("Главное меню", message.answers[-1][0])
+
+    async def test_egg_entry_can_be_recorded_for_yesterday(self) -> None:
+        class FixedDate(date):
+            @classmethod
+            def today(cls):
+                return cls(2026, 5, 27)
+
+        state = FakeState()
+        add_callback = FakeCallback("eggs:add")
+
+        await eggs_add(add_callback, state)
+
+        self.assertIn("За какой день", add_callback.message.answers[-1][0])
+        self.assertTrue(add_callback.answered)
+
+        with patch("app.handlers.eggs.date", FixedDate):
+            date_callback = FakeCallback("eggs:add_date:yesterday")
+            await eggs_add_date(date_callback, state)
+
+            self.assertEqual(state.state, EggEntryFlow.count)
+            self.assertEqual(state.data["entry_date"], "2026-05-26")
+            self.assertIn("вчера (2026-05-26)", date_callback.message.answers[-1][0])
+
+            count_message = FakeMessage("6")
+            await egg_entry_count(count_message, state, self.egg_service)
+
+        self.assertTrue(state.cleared)
+        self.assertIn("Дата: 2026-05-26", count_message.answers[-1][0])
+        history = self.egg_service.history(1, days=2, today=date(2026, 5, 27))
+        self.assertEqual(history, [(date(2026, 5, 27), 0), (date(2026, 5, 26), 6)])
 
     async def test_feed_creation_fsm_critical_path(self) -> None:
         state = FakeState()

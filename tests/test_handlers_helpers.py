@@ -28,7 +28,7 @@ from app.keyboards.feeds import (
     stock_items_keyboard,
     stock_mix_quick_keyboard,
 )
-from app.keyboards.eggs import eggs_menu_keyboard, exclusions_keyboard, weather_keyboard
+from app.keyboards.eggs import egg_entry_date_keyboard, eggs_menu_keyboard, exclusions_keyboard, weather_keyboard
 from app.keyboards.incubation import (
     batch_actions_keyboard,
     edit_batch_back_keyboard,
@@ -154,6 +154,8 @@ class HandlerHelpersTest(unittest.TestCase):
     def test_eggs_keyboards_have_section_navigation(self) -> None:
         self.assertIn("➕ Добавить яйца", _keyboard_texts(eggs_menu_keyboard()))
         self.assertIn("📊 Расчеты", _keyboard_texts(eggs_menu_keyboard()))
+        self.assertIn("Сегодня", _keyboard_texts(egg_entry_date_keyboard()))
+        self.assertIn("Вчера", _keyboard_texts(egg_entry_date_keyboard()))
         self.assertIn("⬅️ К яйцам", _keyboard_texts(exclusions_keyboard([])))
         self.assertIn("✏️ Изменить город", _keyboard_texts(weather_keyboard()))
 

@@ -1,4 +1,5 @@
 import asyncio
+from datetime import date, timedelta
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -9,6 +10,7 @@ from app.domain import DailyWeather, EggStats, HenLayingExclusion
 from app.keyboards.eggs import (
     eggs_back_keyboard,
     eggs_cancel_keyboard,
+    egg_entry_date_keyboard,
     eggs_menu_keyboard,
     exclusion_reason_keyboard,
     exclusions_keyboard,
@@ -46,9 +48,26 @@ async def eggs_menu(callback: CallbackQuery, state: FSMContext, egg_service: Egg
 
 @router.callback_query(F.data == "eggs:add")
 async def eggs_add(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.message.answer(
+        "За какой день добавить сбор яиц?",
+        reply_markup=egg_entry_date_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("eggs:add_date:"))
+async def eggs_add_date(callback: CallbackQuery, state: FSMContext) -> None:
+    choice = str(callback.data).rsplit(":", 1)[1]
+    try:
+        entry_date = _egg_entry_date_from_choice(choice)
+    except ValueError:
+        await callback.answer("Дата не найдена.", show_alert=True)
+        return
+    await state.update_data(entry_date=entry_date.isoformat())
     await state.set_state(EggEntryFlow.count)
     await callback.message.answer(
-        "Сколько яиц собрано сегодня?\n\n"
+        f"Сколько яиц собрано {_egg_entry_date_label(choice)} ({entry_date.isoformat()})?\n\n"
         "Введите число. Если хотите внести несколько раз за день, можно добавлять отдельными записями.",
         reply_markup=eggs_cancel_keyboard(),
     )
@@ -59,7 +78,9 @@ async def eggs_add(callback: CallbackQuery, state: FSMContext) -> None:
 async def eggs_count(message: Message, state: FSMContext, egg_service: EggService) -> None:
     try:
         count = int((message.text or "").strip())
-        entry = egg_service.record_today(message.from_user.id, count)
+        data = await state.get_data()
+        entry_date = date.fromisoformat(str(data.get("entry_date") or date.today().isoformat()))
+        entry = egg_service.record_today(message.from_user.id, count, today=entry_date)
     except ValueError as exc:
         await message.answer(str(exc), reply_markup=eggs_cancel_keyboard())
         return
@@ -341,6 +362,23 @@ def _format_exclusion(exclusion: HenLayingExclusion) -> str:
 
 def _safe_stats(egg_service: EggService, user_id: int) -> EggStats:
     return egg_service.stats(user_id, refresh_weather=False)
+
+
+def _egg_entry_date_from_choice(choice: str, *, today: date | None = None) -> date:
+    current = today or date.today()
+    if choice == "today":
+        return current
+    if choice == "yesterday":
+        return current - timedelta(days=1)
+    raise ValueError("unknown date choice")
+
+
+def _egg_entry_date_label(choice: str) -> str:
+    if choice == "today":
+        return "сегодня"
+    if choice == "yesterday":
+        return "вчера"
+    return "за выбранный день"
 
 
 def _format_weather_forecast_line(stats: EggStats) -> str:
