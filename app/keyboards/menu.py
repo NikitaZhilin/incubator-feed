@@ -5,10 +5,10 @@ def main_menu_keyboard(settings: dict | None = None) -> InlineKeyboardMarkup:
     feature_row: list[InlineKeyboardButton] = []
     if _enabled(settings, "notify_feed"):
         feature_row.append(InlineKeyboardButton(text="🌾 Корма", callback_data="feeds:menu"))
-    if _enabled(settings, "notify_eggs"):
-        feature_row.append(InlineKeyboardButton(text="🥚 Яйца", callback_data="eggs:menu"))
     if _enabled(settings, "notify_incubation"):
         feature_row.append(InlineKeyboardButton(text="🥚 Инкубация", callback_data="menu:incubation"))
+    if _enabled(settings, "notify_eggs"):
+        feature_row.append(InlineKeyboardButton(text="🥚 Яйца", callback_data="eggs:menu"))
 
     rows: list[list[InlineKeyboardButton]] = []
     if feature_row:
