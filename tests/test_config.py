@@ -4,7 +4,12 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from app.config import load_config, read_bot_token, should_send_release_notice
+from app.config import (
+    load_config,
+    read_bot_token,
+    should_send_admin_startup_notice,
+    should_send_release_notice,
+)
 from app.version import APP_VERSION
 
 
@@ -40,6 +45,7 @@ class ConfigTest(unittest.TestCase):
                     "RELEASE_IMPORTANCE": "major",
                     "RELEASE_DEPLOYED_AT": "2026-05-26T08:30:00Z",
                     "RELEASE_COMMIT": "abcdef123456",
+                    "ADMIN_STARTUP_NOTICE_MODE": "off",
                     "GITHUB_URL": "https://github.com/example/project",
                     "CHANGELOG_URL": "https://github.com/example/project/releases",
                 },
@@ -54,6 +60,7 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(config.release_importance, "major")
         self.assertEqual(config.release_deployed_at, "2026-05-26T08:30:00Z")
         self.assertEqual(config.release_commit, "abcdef123456")
+        self.assertEqual(config.admin_startup_notice_mode, "off")
         self.assertEqual(config.github_url, "https://github.com/example/project")
         self.assertEqual(config.changelog_url, "https://github.com/example/project/releases")
         self.assertFalse(config.release_notice_enabled)
@@ -77,6 +84,33 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(config.release_version, APP_VERSION)
         self.assertFalse(config.release_notice_enabled)
         self.assertFalse(should_send_release_notice(config))
+
+    def test_admin_startup_notice_policy_requires_admin_ids_and_enabled_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            db_path = root / "test.db"
+            base_env = {
+                "ENVIRONMENT": "prod",
+                "BOT_TOKEN": "123456:test",
+                "DATABASE_PATH": str(db_path),
+            }
+            with patch.dict(os.environ, base_env, clear=True):
+                with patch("app.config.get_project_root", return_value=root):
+                    no_admins = load_config()
+            with patch.dict(os.environ, {**base_env, "ADMIN_IDS": "1,2"}, clear=True):
+                with patch("app.config.get_project_root", return_value=root):
+                    enabled = load_config()
+            with patch.dict(
+                os.environ,
+                {**base_env, "ADMIN_IDS": "1,2", "ADMIN_STARTUP_NOTICE_MODE": "off"},
+                clear=True,
+            ):
+                with patch("app.config.get_project_root", return_value=root):
+                    disabled = load_config()
+
+        self.assertFalse(should_send_admin_startup_notice(no_admins))
+        self.assertTrue(should_send_admin_startup_notice(enabled))
+        self.assertFalse(should_send_admin_startup_notice(disabled))
 
     def test_release_notice_policy_requires_enabled_medium_major_or_critical(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

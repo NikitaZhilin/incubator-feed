@@ -4,7 +4,10 @@ import tempfile
 import unittest
 
 from app.services.release_notifications import (
+    AdminStartupNotificationService,
     ReleaseNotificationService,
+    admin_startup_event_key,
+    build_admin_startup_notice,
     build_release_notice,
     release_event_key,
 )
@@ -65,6 +68,21 @@ class ReleaseNotificationTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Настройки -> О боте", text)
         self.assertNotIn("Эта строка", text)
 
+    def test_admin_startup_message_is_short_and_admin_only_worded(self) -> None:
+        text = build_admin_startup_notice(
+            version="0.1.23-beta",
+            started_at=datetime(2026, 5, 26, 23, 18, tzinfo=timezone.utc),
+            timezone_name="Europe/Moscow",
+        )
+
+        self.assertIn("Служебное уведомление", text)
+        self.assertIn("Обновление выкатилось, бот перезапущен и доступен.", text)
+        self.assertIn("Версия: 0.1.23-beta", text)
+        self.assertIn("Запуск: 27.05.2026 02:18 (Europe/Moscow)", text)
+        self.assertIn("только для администраторов", text)
+        self.assertNotIn("Технические изменения", text)
+        self.assertNotIn("Пользовательские релизные сообщения", text)
+
     async def test_release_notice_is_sent_once_to_active_service_users(self) -> None:
         self.users.upsert(user_id=1, username="active")
         self.users.update_settings(user_id=1, notify_feed=False)
@@ -110,6 +128,42 @@ class ReleaseNotificationTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             self.notifications.was_sent(
                 release_event_key("0.1.42-beta", 1)
+            )
+        )
+
+    async def test_admin_startup_notice_is_sent_once_per_version_to_admins_only(self) -> None:
+        bot = FakeBot()
+        service = AdminStartupNotificationService(
+            bot=bot,
+            admin_ids=frozenset({2, 1}),
+            notifications=self.notifications,
+        )
+        started_at = datetime(2026, 5, 26, 23, 18, tzinfo=timezone.utc)
+
+        first = await service.send_startup_notice(
+            version="0.1.23-beta",
+            started_at=started_at,
+            timezone_name="Europe/Moscow",
+            mode="once_per_version",
+            now=started_at,
+        )
+        second = await service.send_startup_notice(
+            version="0.1.23-beta",
+            started_at=started_at,
+            timezone_name="Europe/Moscow",
+            mode="once_per_version",
+            now=started_at,
+        )
+
+        self.assertEqual(first.sent, 2)
+        self.assertEqual(first.skipped, 0)
+        self.assertEqual(first.failed, 0)
+        self.assertEqual(second.sent, 0)
+        self.assertEqual(second.skipped, 2)
+        self.assertEqual([message["user_id"] for message in bot.messages], [1, 2])
+        self.assertTrue(
+            self.notifications.was_sent(
+                admin_startup_event_key("0.1.23-beta", 1)
             )
         )
 

@@ -26,6 +26,7 @@ class AppConfig:
     github_url: str
     changelog_url: str
     timezone: str = "Europe/Moscow"
+    admin_startup_notice_mode: str = "once_per_version"
     release_deployed_at: str = ""
     release_commit: str = ""
     runtime_started_at: datetime = field(default_factory=lambda: datetime.now(datetime_timezone.utc))
@@ -141,6 +142,9 @@ def load_config() -> AppConfig:
         release_version=release_version,
         release_notes=os.getenv("RELEASE_NOTES", "").strip(),
         release_notice_enabled=release_notice_enabled,
+        admin_startup_notice_mode=_parse_admin_startup_notice_mode(
+            os.getenv("ADMIN_STARTUP_NOTICE_MODE", "once_per_version")
+        ),
         release_channel=os.getenv("RELEASE_CHANNEL", "beta").strip() or "beta",
         release_importance=release_importance,
         github_url=os.getenv("GITHUB_URL", default_github_url).strip() or default_github_url,
@@ -156,6 +160,10 @@ def should_send_release_notice(config: AppConfig) -> bool:
     if not config.release_notice_enabled or not config.release_version:
         return False
     return config.release_importance in {"medium", "major", "critical"}
+
+
+def should_send_admin_startup_notice(config: AppConfig) -> bool:
+    return bool(config.admin_ids) and config.admin_startup_notice_mode != "off"
 
 
 def _parse_admin_ids(raw: str) -> set[int]:
@@ -183,3 +191,10 @@ def _parse_bool_env(name: str, *, default: bool) -> bool:
     if not raw:
         return default
     return raw in {"1", "true", "yes", "on"}
+
+
+def _parse_admin_startup_notice_mode(raw: str) -> str:
+    value = raw.strip().lower()
+    if value in {"off", "always", "once_per_version"}:
+        return value
+    return "once_per_version"

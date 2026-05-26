@@ -49,6 +49,12 @@ release notes. The notice is deduplicated in `notification_log` by release
 version, so re-running or restarting the same version does not send the same
 update twice.
 
+Administrators can still receive a short technical startup notice. This is
+controlled separately by `ADMIN_STARTUP_NOTICE_MODE` and is sent only to
+`ADMIN_IDS`; regular users never receive it. The default production mode is
+`once_per_version`, so an admin sees that the deployed version started, without
+the long user-facing release text.
+
 For a manual GitHub Actions run you can fill:
 
 ```text
@@ -132,6 +138,24 @@ immediately:
 - `critical` - urgent detailed notice plus main menu.
 
 Minor changes should stay available only inside `Настройки -> О боте`.
+
+## Admin startup notice
+
+Use this for a compact confirmation that the deployed bot has actually started:
+
+```text
+ADMIN_STARTUP_NOTICE_MODE=once_per_version
+```
+
+Modes:
+
+- `off` - do not send technical startup notices;
+- `once_per_version` - send one short notice to each admin for each version;
+- `always` - send the short notice on every bot start.
+
+The message contains only the useful operational facts: bot restarted, version,
+startup time and that the message is admin-only. It does not include detailed
+release notes or internal flags.
 
 ## Server requirements
 

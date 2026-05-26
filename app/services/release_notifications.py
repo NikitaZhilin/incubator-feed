@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import re
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.keyboards.menu import main_menu_keyboard
 from app.services.reminders import classify_telegram_error
@@ -17,6 +18,13 @@ DEFAULT_TESTING_DISCLAIMER = (
 
 @dataclass(frozen=True)
 class ReleaseNoticeResult:
+    sent: int = 0
+    skipped: int = 0
+    failed: int = 0
+
+
+@dataclass(frozen=True)
+class AdminStartupNoticeResult:
     sent: int = 0
     skipped: int = 0
     failed: int = 0
@@ -61,6 +69,33 @@ def release_event_key(version: str, user_id: int) -> str:
     if not safe_version:
         safe_version = "unknown"
     return f"service:release:{safe_version}:user_{user_id}"
+
+
+def admin_startup_event_key(version: str, admin_id: int) -> str:
+    safe_version = re.sub(r"[^0-9A-Za-z._-]+", "_", version.strip())[:120]
+    if not safe_version:
+        safe_version = "unknown"
+    return f"service:admin_startup:{safe_version}:admin_{admin_id}"
+
+
+def build_admin_startup_notice(
+    *,
+    version: str,
+    started_at: datetime,
+    timezone_name: str,
+) -> str:
+    version = version.strip() or "не указана"
+    return "\n".join(
+        [
+            "🔧 Служебное уведомление",
+            "",
+            "Обновление выкатилось, бот перезапущен и доступен.",
+            f"Версия: {version}",
+            f"Запуск: {_format_notice_time(started_at, timezone_name)}",
+            "",
+            "Сообщение только для администраторов.",
+        ]
+    )
 
 
 class ReleaseNotificationService:
@@ -130,6 +165,68 @@ class ReleaseNotificationService:
         return ReleaseNoticeResult(sent=sent, skipped=skipped, failed=failed)
 
 
+class AdminStartupNotificationService:
+    def __init__(
+        self,
+        *,
+        bot,
+        admin_ids: frozenset[int],
+        notifications: NotificationRepository,
+    ) -> None:
+        self.bot = bot
+        self.admin_ids = admin_ids
+        self.notifications = notifications
+
+    async def send_startup_notice(
+        self,
+        *,
+        version: str,
+        started_at: datetime,
+        timezone_name: str,
+        mode: str = "once_per_version",
+        now: datetime | None = None,
+    ) -> AdminStartupNoticeResult:
+        sent = 0
+        skipped = 0
+        failed = 0
+        mode = mode.strip().lower()
+        scheduled_for = now or datetime.now(timezone.utc)
+        text = build_admin_startup_notice(
+            version=version,
+            started_at=started_at,
+            timezone_name=timezone_name,
+        )
+
+        for admin_id in sorted(self.admin_ids):
+            event_key = admin_startup_event_key(version, admin_id)
+            if mode != "always" and self.notifications.was_sent(event_key):
+                skipped += 1
+                continue
+
+            self.notifications.record_attempt(
+                user_id=admin_id,
+                type="service",
+                event_key=event_key,
+                scheduled_for=scheduled_for,
+            )
+            try:
+                await self.bot.send_message(admin_id, text)
+            except Exception as exc:
+                error_code = classify_telegram_error(exc)
+                self.notifications.mark_failed(
+                    event_key,
+                    error_code=error_code,
+                    error_message=str(exc),
+                )
+                failed += 1
+                continue
+
+            self.notifications.mark_sent(event_key, scheduled_for)
+            sent += 1
+
+        return AdminStartupNoticeResult(sent=sent, skipped=skipped, failed=failed)
+
+
 def _normalize_notes(notes: str) -> list[str]:
     items: list[str] = []
     for raw_line in notes.replace(";", "\n").splitlines():
@@ -137,3 +234,17 @@ def _normalize_notes(notes: str) -> list[str]:
         if item:
             items.append(item)
     return items
+
+
+def _format_notice_time(value: datetime, timezone_name: str) -> str:
+    timezone_label = timezone_name.strip() or "UTC"
+    try:
+        target_timezone = ZoneInfo(timezone_label)
+    except ZoneInfoNotFoundError:
+        timezone_label = "UTC"
+        target_timezone = timezone.utc
+
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    local_value = value.astimezone(target_timezone)
+    return f"{local_value:%d.%m.%Y %H:%M} ({timezone_label})"

@@ -8,7 +8,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from app.config import load_config, should_send_release_notice
+from app.config import load_config, should_send_admin_startup_notice, should_send_release_notice
 from app.handlers import register_handlers
 from app.middlewares.callbacks import StaleCallbackMiddleware
 from app.middlewares.users import UserTrackingMiddleware
@@ -17,7 +17,7 @@ from app.services.eggs import EggService
 from app.services.feeds import FeedService
 from app.services.stock import StockService
 from app.services.admin import AdminService
-from app.services.release_notifications import ReleaseNotificationService
+from app.services.release_notifications import AdminStartupNotificationService, ReleaseNotificationService
 from app.services.reminders import ReminderRunner
 from app.services.weather import OpenMeteoWeatherClient
 from app.storage.database import Database
@@ -153,6 +153,26 @@ async def main() -> None:
                 )
             except Exception:
                 logging.exception("Release notice failed")
+        if should_send_admin_startup_notice(config):
+            try:
+                result = await AdminStartupNotificationService(
+                    bot=bot,
+                    admin_ids=config.admin_ids,
+                    notifications=notifications,
+                ).send_startup_notice(
+                    version=config.release_version,
+                    started_at=config.runtime_started_at,
+                    timezone_name=config.timezone,
+                    mode=config.admin_startup_notice_mode,
+                )
+                logging.info(
+                    "Admin startup notice completed: sent=%s skipped=%s failed=%s",
+                    result.sent,
+                    result.skipped,
+                    result.failed,
+                )
+            except Exception:
+                logging.exception("Admin startup notice failed")
         try:
             try:
                 await dispatcher.start_polling(bot)
