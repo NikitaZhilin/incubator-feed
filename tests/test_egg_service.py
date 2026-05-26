@@ -7,6 +7,7 @@ from app.services.eggs import EggService
 from app.services.feeds import FeedService
 from app.services.weather import GeocodedLocation, WeatherDay
 from app.services.weather import OpenMeteoWeatherClient
+from app.handlers.eggs import _display_city, _display_weather_condition
 from app.storage.database import Database
 from app.storage.repositories.eggs import EggRepository
 from app.storage.repositories.feeds import FeedRepository
@@ -183,6 +184,10 @@ class EggServiceTest(unittest.TestCase):
 
         self.assertIn("%D0%9A%D1%83%D1%80%D1%81%D0%BA", client.request_url)
         self.assertEqual(weather.provider, "wttr.in")
+
+    def test_weather_display_is_russian_for_cached_english_values(self) -> None:
+        self.assertEqual(_display_weather_condition("Patchy rain nearby"), "местами дождь поблизости")
+        self.assertEqual(_display_city("Курск, Курская Область"), "Курск, Курская область")
 
 
 if __name__ == "__main__":

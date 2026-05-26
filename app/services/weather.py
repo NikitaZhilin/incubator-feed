@@ -46,11 +46,11 @@ class OpenMeteoWeatherClient:
             raise ValueError("Город не найден. Проверьте написание или укажите ближайший крупный город.")
         item = results[0]
         return GeocodedLocation(
-            name=str(item.get("name") or city),
+            name=_normalize_place_name(str(item.get("name") or city)),
             latitude=float(item["latitude"]),
             longitude=float(item["longitude"]),
             country=str(item.get("country") or ""),
-            admin1=str(item.get("admin1") or ""),
+            admin1=_normalize_place_name(str(item.get("admin1") or "")),
         )
 
     def forecast_today(self, *, latitude: float, longitude: float, today: date) -> WeatherDay:
@@ -121,7 +121,7 @@ class OpenMeteoWeatherClient:
             temperature_min_c=_float_value(weather.get("mintempC")),
             temperature_max_c=_float_value(weather.get("maxtempC")),
             precipitation_mm=_float_value(current.get("precipMM")),
-            condition=condition,
+            condition=_normalize_condition(condition),
             provider="wttr.in",
         )
 
@@ -168,3 +168,46 @@ def _weather_code_label(code: int | None) -> str:
     if code in {95, 96, 99}:
         return "гроза"
     return f"код погоды {code}"
+
+
+def _normalize_place_name(value: str) -> str:
+    clean = " ".join(value.strip().split())
+    if not clean:
+        return ""
+    replacements = {
+        "Курская Область": "Курская область",
+        "Московская Область": "Московская область",
+        "Ленинградская Область": "Ленинградская область",
+    }
+    return replacements.get(clean, clean.replace(" Область", " область"))
+
+
+def _normalize_condition(value: str) -> str:
+    clean = " ".join(value.strip().split())
+    if not clean:
+        return ""
+    lower = clean.lower()
+    translations = {
+        "sunny": "ясно",
+        "clear": "ясно",
+        "partly cloudy": "переменная облачность",
+        "cloudy": "облачно",
+        "overcast": "пасмурно",
+        "mist": "дымка",
+        "fog": "туман",
+        "patchy rain nearby": "местами дождь поблизости",
+        "light rain": "небольшой дождь",
+        "moderate rain": "дождь",
+        "heavy rain": "сильный дождь",
+        "light drizzle": "морось",
+        "patchy light drizzle": "местами морось",
+        "light snow": "небольшой снег",
+        "moderate snow": "снег",
+        "heavy snow": "сильный снег",
+        "thundery outbreaks possible": "возможна гроза",
+    }
+    if lower in translations:
+        return translations[lower]
+    if any("a" <= char <= "z" for char in lower):
+        return "погодные условия уточняются"
+    return clean[:1].lower() + clean[1:]

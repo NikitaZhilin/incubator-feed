@@ -367,7 +367,7 @@ def _format_weather(weather: DailyWeather | None) -> str:
         if weather.precipitation_mm is None
         else f"{weather.precipitation_mm:.1f} мм"
     )
-    condition = weather.condition or "нет данных"
+    condition = _display_weather_condition(weather.condition) or "нет данных"
     return (
         f"Погода на {weather.weather_date.isoformat()}:\n"
         f"- температура: {temp}\n"
@@ -383,8 +383,9 @@ def _format_weather_brief(weather: DailyWeather | None) -> str:
     temp = "нет данных"
     if weather.temperature_avg_c is not None:
         temp = f"{weather.temperature_avg_c:.1f} °C"
-    condition = f", {weather.condition}" if weather.condition else ""
-    return f"Погода: {temp}{condition}, {weather.city}."
+    condition_text = _display_weather_condition(weather.condition)
+    condition = f", {condition_text}" if condition_text else ""
+    return f"Погода: {temp}{condition}, {_display_city(weather.city)}."
 
 
 def _format_weather_error(exc: Exception) -> str:
@@ -397,3 +398,33 @@ def _format_weather_error(exc: Exception) -> str:
     if "urlopen error" in lowered:
         return "нет соединения с погодным сервисом. Попробуйте позже."
     return text or "неизвестная ошибка погодного сервиса."
+
+
+def _display_city(value: str) -> str:
+    clean = " ".join(value.strip().split())
+    return clean.replace(" Область", " область")
+
+
+def _display_weather_condition(value: str) -> str:
+    clean = " ".join(value.strip().split())
+    if not clean:
+        return ""
+    lower = clean.lower()
+    translations = {
+        "patchy rain nearby": "местами дождь поблизости",
+        "sunny": "ясно",
+        "clear": "ясно",
+        "partly cloudy": "переменная облачность",
+        "cloudy": "облачно",
+        "overcast": "пасмурно",
+        "mist": "дымка",
+        "fog": "туман",
+        "light rain": "небольшой дождь",
+        "moderate rain": "дождь",
+        "heavy rain": "сильный дождь",
+    }
+    if lower in translations:
+        return translations[lower]
+    if any("a" <= char <= "z" for char in lower):
+        return "погодные условия уточняются"
+    return clean[:1].lower() + clean[1:]
