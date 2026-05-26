@@ -15,6 +15,7 @@ def eggs_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🐔 Не несутся", callback_data="eggs:exclusions"),
             ],
             [InlineKeyboardButton(text="🌦 Город и погода", callback_data="eggs:weather")],
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:eggs")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
     )
@@ -24,6 +25,7 @@ def eggs_back_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ К яйцам", callback_data="eggs:menu")],
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:eggs")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
     )
@@ -72,6 +74,7 @@ def exclusions_keyboard(exclusions) -> InlineKeyboardMarkup:
     rows.extend(
         [
             [InlineKeyboardButton(text="➕ Добавить исключение", callback_data="eggs:exclude")],
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:egg_exclusions")],
             [InlineKeyboardButton(text="⬅️ К яйцам", callback_data="eggs:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
@@ -84,6 +87,7 @@ def weather_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="🔄 Обновить погоду", callback_data="eggs:weather_refresh")],
             [InlineKeyboardButton(text="✏️ Изменить город", callback_data="eggs:weather_city")],
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:egg_weather")],
             [InlineKeyboardButton(text="⬅️ К яйцам", callback_data="eggs:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]

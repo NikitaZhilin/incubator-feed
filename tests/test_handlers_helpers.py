@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from app.config import AppConfig
-from app.handlers.common import build_share_text
+from app.handlers.common import build_share_text, faq_keyboard, format_faq
 from app.handlers.incubation import _adjust_number
 from app.handlers.feeds import _format_flock_reports
 from app.handlers.settings import (
@@ -36,7 +36,7 @@ from app.keyboards.incubation import (
     guide_species_keyboard,
     number_adjust_keyboard,
 )
-from app.keyboards.menu import incubation_menu_keyboard, main_menu_keyboard, settings_keyboard
+from app.keyboards.menu import incubation_menu_keyboard, main_menu_keyboard, settings_keyboard, settings_sections_keyboard
 
 
 def _keyboard_texts(keyboard) -> list[str]:
@@ -53,6 +53,24 @@ class HandlerHelpersTest(unittest.TestCase):
 
         self.assertIn("https://t.me/test_incubator_bot?start=share", text)
         self.assertIn("Каждый Telegram-аккаунт работает изолированно", text)
+
+    def test_faq_text_and_navigation_are_available(self) -> None:
+        text = format_faq("mix")
+        callbacks = _keyboard_callbacks(faq_keyboard("mix"))
+
+        self.assertIn("FAQ: смесь", text)
+        self.assertIn("1 часть = 1 литровая кружка", text)
+        self.assertIn("stock:mix", callbacks)
+        self.assertIn("menu:home", callbacks)
+
+        livestock_text = format_faq("livestock")
+        self.assertIn("Поголовье - это отдельные группы птиц", livestock_text)
+        self.assertIn("Стада - это наборы групп поголовья", livestock_text)
+        self.assertIn("сначала создайте поголовье", livestock_text)
+
+        flocks_text = format_faq("flocks")
+        self.assertIn("назначьте стаду готовую", flocks_text)
+        self.assertIn("сколько это стадо съедает в день", flocks_text)
 
     def test_adjust_number_respects_minimum(self) -> None:
         self.assertEqual(_adjust_number(1, "-10", min_value=1), 1)
@@ -134,7 +152,10 @@ class HandlerHelpersTest(unittest.TestCase):
 
         self.assertIn("🧩 Разделы и уведомления", texts)
         self.assertIn("🏷 Название хозяйства", texts)
+        self.assertIn("❓ FAQ", texts)
         self.assertNotIn("Инкубация вкл/выкл", texts)
+
+        self.assertIn("❓ FAQ", _keyboard_texts(settings_sections_keyboard({"notify_feed": True})))
 
     def test_main_menu_hides_disabled_sections(self) -> None:
         keyboard = main_menu_keyboard(
@@ -150,14 +171,18 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertNotIn("🥚 Яйца", texts)
         self.assertIn("🥚 Инкубация", texts)
         self.assertIn("⚙️ Настройки", texts)
+        self.assertIn("❓ FAQ", texts)
 
     def test_eggs_keyboards_have_section_navigation(self) -> None:
         self.assertIn("➕ Добавить яйца", _keyboard_texts(eggs_menu_keyboard()))
         self.assertIn("📊 Расчеты", _keyboard_texts(eggs_menu_keyboard()))
+        self.assertIn("❓ FAQ", _keyboard_texts(eggs_menu_keyboard()))
         self.assertIn("Сегодня", _keyboard_texts(egg_entry_date_keyboard()))
         self.assertIn("Вчера", _keyboard_texts(egg_entry_date_keyboard()))
         self.assertIn("⬅️ К яйцам", _keyboard_texts(exclusions_keyboard([])))
+        self.assertIn("❓ FAQ", _keyboard_texts(exclusions_keyboard([])))
         self.assertIn("✏️ Изменить город", _keyboard_texts(weather_keyboard()))
+        self.assertIn("❓ FAQ", _keyboard_texts(weather_keyboard()))
 
     def test_incubation_menu_hides_post_hatch_care_when_disabled(self) -> None:
         keyboard = incubation_menu_keyboard({"notify_post_hatch_care": False})
@@ -165,6 +190,7 @@ class HandlerHelpersTest(unittest.TestCase):
 
         self.assertNotIn("После вывода", texts)
         self.assertIn("Режимы", texts)
+        self.assertIn("❓ FAQ", texts)
 
     def test_parse_notification_time_normalizes_and_validates(self) -> None:
         self.assertEqual(_parse_notification_time("9:05"), "09:05")
@@ -193,6 +219,8 @@ class HandlerHelpersTest(unittest.TestCase):
     def test_feed_and_stock_keyboards_have_section_back_buttons(self) -> None:
         self.assertIn("⬅️ К кормам", _keyboard_texts(feed_actions_keyboard(3)))
         self.assertIn("⬅️ К складу", _keyboard_texts(stock_mix_quick_keyboard("wheat", 3)))
+        self.assertIn("❓ FAQ", _keyboard_texts(feeds_menu_keyboard()))
+        self.assertIn("❓ FAQ", _keyboard_texts(stock_mix_quick_keyboard("wheat", 3)))
         self.assertIn("Отмена", _keyboard_texts(stock_cancel_keyboard()))
 
     def test_mix_checklist_keyboard_uses_recipe_parts(self) -> None:
@@ -244,19 +272,24 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertNotIn("🐓 Стада", _keyboard_texts(feeds_menu_keyboard()))
         self.assertIn("🐔 Поголовье", _keyboard_texts(livestock_menu_keyboard()))
         self.assertIn("🐓 Стада", _keyboard_texts(livestock_menu_keyboard()))
+        self.assertIn("❓ FAQ", _keyboard_texts(livestock_menu_keyboard()))
         self.assertIn("➕ Добавить поголовье", _keyboard_texts(livestock_menu_keyboard()))
         self.assertIn("➕ Создать стадо", _keyboard_texts(livestock_menu_keyboard()))
         self.assertNotIn("🐔 Стада", _keyboard_texts(bird_groups_keyboard()))
+        self.assertIn("❓ FAQ", _keyboard_texts(bird_groups_keyboard()))
         self.assertIn("⬅️ Поголовье и стада", _keyboard_texts(bird_groups_keyboard()))
         self.assertNotIn("🐔 Поголовье", _keyboard_texts(flocks_keyboard()))
+        self.assertIn("❓ FAQ", _keyboard_texts(flocks_keyboard()))
         self.assertIn("⬅️ Поголовье и стада", _keyboard_texts(flocks_keyboard()))
         self.assertIn("🍽 Назначить смесь", _keyboard_texts(flock_actions_keyboard(1)))
+        self.assertIn("❓ FAQ", _keyboard_texts(flock_actions_keyboard(1)))
 
     def test_feed_stats_keyboard_stays_in_stats_context(self) -> None:
         texts = _keyboard_texts(feed_stats_keyboard())
 
         self.assertIn("🐔 Поголовье и стада", texts)
         self.assertIn("⬅️ К кормам", texts)
+        self.assertIn("❓ FAQ", texts)
         self.assertNotIn("➕ Добавить корм", texts)
         self.assertNotIn("📊 Расчеты", texts)
 

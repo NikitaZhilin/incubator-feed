@@ -15,6 +15,7 @@ def main_menu_keyboard(settings: dict | None = None) -> InlineKeyboardMarkup:
         rows.append(feature_row)
     rows.extend(
         [
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:main")],
             [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings:menu")],
             [InlineKeyboardButton(text="🔗 Поделиться ботом", callback_data="menu:share")],
         ]
@@ -40,6 +41,7 @@ def incubation_menu_keyboard(settings: dict | None = None) -> InlineKeyboardMark
             InlineKeyboardButton(text="Статистика", callback_data="menu:stats"),
         ],
         [InlineKeyboardButton(text="Напоминания", callback_data="menu:reminders")],
+        [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:incubation")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
     ]
     if _enabled(settings, "notify_post_hatch_care"):
@@ -74,6 +76,7 @@ def settings_keyboard() -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton(text="🧩 Разделы и уведомления", callback_data="settings:sections")],
             [InlineKeyboardButton(text="ℹ️ О боте", callback_data="settings:about")],
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:settings")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
     )
@@ -112,6 +115,7 @@ def settings_sections_keyboard(settings: dict) -> InlineKeyboardMarkup:
                     callback_data="settings:toggle:notify_service",
                 )
             ],
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:settings_sections")],
             [InlineKeyboardButton(text="⬅️ Настройки", callback_data="settings:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]

@@ -14,6 +14,7 @@ def feeds_menu_keyboard(feed_buttons: list[tuple[int, str]] | None = None) -> In
     rows.append([InlineKeyboardButton(text="📦 Склад", callback_data="stock:menu")])
     rows.append([InlineKeyboardButton(text="🐔 Поголовье и стада", callback_data="feeds:livestock")])
     rows.append([InlineKeyboardButton(text="📊 Расчеты", callback_data="feeds:stats")])
+    rows.append([InlineKeyboardButton(text="❓ FAQ", callback_data="faq:feeds")])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -22,6 +23,7 @@ def feed_stats_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🐔 Поголовье и стада", callback_data="feeds:livestock")],
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:feed_stats")],
             [InlineKeyboardButton(text="⬅️ К кормам", callback_data="feeds:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
@@ -37,6 +39,7 @@ def livestock_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="➕ Добавить поголовье", callback_data="feeds:group_add"),
                 InlineKeyboardButton(text="➕ Создать стадо", callback_data="feeds:flock_add"),
             ],
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:livestock")],
             [InlineKeyboardButton(text="⬅️ К кормам", callback_data="feeds:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
@@ -89,6 +92,7 @@ def feed_actions_keyboard(feed_id: int) -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton(text="🔄 Задать остаток", callback_data=f"feeds:restock:{feed_id}")],
             [InlineKeyboardButton(text="🗑 Архивировать", callback_data=f"feeds:delete:{feed_id}")],
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:feed_card")],
             [InlineKeyboardButton(text="⬅️ К кормам", callback_data="feeds:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
@@ -153,6 +157,7 @@ def bird_groups_keyboard(groups=None) -> InlineKeyboardMarkup:
     rows.extend(
         [
             [InlineKeyboardButton(text="➕ Создать поголовье", callback_data="feeds:group_add")],
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:bird_groups")],
             [InlineKeyboardButton(text="⬅️ Поголовье и стада", callback_data="feeds:livestock")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
@@ -181,6 +186,7 @@ def flocks_keyboard(flocks=None) -> InlineKeyboardMarkup:
     rows.extend(
         [
             [InlineKeyboardButton(text="➕ Создать стадо", callback_data="feeds:flock_add")],
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:flocks")],
             [InlineKeyboardButton(text="⬅️ Поголовье и стада", callback_data="feeds:livestock")],
             [InlineKeyboardButton(text="🌾 К кормам", callback_data="feeds:menu")],
         ]
@@ -194,6 +200,7 @@ def flock_actions_keyboard(flock_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="👥 Изменить состав", callback_data=f"feeds:flock_members:{flock_id}")],
             [InlineKeyboardButton(text="🍽 Назначить смесь", callback_data=f"feeds:flock_assign:{flock_id}")],
             [InlineKeyboardButton(text="🗑 Архивировать", callback_data=f"feeds:flock_archive:{flock_id}")],
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:flock_card")],
             [InlineKeyboardButton(text="⬅️ К стадам", callback_data="feeds:flocks")],
         ]
     )
@@ -224,6 +231,7 @@ def stock_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="📋 История", callback_data="stock:history"),
             ],
             [InlineKeyboardButton(text="🔄 Задать фактический остаток", callback_data="stock:adjust")],
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:stock")],
             [InlineKeyboardButton(text="⬅️ К кормам", callback_data="feeds:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
@@ -337,6 +345,7 @@ def stock_mix_quick_keyboard(grain_base: str, max_mix_count: int) -> InlineKeybo
         ]
     )
     rows.append([InlineKeyboardButton(text="Ввести вручную", callback_data=f"stock:mix_manual:{grain_base}")])
+    rows.append([InlineKeyboardButton(text="❓ FAQ", callback_data="faq:mix")])
     rows.append(
         [
             InlineKeyboardButton(text="⬅️ К складу", callback_data="stock:menu"),
