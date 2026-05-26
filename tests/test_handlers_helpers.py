@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.config import AppConfig
 from app.handlers.common import build_share_text
@@ -23,7 +24,7 @@ from app.keyboards.feeds import (
     livestock_menu_keyboard,
     stock_assign_groups_keyboard,
     stock_cancel_keyboard,
-    stock_confirm_mix_keyboard,
+    stock_mix_checklist_keyboard,
     stock_items_keyboard,
     stock_mix_quick_keyboard,
 )
@@ -190,8 +191,25 @@ class HandlerHelpersTest(unittest.TestCase):
     def test_feed_and_stock_keyboards_have_section_back_buttons(self) -> None:
         self.assertIn("⬅️ К кормам", _keyboard_texts(feed_actions_keyboard(3)))
         self.assertIn("⬅️ К складу", _keyboard_texts(stock_mix_quick_keyboard("wheat", 3)))
-        self.assertIn("📦 К складу", _keyboard_texts(stock_confirm_mix_keyboard(1, "wheat")))
         self.assertIn("Отмена", _keyboard_texts(stock_cancel_keyboard()))
+
+    def test_mix_checklist_keyboard_uses_one_cycle_amounts(self) -> None:
+        plan = SimpleNamespace(
+            mix_count=2,
+            grain_base_code="wheat",
+            can_produce=True,
+            ingredients=(
+                SimpleNamespace(name="Кукуруза", required_kg=5.04),
+                SimpleNamespace(name="Премикс", required_kg=0.15),
+            ),
+        )
+
+        keyboard = stock_mix_checklist_keyboard(plan, checked_indices={0}, current_cycle=1, total_cycles=2)
+        texts = _keyboard_texts(keyboard)
+
+        self.assertIn("✅ Кукуруза 2.52 кг", texts)
+        self.assertIn("⬜ Премикс 0.07 кг", texts)
+        self.assertIn("Продолжить после отметок", texts)
 
     def test_mix_quick_buttons_open_plan_before_writeoff(self) -> None:
         quick_keyboard = stock_mix_quick_keyboard("wheat", 3)

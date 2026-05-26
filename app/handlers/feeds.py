@@ -26,7 +26,7 @@ from app.keyboards.feeds import (
     livestock_menu_keyboard,
     stock_assign_groups_keyboard,
     stock_cancel_keyboard,
-    stock_confirm_mix_keyboard,
+    stock_mix_checklist_keyboard,
     stock_items_keyboard,
     stock_kind_keyboard,
     stock_mix_quick_keyboard,
@@ -38,6 +38,7 @@ from app.services.stock import STOCK_KIND_LABELS, StockService
 from app.services.feed_recipes import (
     DEFAULT_GRAIN_BASE,
     get_grain_base_option,
+    load_chicken_mix_recipe,
     parse_feed_amount,
 )
 from app.utils.dates import DATE_FORMAT_HINT, parse_user_date
@@ -776,13 +777,14 @@ async def stock_mix_count(
 ) -> None:
     try:
         mix_count = _parse_float(message.text)
+        mix_count = _parse_mix_cycle_count(mix_count)
     except ValueError:
         incubation_service.track_scenario_error(
             user_id=message.from_user.id,
             scenario="stock_mix_count",
             message="invalid_count",
         )
-        await message.answer("Введите количество замесов числом, например 3.")
+        await message.answer("Введите целое количество замесов, например 1, 2 или 3.")
         return
     data = await state.get_data()
     grain_base = str(data.get("grain_base") or DEFAULT_GRAIN_BASE)
@@ -792,21 +794,18 @@ async def stock_mix_count(
         grain_base=grain_base,
     )
     await state.clear()
-    await message.answer(
-        _format_mix_plan(plan),
-        reply_markup=(
-            stock_confirm_mix_keyboard(mix_count, grain_base)
-            if plan.can_produce
-            else stock_menu_keyboard()
-        ),
-    )
+    if not plan.can_produce:
+        await message.answer(_format_mix_plan(plan), reply_markup=stock_menu_keyboard())
+        return
+    await _send_mix_checklist(message, state, plan)
 
 
 @router.callback_query(F.data.startswith("stock:mix_plan:"))
-async def stock_mix_plan(callback: CallbackQuery, stock_service: StockService) -> None:
+async def stock_mix_plan(callback: CallbackQuery, state: FSMContext, stock_service: StockService) -> None:
     try:
         _, _, grain_base, mix_count_text = str(callback.data).split(":", 3)
         mix_count = float(mix_count_text)
+        mix_count = _parse_mix_cycle_count(mix_count)
         plan = stock_service.plan_mix(
             user_id=callback.from_user.id,
             mix_count=mix_count,
@@ -816,19 +815,98 @@ async def stock_mix_plan(callback: CallbackQuery, stock_service: StockService) -
         await callback.message.answer(str(exc), reply_markup=stock_menu_keyboard())
         await callback.answer()
         return
-    await callback.message.answer(
-        _format_mix_plan(plan),
-        reply_markup=(
-            stock_confirm_mix_keyboard(mix_count, grain_base)
-            if plan.can_produce
-            else stock_mix_quick_keyboard(grain_base, int(plan.max_mix_count))
-        ),
+    if plan.can_produce:
+        await _send_mix_checklist(callback.message, state, plan)
+    else:
+        await state.clear()
+        await callback.message.answer(
+            _format_mix_plan(plan),
+            reply_markup=stock_mix_quick_keyboard(grain_base, int(plan.max_mix_count)),
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("stock:mix_toggle:"))
+async def stock_mix_toggle(callback: CallbackQuery, state: FSMContext, stock_service: StockService) -> None:
+    plan = await _mix_plan_from_state(callback.from_user.id, state, stock_service)
+    if plan is None:
+        await callback.answer("Откройте расчет замеса заново.", show_alert=True)
+        return
+    try:
+        index = int(str(callback.data).rsplit(":", 1)[1])
+    except ValueError:
+        await callback.answer("Ингредиент не найден.", show_alert=True)
+        return
+    checked = set((await state.get_data()).get("mix_checked_indices", []))
+    if index < 0 or index >= len(plan.ingredients):
+        await callback.answer("Ингредиент не найден.", show_alert=True)
+        return
+    if index in checked:
+        checked.remove(index)
+    else:
+        checked.add(index)
+    data = await state.get_data()
+    current_cycle = int(data.get("mix_current_cycle", 1))
+    await _send_mix_checklist(
+        callback.message,
+        state,
+        plan,
+        checked_indices=checked,
+        current_cycle=current_cycle,
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "stock:mix_check_all")
+async def stock_mix_check_all(callback: CallbackQuery, state: FSMContext, stock_service: StockService) -> None:
+    plan = await _mix_plan_from_state(callback.from_user.id, state, stock_service)
+    if plan is None:
+        await callback.answer("Откройте расчет замеса заново.", show_alert=True)
+        return
+    data = await state.get_data()
+    await _send_mix_checklist(
+        callback.message,
+        state,
+        plan,
+        checked_indices=set(range(len(plan.ingredients))),
+        current_cycle=int(data.get("mix_current_cycle", 1)),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "stock:mix_not_ready")
+async def stock_mix_not_ready(callback: CallbackQuery) -> None:
+    await callback.answer("Отметьте ингредиенты текущего замеса.", show_alert=True)
+
+
+@router.callback_query(F.data == "stock:mix_cycle_done")
+async def stock_mix_cycle_done(callback: CallbackQuery, state: FSMContext, stock_service: StockService) -> None:
+    plan = await _mix_plan_from_state(callback.from_user.id, state, stock_service)
+    if plan is None:
+        await callback.answer("Откройте расчет замеса заново.", show_alert=True)
+        return
+    data = await state.get_data()
+    checked = set(data.get("mix_checked_indices", []))
+    if len(checked) < len(plan.ingredients):
+        await callback.answer("Отметьте ингредиенты текущего замеса.", show_alert=True)
+        return
+    current_cycle = int(data.get("mix_current_cycle", 1))
+    total_cycles = int(data.get("mix_total_cycles", int(plan.mix_count)))
+    if current_cycle >= total_cycles:
+        await callback.answer("Это последний замес. Нажмите списание склада.", show_alert=True)
+        return
+    await _send_mix_checklist(
+        callback.message,
+        state,
+        plan,
+        checked_indices=set(),
+        current_cycle=current_cycle + 1,
     )
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("stock:mix_confirm:"))
-async def stock_mix_confirm(callback: CallbackQuery, stock_service: StockService) -> None:
+async def stock_mix_confirm(callback: CallbackQuery, state: FSMContext, stock_service: StockService) -> None:
     parts = str(callback.data).split(":")
     if len(parts) == 4:
         grain_base = parts[2]
@@ -836,6 +914,32 @@ async def stock_mix_confirm(callback: CallbackQuery, stock_service: StockService
     else:
         grain_base = DEFAULT_GRAIN_BASE
         mix_count = float(parts[-1])
+    try:
+        mix_count = _parse_mix_cycle_count(mix_count)
+    except ValueError as exc:
+        await callback.answer(str(exc), show_alert=True)
+        return
+    state_plan = await _mix_plan_from_state(callback.from_user.id, state, stock_service)
+    if state_plan is None or state_plan.grain_base_code != grain_base or state_plan.mix_count != mix_count:
+        current_plan = stock_service.best_available_mix_plan(user_id=callback.from_user.id)
+        await callback.message.answer(
+            "Откройте расчет замеса заново.\n\n"
+            "Остатки могли измениться после открытия старой кнопки. Актуальный расчет:\n\n"
+            + _format_mix_dashboard(current_plan, auto_selected=True),
+            reply_markup=stock_mix_quick_keyboard(
+                current_plan.grain_base_code,
+                int(current_plan.max_mix_count),
+            ),
+        )
+        await callback.answer()
+        return
+    data = await state.get_data()
+    checked = set(data.get("mix_checked_indices", []))
+    current_cycle = int(data.get("mix_current_cycle", 1))
+    total_cycles = int(data.get("mix_total_cycles", int(mix_count)))
+    if current_cycle < total_cycles or len(checked) < len(state_plan.ingredients):
+        await callback.answer("Сначала завершите чеклист всех замесов.", show_alert=True)
+        return
     try:
         plan = stock_service.produce_mix(
             user_id=callback.from_user.id,
@@ -855,6 +959,7 @@ async def stock_mix_confirm(callback: CallbackQuery, stock_service: StockService
         )
         await callback.answer()
         return
+    await state.clear()
     await callback.message.answer(
         _format_mix_created(plan),
         reply_markup=stock_menu_keyboard(),
@@ -1872,6 +1977,57 @@ async def _answer_mix_dashboard(message: Message, user_id: int, stock_service: S
     )
 
 
+async def _send_mix_checklist(
+    message: Message,
+    state: FSMContext,
+    plan,
+    *,
+    checked_indices: set[int] | None = None,
+    current_cycle: int = 1,
+) -> None:
+    total_cycles = _parse_mix_cycle_count(plan.mix_count)
+    checked = checked_indices or set()
+    current = min(max(current_cycle, 1), total_cycles)
+    await state.update_data(
+        mix_grain_base=plan.grain_base_code,
+        mix_count=total_cycles,
+        mix_total_cycles=total_cycles,
+        mix_current_cycle=current,
+        mix_checked_indices=sorted(checked),
+    )
+    await message.answer(
+        _format_mix_plan(
+            plan,
+            checked_indices=checked,
+            current_cycle=current,
+            total_cycles=total_cycles,
+        ),
+        reply_markup=stock_mix_checklist_keyboard(
+            plan,
+            checked_indices=checked,
+            current_cycle=current,
+            total_cycles=total_cycles,
+        ),
+    )
+
+
+async def _mix_plan_from_state(user_id: int, state: FSMContext, stock_service: StockService):
+    data = await state.get_data()
+    grain_base = data.get("mix_grain_base")
+    mix_count = data.get("mix_count")
+    if not grain_base or not mix_count:
+        return None
+    try:
+        total_cycles = _parse_mix_cycle_count(float(mix_count))
+        return stock_service.plan_mix(
+            user_id=user_id,
+            mix_count=total_cycles,
+            grain_base=str(grain_base),
+        )
+    except ValueError:
+        return None
+
+
 async def _send_flock_detail(message: Message, user_id: int, flock_id: int, feed_service: FeedService) -> None:
     flock = feed_service.get_flock(flock_id, user_id)
     if flock is None:
@@ -2142,16 +2298,40 @@ def _format_stock_estimate(estimate) -> str:
     )
 
 
-def _format_mix_plan(plan) -> str:
+def _format_mix_plan(
+    plan,
+    *,
+    checked_indices: set[int] | None = None,
+    current_cycle: int | None = None,
+    total_cycles: int | None = None,
+) -> str:
+    total = total_cycles or _parse_mix_cycle_count(plan.mix_count)
+    current = current_cycle or 1
+    checked = checked_indices or set()
+    recipe = load_chicken_mix_recipe(grain_base=plan.grain_base_code)
+    one_cycle_output_kg = plan.output_kg / total
     lines = [
         f"🧮 {plan.title}",
         "",
         f"Зерновая основа: {plan.grain_base_label}",
-        f"Замесов: {plan.mix_count:g}",
-        f"Будет получено примерно: {plan.output_kg:.1f} кг.",
+        f"Повторов базового замеса: {total}",
+        f"Готовой смеси всего: около {plan.output_kg:.1f} кг.",
         "",
-        "Будет списано:",
+        "Формула на 1 замес:",
+        "1 часть = 1 литровая кружка.",
     ]
+    for ingredient, recipe_item in zip(plan.ingredients, recipe):
+        one_cycle_kg = ingredient.required_kg / total
+        lines.append(
+            f"- {ingredient.name}: {recipe_item.parts:g} части, примерно {_format_mix_amount(one_cycle_kg)}"
+        )
+    lines.extend(
+        [
+            f"Выход 1 замеса: около {one_cycle_output_kg:.1f} кг.",
+            "",
+            "Будет списано со склада всего:",
+        ]
+    )
     for ingredient in plan.ingredients:
         if ingredient.missing_kg > 0:
             lines.append(
@@ -2162,11 +2342,31 @@ def _format_mix_plan(plan) -> str:
             lines.append(f"- {ingredient.name}: {ingredient.required_kg:.2f} кг")
     lines.append("")
     if plan.can_produce:
-        lines.append("Создать замес?")
+        lines.extend(
+            [
+                f"Текущий замес: {current} из {total}.",
+                "Отмечайте ингредиенты, которые уже добавили в текущий замес:",
+            ]
+        )
+        for index, ingredient in enumerate(plan.ingredients):
+            mark = "✅" if index in checked else "⬜"
+            lines.append(f"{mark} {ingredient.name}")
+        if current < total:
+            lines.append("")
+            lines.append("Когда текущий замес готов, бот откроет чеклист следующего замеса.")
+        else:
+            lines.append("")
+            lines.append("После последнего замеса завершите операцию, чтобы списать ингредиенты и добавить смесь на склад.")
     else:
         lines.append(f"Ингредиентов не хватает. Максимум сейчас: {plan.max_mix_count:.1f} замеса.")
     lines.append("Расчет примерный: вес зависит от влажности и фракции ингредиентов.")
     return "\n".join(lines)
+
+
+def _format_mix_amount(kg: float) -> str:
+    if kg < 1:
+        return f"{kg * 1000:.0f} г"
+    return f"{kg:.2f} кг"
 
 
 def _format_mix_created(plan) -> str:
@@ -2186,6 +2386,12 @@ def _parse_float(value: str | None, *, allow_zero: bool = False) -> float:
     if not isfinite(parsed) or parsed < 0 or (parsed == 0 and not allow_zero):
         raise ValueError("not positive")
     return parsed
+
+
+def _parse_mix_cycle_count(value: float) -> int:
+    if not isfinite(value) or value <= 0 or not float(value).is_integer():
+        raise ValueError("Количество замесов должно быть целым числом.")
+    return int(value)
 
 
 def _format_estimate(estimate: FeedEstimate) -> str:

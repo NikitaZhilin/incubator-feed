@@ -263,19 +263,47 @@ def stock_items_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def stock_confirm_mix_keyboard(mix_count: float, grain_base: str = "wheat") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+def stock_mix_checklist_keyboard(
+    plan,
+    checked_indices: set[int] | None = None,
+    *,
+    current_cycle: int = 1,
+    total_cycles: int | None = None,
+) -> InlineKeyboardMarkup:
+    checked = checked_indices or set()
+    total = total_cycles or int(plan.mix_count)
+    one_cycle_multiplier = plan.mix_count if plan.mix_count > 0 else 1
+    rows = []
+    for index, ingredient in enumerate(plan.ingredients):
+        mark = "✅" if index in checked else "⬜"
+        one_cycle_kg = ingredient.required_kg / one_cycle_multiplier
+        rows.append(
             [
                 InlineKeyboardButton(
-                    text="✅ Создать замес",
-                    callback_data=f"stock:mix_confirm:{grain_base}:{mix_count:g}",
+                    text=f"{mark} {ingredient.name[:24]} {one_cycle_kg:.2f} кг",
+                    callback_data=f"stock:mix_toggle:{index}",
                 )
-            ],
-            [InlineKeyboardButton(text="⬅️ К смеси", callback_data="stock:mix")],
-            [InlineKeyboardButton(text="📦 К складу", callback_data="stock:menu")],
-        ]
-    )
+            ]
+        )
+    if plan.can_produce:
+        if len(checked) >= len(plan.ingredients):
+            if current_cycle < total:
+                rows.append([InlineKeyboardButton(text=f"✅ Замес {current_cycle} готов", callback_data="stock:mix_cycle_done")])
+            else:
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            text="✅ Завершить и списать склад",
+                            callback_data=f"stock:mix_confirm:{plan.grain_base_code}:{plan.mix_count:g}",
+                        )
+                    ]
+                )
+        else:
+            rows.append([InlineKeyboardButton(text="Отметить все ингредиенты", callback_data="stock:mix_check_all")])
+            rows.append([InlineKeyboardButton(text="Продолжить после отметок", callback_data="stock:mix_not_ready")])
+    rows.append([InlineKeyboardButton(text="⬅️ К смеси", callback_data="stock:mix")])
+    rows.append([InlineKeyboardButton(text="📦 К складу", callback_data="stock:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def stock_mix_quick_keyboard(grain_base: str, max_mix_count: int) -> InlineKeyboardMarkup:

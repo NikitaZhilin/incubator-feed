@@ -19,7 +19,9 @@ from app.handlers.feeds import (
     feed_threshold,
     feed_add,
     flock_assign_item,
+    stock_mix_check_all,
     stock_mix_confirm,
+    stock_mix_cycle_done,
     stock_mix_plan,
     stock_purchase_amount,
     stock_purchase_name,
@@ -279,7 +281,7 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
             )
         callback = FakeCallback("stock:mix_confirm:wheat:2")
 
-        await stock_mix_confirm(callback, self.stock_service)
+        await stock_mix_confirm(callback, FakeState(), self.stock_service)
 
         self.assertIn("Остатки могли измениться", callback.message.answers[-1][0])
         self.assertIn("Актуальный расчет", callback.message.answers[-1][0])
@@ -303,10 +305,12 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
                 amount_kg=100,
             )
         callback = FakeCallback("stock:mix_plan:wheat:2")
+        state = FakeState()
 
-        await stock_mix_plan(callback, self.stock_service)
+        await stock_mix_plan(callback, state, self.stock_service)
 
-        self.assertIn("Создать замес?", callback.message.answers[-1][0])
+        self.assertIn("Формула на 1 замес", callback.message.answers[-1][0])
+        self.assertIn("Текущий замес: 1 из 2", callback.message.answers[-1][0])
         self.assertEqual(
             [
                 item.item.name
@@ -316,6 +320,52 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
             [],
         )
         self.assertTrue(callback.answered)
+
+    async def test_mix_checklist_advances_one_cycle_at_a_time(self) -> None:
+        for name in [
+            "Кукуруза",
+            "Пшеница",
+            "Ячмень",
+            "Комбикорм",
+            "Мясокостная мука",
+            "Рыбная мука",
+            "Ракушка",
+            "Премикс",
+        ]:
+            self.stock_service.add_purchase(
+                user_id=1,
+                name=name,
+                kind="ingredient",
+                amount_kg=100,
+            )
+        state = FakeState()
+        callback = FakeCallback("stock:mix_plan:wheat:2")
+
+        await stock_mix_plan(callback, state, self.stock_service)
+        await stock_mix_check_all(FakeCallback("stock:mix_check_all"), state, self.stock_service)
+        done_callback = FakeCallback("stock:mix_cycle_done")
+
+        await stock_mix_cycle_done(done_callback, state, self.stock_service)
+
+        self.assertEqual(state.data["mix_current_cycle"], 2)
+        self.assertEqual(state.data["mix_checked_indices"], [])
+        self.assertIn("Текущий замес: 2 из 2", done_callback.message.answers[-1][0])
+
+        await stock_mix_check_all(FakeCallback("stock:mix_check_all"), state, self.stock_service)
+        confirm_callback = FakeCallback("stock:mix_confirm:wheat:2")
+
+        await stock_mix_confirm(confirm_callback, state, self.stock_service)
+
+        self.assertTrue(state.cleared)
+        self.assertIn("Замес создан", confirm_callback.message.answers[-1][0])
+        self.assertEqual(
+            [
+                item.item.name
+                for item in self.stock_service.list_estimates(1)
+                if item.item.kind == "finished_mix"
+            ],
+            ["Смесь для кур"],
+        )
 
     async def test_flock_assign_item_sets_full_mix_without_percent_step(self) -> None:
         group = self.feed_service.create_bird_group(
