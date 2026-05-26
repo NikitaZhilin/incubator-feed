@@ -55,6 +55,13 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("Каждый Telegram-аккаунт работает изолированно", text)
 
     def test_faq_text_and_navigation_are_available(self) -> None:
+        main_text = format_faq("main")
+        main_callbacks = _keyboard_callbacks(faq_keyboard("main"))
+
+        self.assertIn("Корма - раздел для учета склада", main_text)
+        self.assertIn("Яйца - раздел для ежедневного учета", main_text)
+        self.assertEqual(main_callbacks.count("menu:home"), 1)
+
         text = format_faq("mix")
         callbacks = _keyboard_callbacks(faq_keyboard("mix"))
 
