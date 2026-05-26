@@ -1,3 +1,5 @@
+import asyncio
+
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -36,7 +38,7 @@ class EggWeatherFlow(StatesGroup):
 async def eggs_menu(callback: CallbackQuery, state: FSMContext, egg_service: EggService) -> None:
     await state.clear()
     await callback.message.answer(
-        _format_eggs_menu(_safe_stats(egg_service, callback.from_user.id, refresh_weather=True)),
+        _format_eggs_menu(_safe_stats(egg_service, callback.from_user.id)),
         reply_markup=eggs_menu_keyboard(),
     )
     await callback.answer()
@@ -74,7 +76,7 @@ async def eggs_count(message: Message, state: FSMContext, egg_service: EggServic
 @router.callback_query(F.data == "eggs:stats")
 async def eggs_stats(callback: CallbackQuery, egg_service: EggService) -> None:
     await callback.message.answer(
-        _format_stats(_safe_stats(egg_service, callback.from_user.id, refresh_weather=True)),
+        _format_stats(_safe_stats(egg_service, callback.from_user.id)),
         reply_markup=eggs_back_keyboard(),
     )
     await callback.answer()
@@ -180,20 +182,16 @@ async def eggs_exclude_finish(callback: CallbackQuery, egg_service: EggService) 
 
 @router.callback_query(F.data == "eggs:weather")
 async def eggs_weather(callback: CallbackQuery, egg_service: EggService) -> None:
-    weather_error = ""
-    try:
-        weather = egg_service.refresh_weather(callback.from_user.id)
-    except Exception as exc:
-        weather = egg_service.get_daily_weather(callback.from_user.id)
-        weather_error = f"\n\nПогоду сейчас не удалось обновить: {exc}"
+    weather = egg_service.get_daily_weather(callback.from_user.id)
     settings = egg_service.get_weather_settings(callback.from_user.id)
     await callback.message.answer(
         "🌦 Город и погода\n\n"
         f"Город: {settings.city}\n"
         f"{_format_weather(weather)}"
-        f"{weather_error}\n\n"
+        "\n\n"
         "Погодная поправка в расчетах ориентировочная: бот смотрит уличную погоду, "
-        "а яйценоскость сильнее зависит от фактических условий в курятнике.",
+        "а яйценоскость сильнее зависит от фактических условий в курятнике.\n\n"
+        "Для загрузки свежих данных нажмите Обновить погоду.",
         reply_markup=weather_keyboard(),
     )
     await callback.answer()
@@ -202,10 +200,14 @@ async def eggs_weather(callback: CallbackQuery, egg_service: EggService) -> None
 @router.callback_query(F.data == "eggs:weather_refresh")
 async def eggs_weather_refresh(callback: CallbackQuery, egg_service: EggService) -> None:
     try:
-        weather = egg_service.refresh_weather(callback.from_user.id, force=True)
+        weather = await asyncio.to_thread(
+            egg_service.refresh_weather,
+            callback.from_user.id,
+            force=True,
+        )
     except Exception as exc:
         await callback.message.answer(
-            f"Погоду сейчас не удалось обновить: {exc}",
+            f"Погоду сейчас не удалось обновить: {_format_weather_error(exc)}",
             reply_markup=weather_keyboard(),
         )
         await callback.answer()
@@ -230,26 +232,35 @@ async def eggs_weather_city(callback: CallbackQuery, state: FSMContext) -> None:
 @router.message(EggWeatherFlow.city)
 async def eggs_weather_city_save(message: Message, state: FSMContext, egg_service: EggService) -> None:
     try:
-        settings = egg_service.update_weather_city(user_id=message.from_user.id, city=message.text or "")
+        settings = await asyncio.to_thread(
+            egg_service.update_weather_city,
+            user_id=message.from_user.id,
+            city=message.text or "",
+        )
     except ValueError as exc:
         await message.answer(str(exc), reply_markup=eggs_cancel_keyboard())
         return
     except Exception as exc:
         await state.clear()
         await message.answer(
-            f"Город сейчас не удалось проверить: {exc}",
+            f"Город сейчас не удалось проверить: {_format_weather_error(exc)}",
             reply_markup=weather_keyboard(),
         )
         return
     try:
-        weather = egg_service.refresh_weather(message.from_user.id, force=True)
+        weather = await asyncio.to_thread(
+            egg_service.refresh_weather,
+            message.from_user.id,
+            force=True,
+        )
     except ValueError as exc:
         await message.answer(str(exc), reply_markup=eggs_cancel_keyboard())
         return
     except Exception as exc:
         await state.clear()
         await message.answer(
-            f"Город сохранен: {settings.city}\n\nПогоду сейчас не удалось загрузить: {exc}",
+            f"Город сохранен: {settings.city}\n\n"
+            f"Погоду сейчас не удалось загрузить: {_format_weather_error(exc)}",
             reply_markup=weather_keyboard(),
         )
         return
@@ -267,7 +278,8 @@ def _format_eggs_menu(stats: EggStats) -> str:
         f"Сегодня: {stats.today_eggs} шт.\n"
         f"Несутся сейчас: {stats.active_hens_count} из {stats.total_hens_count}\n"
         f"Прогноз на 7 дней: примерно {stats.next_week_forecast} шт.\n"
-        f"{_format_weather_forecast_line(stats)}"
+        f"{_format_weather_forecast_line(stats)}\n\n"
+        f"{_format_weather_brief(stats.weather)}"
     )
 
 
@@ -327,11 +339,8 @@ def _format_exclusion(exclusion: HenLayingExclusion) -> str:
     return f"#{exclusion.id}: {exclusion.hens_count} кур., {reason}{until}"
 
 
-def _safe_stats(egg_service: EggService, user_id: int, *, refresh_weather: bool) -> EggStats:
-    try:
-        return egg_service.stats(user_id, refresh_weather=refresh_weather)
-    except Exception:
-        return egg_service.stats(user_id, refresh_weather=False)
+def _safe_stats(egg_service: EggService, user_id: int) -> EggStats:
+    return egg_service.stats(user_id, refresh_weather=False)
 
 
 def _format_weather_forecast_line(stats: EggStats) -> str:
@@ -347,7 +356,7 @@ def _format_weather_forecast_line(stats: EggStats) -> str:
 
 def _format_weather(weather: DailyWeather | None) -> str:
     if weather is None:
-        return "Погода за сегодня еще не загружена."
+        return "Погода за сегодня еще не загружена. Нажмите Обновить погоду."
     temp = "нет данных"
     if weather.temperature_avg_c is not None:
         temp = f"{weather.temperature_avg_c:.1f} °C"
@@ -366,3 +375,23 @@ def _format_weather(weather: DailyWeather | None) -> str:
         f"- состояние: {condition}\n"
         f"- источник: Open-Meteo"
     )
+
+
+def _format_weather_brief(weather: DailyWeather | None) -> str:
+    if weather is None:
+        return "Погода: не загружена. Откройте Город и погода -> Обновить погоду."
+    temp = "нет данных"
+    if weather.temperature_avg_c is not None:
+        temp = f"{weather.temperature_avg_c:.1f} °C"
+    condition = f", {weather.condition}" if weather.condition else ""
+    return f"Погода: {temp}{condition}, {weather.city}."
+
+
+def _format_weather_error(exc: Exception) -> str:
+    text = str(exc).strip()
+    lowered = text.lower()
+    if "timed out" in lowered or "timeout" in lowered:
+        return "погодный сервис не ответил за 3 секунды. Попробуйте обновить позже."
+    if "urlopen error" in lowered:
+        return "нет соединения с погодным сервисом. Попробуйте позже."
+    return text or "неизвестная ошибка погодного сервиса."

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date
 import json
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 
 @dataclass(frozen=True)
@@ -27,7 +27,7 @@ class WeatherDay:
 
 
 class OpenMeteoWeatherClient:
-    def __init__(self, *, timeout_seconds: float = 8.0) -> None:
+    def __init__(self, *, timeout_seconds: float = 3.0) -> None:
         self.timeout_seconds = timeout_seconds
 
     def geocode(self, city: str) -> GeocodedLocation:
@@ -82,7 +82,8 @@ class OpenMeteoWeatherClient:
 
     def _get_json(self, base_url: str, params: dict[str, object]) -> dict:
         url = f"{base_url}?{urlencode(params)}"
-        with urlopen(url, timeout=self.timeout_seconds) as response:
+        request = Request(url, headers={"User-Agent": "incubator-feed-bot/1.0"})
+        with urlopen(request, timeout=self.timeout_seconds) as response:
             return json.loads(response.read().decode("utf-8"))
 
 
