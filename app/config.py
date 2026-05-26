@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone as datetime_timezone
 import logging
 import os
 from pathlib import Path
@@ -25,6 +26,9 @@ class AppConfig:
     github_url: str
     changelog_url: str
     timezone: str = "Europe/Moscow"
+    release_deployed_at: str = ""
+    release_commit: str = ""
+    runtime_started_at: datetime = field(default_factory=lambda: datetime.now(datetime_timezone.utc))
 
 
 def get_project_root() -> Path:
@@ -143,6 +147,8 @@ def load_config() -> AppConfig:
         changelog_url=os.getenv("CHANGELOG_URL", default_changelog_url).strip()
         or default_changelog_url,
         timezone=os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
+        release_deployed_at=os.getenv("RELEASE_DEPLOYED_AT", "").strip(),
+        release_commit=os.getenv("RELEASE_COMMIT", "").strip(),
     )
 
 

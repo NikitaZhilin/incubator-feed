@@ -48,7 +48,7 @@ def incubation_menu_keyboard(settings: dict | None = None) -> InlineKeyboardMark
 def back_to_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="В меню", callback_data="menu:home")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
     )
 

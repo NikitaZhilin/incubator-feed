@@ -11,6 +11,7 @@ from app.domain import PROFILES, get_profile
 from app.keyboards.incubation import (
     batch_actions_keyboard,
     date_choice_keyboard,
+    edit_batch_back_keyboard,
     edit_batch_keyboard,
     edit_species_keyboard,
     guide_species_keyboard,
@@ -19,9 +20,9 @@ from app.keyboards.incubation import (
     species_keyboard,
 )
 from app.keyboards.menu import (
-    back_to_menu_keyboard,
     incubation_menu_keyboard,
     main_menu_keyboard,
+    back_to_incubation_keyboard,
 )
 from app.services.guides import incubation_calendar, post_hatch_care
 from app.services.incubation import IncubationService
@@ -150,7 +151,7 @@ async def menu_reminders(callback: CallbackQuery, incubation_service: Incubation
         "Команды:\n"
         "/remind 09:00 - включить или изменить время\n"
         "/remind off - выключить",
-        reply_markup=back_to_menu_keyboard(),
+        reply_markup=back_to_incubation_keyboard(),
     )
     await callback.answer()
 
@@ -440,7 +441,7 @@ async def calendar_species(callback: CallbackQuery) -> None:
     await _answer_callback_message(
         callback,
         incubation_calendar(profile),
-        reply_markup=back_to_menu_keyboard(),
+        reply_markup=back_to_incubation_keyboard(),
     )
     await callback.answer()
 
@@ -452,7 +453,7 @@ async def care_species(callback: CallbackQuery) -> None:
     await _answer_callback_message(
         callback,
         post_hatch_care(profile.title),
-        reply_markup=back_to_menu_keyboard(),
+        reply_markup=back_to_incubation_keyboard(),
     )
     await callback.answer()
 
@@ -604,8 +605,10 @@ async def batch_status(callback: CallbackQuery, incubation_service: IncubationSe
 @router.callback_query(F.data.startswith("batch_edit:"))
 async def edit_menu_callback(
     callback: CallbackQuery,
+    state: FSMContext,
     incubation_service: IncubationService,
 ) -> None:
+    await state.clear()
     batch_id = int(str(callback.data).split(":", 1)[1])
     batch = incubation_service.get_batch(batch_id, callback.from_user.id)
     if batch is None:
@@ -682,6 +685,8 @@ async def edit_field_callback(
                 value=batch.eggs_count,
                 prefix="edit_eggs",
                 min_value=1,
+                back_callback=f"batch_edit:{batch_id}",
+                back_text="⬅️ Назад к редактированию",
             ),
         )
         await callback.answer()
@@ -693,7 +698,7 @@ async def edit_field_callback(
     await _answer_callback_message(
         callback,
         _edit_prompt(field),
-        reply_markup=back_to_menu_keyboard(),
+        reply_markup=edit_batch_back_keyboard(batch_id),
     )
     await callback.answer()
 
@@ -711,6 +716,8 @@ async def adjust_edit_eggs_count(callback: CallbackQuery, state: FSMContext) -> 
             value=next_value,
             prefix="edit_eggs",
             min_value=1,
+            back_callback=f"batch_edit:{data['batch_id']}",
+            back_text="⬅️ Назад к редактированию",
         ),
     )
     await callback.answer()

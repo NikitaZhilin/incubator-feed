@@ -1,3 +1,4 @@
+from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiogram import F, Router
@@ -260,17 +261,50 @@ def format_about_bot(config: AppConfig) -> str:
         f"Канал: {config.release_channel}",
         "Статус: тестовый режим",
         "",
-        "Проект:",
-        config.github_url,
-        "",
-        "История изменений:",
-        config.changelog_url,
+        "Состояние:",
+        f"Последний запуск: {_format_runtime_time(config.runtime_started_at, config.timezone)}",
     ]
+    if config.release_deployed_at:
+        lines.append(f"Последний деплой: {_format_runtime_time(config.release_deployed_at, config.timezone)}")
+    if config.release_commit:
+        lines.append(f"Коммит: {config.release_commit[:12]}")
+    lines.extend(
+        [
+            "",
+            "Проект:",
+            config.github_url,
+            "",
+            "История изменений:",
+            config.changelog_url,
+        ]
+    )
     if notes:
         lines.extend(["", "Что нового:"])
         lines.extend(f"- {item}" for item in notes)
     lines.extend(["", DEFAULT_TESTING_DISCLAIMER])
     return "\n".join(lines)
+
+
+def _format_runtime_time(value: datetime | str, timezone_name: str) -> str:
+    try:
+        zone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        zone = ZoneInfo("Europe/Moscow")
+
+    if isinstance(value, datetime):
+        moment = value
+    else:
+        raw = value.strip()
+        if not raw:
+            return "неизвестно"
+        try:
+            moment = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return raw
+
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=zone)
+    return moment.astimezone(zone).strftime("%d.%m.%Y %H:%M")
 
 
 def _release_note_items(notes: str) -> list[str]:

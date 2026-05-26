@@ -42,6 +42,14 @@ def feed_cancel_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def stock_cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Отмена", callback_data="stock:menu")],
+        ]
+    )
+
+
 def feed_actions_keyboard(feed_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -55,7 +63,7 @@ def feed_actions_keyboard(feed_id: int) -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton(text="🔄 Задать остаток", callback_data=f"feeds:restock:{feed_id}")],
             [InlineKeyboardButton(text="🗑 Архивировать", callback_data=f"feeds:delete:{feed_id}")],
-            [InlineKeyboardButton(text="🌾 К кормам", callback_data="feeds:menu")],
+            [InlineKeyboardButton(text="⬅️ К кормам", callback_data="feeds:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
     )
@@ -86,12 +94,19 @@ def feed_edit_keyboard(feed_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="Расход петухов", callback_data=f"feeds:edit_field:{feed_id}:rooster_rate"),
             ],
             [InlineKeyboardButton(text="Поголовье", callback_data=f"feeds:edit_field:{feed_id}:group")],
-            [InlineKeyboardButton(text="Отмена", callback_data=f"feeds:view:{feed_id}")],
+            [InlineKeyboardButton(text="⬅️ Назад к корму", callback_data=f"feeds:view:{feed_id}")],
         ]
     )
 
 
-def bird_group_select_keyboard(groups, *, allow_skip: bool = True, prefix: str = "feeds:select_group") -> InlineKeyboardMarkup:
+def bird_group_select_keyboard(
+    groups,
+    *,
+    allow_skip: bool = True,
+    prefix: str = "feeds:select_group",
+    back_callback: str | None = None,
+    back_text: str = "⬅️ Назад",
+) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=f"{group.name} ({group.bird_count})", callback_data=f"{prefix}:{group.id}")]
         for group in groups
@@ -99,6 +114,8 @@ def bird_group_select_keyboard(groups, *, allow_skip: bool = True, prefix: str =
     if allow_skip:
         rows.append([InlineKeyboardButton(text="Без привязки", callback_data=f"{prefix}:none")])
     rows.append([InlineKeyboardButton(text="Создать поголовье", callback_data="feeds:group_add")])
+    if back_callback:
+        rows.append([InlineKeyboardButton(text=back_text, callback_data=back_callback)])
     rows.append([InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -107,7 +124,7 @@ def bird_groups_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="➕ Создать поголовье", callback_data="feeds:group_add")],
-            [InlineKeyboardButton(text="🌾 К кормам", callback_data="feeds:menu")],
+            [InlineKeyboardButton(text="⬅️ К кормам", callback_data="feeds:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
     )
@@ -125,7 +142,7 @@ def stock_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="📋 История", callback_data="stock:history"),
             ],
             [InlineKeyboardButton(text="🔄 Задать фактический остаток", callback_data="stock:adjust")],
-            [InlineKeyboardButton(text="🌾 К кормам", callback_data="feeds:menu")],
+            [InlineKeyboardButton(text="⬅️ К кормам", callback_data="feeds:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
     )
@@ -142,17 +159,25 @@ def stock_kind_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="Готовый корм", callback_data="stock:kind:commercial_feed"),
                 InlineKeyboardButton(text="Другое", callback_data="stock:kind:other"),
             ],
-            [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")],
+            [InlineKeyboardButton(text="Отмена", callback_data="stock:menu")],
         ]
     )
 
 
-def stock_items_keyboard(items, *, prefix: str) -> InlineKeyboardMarkup:
+def stock_items_keyboard(
+    items,
+    *,
+    prefix: str,
+    back_callback: str | None = None,
+    back_text: str = "⬅️ К складу",
+) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=item.name[:35], callback_data=f"{prefix}:{item.id}")]
         for item in items
     ]
-    rows.append([InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")])
+    if back_callback:
+        rows.append([InlineKeyboardButton(text=back_text, callback_data=back_callback)])
+    rows.append([InlineKeyboardButton(text="Отмена", callback_data="stock:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -165,7 +190,8 @@ def stock_confirm_mix_keyboard(mix_count: float, grain_base: str = "wheat") -> I
                     callback_data=f"stock:mix_confirm:{grain_base}:{mix_count:g}",
                 )
             ],
-            [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")],
+            [InlineKeyboardButton(text="⬅️ К смеси", callback_data="stock:mix")],
+            [InlineKeyboardButton(text="📦 К складу", callback_data="stock:menu")],
         ]
     )
 
@@ -199,7 +225,12 @@ def stock_mix_quick_keyboard(grain_base: str, max_mix_count: int) -> InlineKeybo
         ]
     )
     rows.append([InlineKeyboardButton(text="Ввести вручную", callback_data=f"stock:mix_manual:{grain_base}")])
-    rows.append([InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")])
+    rows.append(
+        [
+            InlineKeyboardButton(text="⬅️ К складу", callback_data="stock:menu"),
+            InlineKeyboardButton(text="🌾 К кормам", callback_data="feeds:menu"),
+        ]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -208,5 +239,6 @@ def stock_assign_groups_keyboard(groups) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=f"{group.name} ({group.bird_count})", callback_data=f"stock:assign_group:{group.id}")]
         for group in groups
     ]
-    rows.append([InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")])
+    rows.append([InlineKeyboardButton(text="⬅️ К складу", callback_data="stock:menu")])
+    rows.append([InlineKeyboardButton(text="Отмена", callback_data="stock:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

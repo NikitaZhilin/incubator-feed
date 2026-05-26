@@ -38,6 +38,8 @@ class ConfigTest(unittest.TestCase):
                     "RELEASE_NOTES": "Добавлена ссылка на web-версию",
                     "RELEASE_CHANNEL": "beta",
                     "RELEASE_IMPORTANCE": "major",
+                    "RELEASE_DEPLOYED_AT": "2026-05-26T08:30:00Z",
+                    "RELEASE_COMMIT": "abcdef123456",
                     "GITHUB_URL": "https://github.com/example/project",
                     "CHANGELOG_URL": "https://github.com/example/project/releases",
                 },
@@ -50,6 +52,8 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(config.release_notes, "Добавлена ссылка на web-версию")
         self.assertEqual(config.release_channel, "beta")
         self.assertEqual(config.release_importance, "major")
+        self.assertEqual(config.release_deployed_at, "2026-05-26T08:30:00Z")
+        self.assertEqual(config.release_commit, "abcdef123456")
         self.assertEqual(config.github_url, "https://github.com/example/project")
         self.assertEqual(config.changelog_url, "https://github.com/example/project/releases")
         self.assertFalse(config.release_notice_enabled)

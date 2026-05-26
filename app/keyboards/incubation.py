@@ -44,6 +44,8 @@ def number_adjust_keyboard(
     prefix: str,
     min_value: int = 0,
     max_value: int | None = None,
+    back_callback: str | None = None,
+    back_text: str = "⬅️ Назад",
 ) -> InlineKeyboardMarkup:
     plus_values = (1, 5, 10)
     minus_values = (-1, -5, -10)
@@ -70,6 +72,8 @@ def number_adjust_keyboard(
             InlineKeyboardButton(text="Ввести вручную", callback_data=f"num_manual:{prefix}"),
         ]
     )
+    if back_callback:
+        rows.append([InlineKeyboardButton(text=back_text, callback_data=back_callback)])
     rows.append([InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -84,12 +88,14 @@ def batch_actions_keyboard(batch_id: int, is_active: bool = True) -> InlineKeybo
             [
                 InlineKeyboardButton(text="Редактировать", callback_data=f"batch_edit:{batch_id}"),
             ],
-            [InlineKeyboardButton(text="В меню", callback_data="menu:home")],
+            [InlineKeyboardButton(text="⬅️ К инкубации", callback_data="menu:incubation")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
     else:
         rows = [
             [InlineKeyboardButton(text="Вернуть в активные", callback_data=f"batch_reopen:{batch_id}")],
-            [InlineKeyboardButton(text="В меню", callback_data="menu:home")],
+            [InlineKeyboardButton(text="⬅️ К инкубации", callback_data="menu:incubation")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -107,9 +113,18 @@ def edit_batch_keyboard(batch_id: int) -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton(text="Птица", callback_data=f"edit_field:{batch_id}:species")],
             [
-                InlineKeyboardButton(text="Назад к партии", callback_data=f"batch_status:{batch_id}"),
-                InlineKeyboardButton(text="В меню", callback_data="menu:home"),
+                InlineKeyboardButton(text="⬅️ Назад к партии", callback_data=f"batch_status:{batch_id}"),
+                InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home"),
             ],
+        ]
+    )
+
+
+def edit_batch_back_keyboard(batch_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад к редактированию", callback_data=f"batch_edit:{batch_id}")],
+            [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")],
         ]
     )
 
@@ -119,6 +134,7 @@ def edit_species_keyboard(batch_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=profile.title, callback_data=f"edit_species:{batch_id}:{code}")]
         for code, profile in PROFILES.items()
     ]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад к редактированию", callback_data=f"batch_edit:{batch_id}")])
     rows.append([InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -128,5 +144,6 @@ def guide_species_keyboard(prefix: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=profile.title, callback_data=f"{prefix}:{code}")]
         for code, profile in PROFILES.items()
     ]
-    rows.append([InlineKeyboardButton(text="В меню", callback_data="menu:home")])
+    rows.append([InlineKeyboardButton(text="⬅️ К инкубации", callback_data="menu:incubation")])
+    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

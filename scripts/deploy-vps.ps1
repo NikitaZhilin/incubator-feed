@@ -123,6 +123,8 @@ RELEASE_NOTICE_ENABLED=$quotedReleaseNoticeEnabled
 RELEASE_VERSION=$quotedReleaseVersion
 RELEASE_NOTES=$quotedReleaseNotes
 RELEASE_IMPORTANCE=$quotedReleaseImportance
+RELEASE_COMMIT=`$(git rev-parse --short=12 HEAD 2>/dev/null || true)
+RELEASE_DEPLOYED_AT=`$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 docker build -t "`$IMAGE_NAME" .
 docker run --rm --env-file .env.prod \
   -v "$DeployPath/data:/app/data" \
@@ -136,6 +138,8 @@ docker run -d --name "`$CONTAINER_NAME" --restart unless-stopped \
   -e RELEASE_VERSION="`$RELEASE_VERSION" \
   -e RELEASE_NOTES="`$RELEASE_NOTES" \
   -e RELEASE_IMPORTANCE="`$RELEASE_IMPORTANCE" \
+  -e RELEASE_COMMIT="`$RELEASE_COMMIT" \
+  -e RELEASE_DEPLOYED_AT="`$RELEASE_DEPLOYED_AT" \
   -v "$DeployPath/data:/app/data" \
   -v "$DeployPath/logs:/app/logs" \
   -v "$DeployPath/backups:/app/backups" \

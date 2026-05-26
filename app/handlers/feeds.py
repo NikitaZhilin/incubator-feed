@@ -18,6 +18,7 @@ from app.keyboards.feeds import (
     feed_rate_keyboard,
     feeds_menu_keyboard,
     stock_assign_groups_keyboard,
+    stock_cancel_keyboard,
     stock_confirm_mix_keyboard,
     stock_items_keyboard,
     stock_kind_keyboard,
@@ -148,7 +149,7 @@ async def feed_command(message: Message, state: FSMContext) -> None:
     await state.set_state(StockPurchaseFlow.name)
     await message.answer(
         "Введите название позиции склада, например Кукуруза, Премикс, Зерносмесь или Комбикорм ПК-1.",
-        reply_markup=feed_cancel_keyboard(),
+        reply_markup=stock_cancel_keyboard(),
     )
 
 
@@ -174,7 +175,7 @@ async def feed_add(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(StockPurchaseFlow.name)
     await callback.message.answer(
         "Введите название позиции склада, например Кукуруза, Премикс, Зерносмесь или Комбикорм ПК-1.",
-        reply_markup=feed_cancel_keyboard(),
+        reply_markup=stock_cancel_keyboard(),
     )
     await callback.answer()
 
@@ -407,7 +408,7 @@ async def stock_purchase_start(callback: CallbackQuery, state: FSMContext) -> No
     await state.set_state(StockPurchaseFlow.name)
     await callback.message.answer(
         "Введите название позиции склада, например Кукуруза, Премикс, Зерносмесь или Комбикорм ПК-1.",
-        reply_markup=feed_cancel_keyboard(),
+        reply_markup=stock_cancel_keyboard(),
     )
     await callback.answer()
 
@@ -431,7 +432,7 @@ async def stock_purchase_kind(callback: CallbackQuery, state: FSMContext) -> Non
     await callback.message.answer(
         "Сколько куплено или добавлено на склад? Например 25 кг, 500 г, 1 мешок, 2 мешка по 25, 1 пачка, 2 пачки по 0.5.\n"
         "По умолчанию 1 пачка = 0.5 кг.",
-        reply_markup=feed_cancel_keyboard(),
+        reply_markup=stock_cancel_keyboard(),
     )
     await callback.answer()
 
@@ -512,7 +513,7 @@ async def stock_mix_manual(callback: CallbackQuery, state: FSMContext, stock_ser
         f"Сколько замесов смеси сделать?\n\n"
         f"Зерновая основа: {option.label}.\n"
         f"Один замес по рецепту ≈ {one_cycle:.1f} кг готовой смеси.",
-        reply_markup=feed_cancel_keyboard(),
+        reply_markup=stock_cancel_keyboard(),
     )
     await callback.answer()
 
@@ -654,7 +655,12 @@ async def stock_assign_group(callback: CallbackQuery, state: FSMContext, stock_s
     await state.set_state(StockAssignFlow.item)
     await callback.message.answer(
         "Выберите, какой складской корм ест это поголовье.",
-        reply_markup=stock_items_keyboard(items, prefix="stock:assign_item"),
+        reply_markup=stock_items_keyboard(
+            items,
+            prefix="stock:assign_item",
+            back_callback="stock:assignments",
+            back_text="⬅️ К рационам",
+        ),
     )
     await callback.answer()
 
@@ -685,7 +691,7 @@ async def stock_assign_item(callback: CallbackQuery, state: FSMContext, feed_ser
         await state.set_state(StockAssignFlow.rate)
         await callback.message.answer(
             "Введите средний расход на одну птицу в день в граммах, например 120.",
-            reply_markup=feed_cancel_keyboard(),
+            reply_markup=stock_cancel_keyboard(),
         )
     await callback.answer()
 
@@ -722,7 +728,12 @@ async def stock_adjust_start(callback: CallbackQuery, state: FSMContext, stock_s
     await state.set_state(StockAdjustFlow.item)
     await callback.message.answer(
         "Выберите позицию, для которой нужно задать фактический остаток.",
-        reply_markup=stock_items_keyboard(items, prefix="stock:adjust_item"),
+        reply_markup=stock_items_keyboard(
+            items,
+            prefix="stock:adjust_item",
+            back_callback="stock:menu",
+            back_text="⬅️ К складу",
+        ),
     )
     await callback.answer()
 
@@ -734,7 +745,7 @@ async def stock_adjust_item(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(StockAdjustFlow.amount)
     await callback.message.answer(
         "Введите фактический остаток в кг, например 10 или 1 мешок.",
-        reply_markup=feed_cancel_keyboard(),
+        reply_markup=stock_cancel_keyboard(),
     )
     await callback.answer()
 
@@ -1334,7 +1345,13 @@ async def feed_edit_field(callback: CallbackQuery, state: FSMContext, feed_servi
         await state.set_state(EditFeed.group)
         await callback.message.answer(
             "Выберите новое поголовье или оставьте корм без привязки.",
-            reply_markup=bird_group_select_keyboard(groups, allow_skip=True, prefix="feeds:edit_group"),
+            reply_markup=bird_group_select_keyboard(
+                groups,
+                allow_skip=True,
+                prefix="feeds:edit_group",
+                back_callback=f"feeds:edit:{feed_id_text}",
+                back_text="⬅️ Назад к редактированию",
+            ),
         )
         await callback.answer()
         return
