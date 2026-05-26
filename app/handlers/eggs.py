@@ -55,10 +55,10 @@ async def eggs_add(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data.startswith("eggs:add_date:"))
-async def eggs_add_date(callback: CallbackQuery, state: FSMContext) -> None:
+async def eggs_add_date(callback: CallbackQuery, state: FSMContext, egg_service: EggService) -> None:
     choice = str(callback.data).rsplit(":", 1)[1]
     try:
-        entry_date = _egg_entry_date_from_choice(choice)
+        entry_date = _egg_entry_date_from_choice(choice, today=egg_service.current_date())
     except ValueError:
         await callback.answer("Дата не найдена.", show_alert=True)
         return
@@ -77,7 +77,7 @@ async def eggs_count(message: Message, state: FSMContext, egg_service: EggServic
     try:
         count = int((message.text or "").strip())
         data = await state.get_data()
-        entry_date = date.fromisoformat(str(data.get("entry_date") or date.today().isoformat()))
+        entry_date = date.fromisoformat(str(data.get("entry_date") or egg_service.current_date().isoformat()))
         entry = egg_service.record_today(message.from_user.id, count, today=entry_date)
     except ValueError as exc:
         await message.answer(str(exc), reply_markup=eggs_cancel_keyboard())
@@ -452,8 +452,8 @@ def _format_weather(weather: DailyWeather | None) -> str:
         else f"{weather.precipitation_mm:.1f} мм"
     )
     return (
-        f"Погода на {weather.weather_date.isoformat()}:\n"
-        f"- день: {_format_weather_part(weather.day_temperature_min_c, weather.day_temperature_max_c, weather.day_condition)}\n"
+        f"Погода на {_format_display_date(weather.weather_date)}:\n"
+        f"- день: {_format_day_weather(weather)}\n"
         f"- ночь: {_format_weather_part(weather.night_temperature_min_c, weather.night_temperature_max_c, weather.night_condition)}\n"
         f"- завтра: {_format_tomorrow_weather(weather)}\n"
         f"- осадки: {precipitation}\n"
@@ -483,9 +483,23 @@ def _format_weather_brief(weather: DailyWeather | None, *, updating: bool = Fals
         return "Погода: не загружена."
     return (
         f"Погода, {_display_city(weather.city)}:\n"
-        f"День: {_format_weather_part(weather.day_temperature_min_c, weather.day_temperature_max_c, weather.day_condition)}\n"
+        f"День: {_format_day_weather(weather)}\n"
         f"Ночь: {_format_weather_part(weather.night_temperature_min_c, weather.night_temperature_max_c, weather.night_condition)}\n"
         f"Завтра: {_format_tomorrow_weather(weather)}"
+    )
+
+
+def _format_day_weather(weather: DailyWeather) -> str:
+    if weather.day_temperature_min_c is None and weather.day_temperature_max_c is None:
+        return _format_weather_part(
+            weather.temperature_min_c,
+            weather.temperature_max_c,
+            weather.day_condition or weather.condition,
+        )
+    return _format_weather_part(
+        weather.day_temperature_min_c,
+        weather.day_temperature_max_c,
+        weather.day_condition,
     )
 
 
@@ -509,7 +523,7 @@ def _format_weather_part(
 
 
 def _format_tomorrow_weather(weather: DailyWeather) -> str:
-    prefix = f"{weather.tomorrow_date.isoformat()}: " if weather.tomorrow_date else ""
+    prefix = f"{_format_display_date(weather.tomorrow_date)}: " if weather.tomorrow_date else ""
     return prefix + _format_weather_part(
         weather.tomorrow_temperature_min_c,
         weather.tomorrow_temperature_max_c,
@@ -527,6 +541,10 @@ def _format_weather_error(exc: Exception) -> str:
     if "urlopen error" in lowered:
         return "нет соединения с погодным сервисом. Попробуйте позже."
     return text or "неизвестная ошибка погодного сервиса."
+
+
+def _format_display_date(value: date) -> str:
+    return f"{value:%d.%m.%Y}"
 
 
 def _display_city(value: str) -> str:

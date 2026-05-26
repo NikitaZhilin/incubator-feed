@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.domain import DailyWeather, EggEntry, EggStats, HenLayingExclusion, WeatherSettings
 from app.storage.repositories.eggs import EggRepository
@@ -21,13 +22,15 @@ class EggService:
         eggs: EggRepository,
         feeds: FeedRepository,
         weather_client: OpenMeteoWeatherClient | None = None,
+        timezone_name: str = "Europe/Moscow",
     ) -> None:
         self.eggs = eggs
         self.feeds = feeds
         self.weather_client = weather_client
+        self.timezone_name = timezone_name
 
     def record_today(self, user_id: int, eggs_count: int, *, today: date | None = None, note: str = "") -> EggEntry:
-        current_date = today or date.today()
+        current_date = today or self.current_date()
         if eggs_count < 0:
             raise ValueError("Количество яиц не может быть отрицательным.")
         total_hens = self.total_laying_hens(user_id)
@@ -50,7 +53,7 @@ class EggService:
         today: date | None = None,
         refresh_weather: bool = False,
     ) -> EggStats:
-        current_date = today or date.today()
+        current_date = today or self.current_date()
         total_hens = self.total_laying_hens(user_id)
         active_exclusions = tuple(self.eggs.list_active_exclusions(user_id, on_date=current_date))
         excluded_hens = min(sum(item.hens_count for item in active_exclusions), total_hens)
@@ -96,7 +99,7 @@ class EggService:
         )
 
     def history(self, user_id: int, *, days: int = 14, today: date | None = None) -> list[tuple[date, int]]:
-        current_date = today or date.today()
+        current_date = today or self.current_date()
         start_date = current_date - timedelta(days=max(days - 1, 0))
         totals = self.eggs.daily_totals(user_id, start_date=start_date, end_date=current_date)
         return [
@@ -117,7 +120,7 @@ class EggService:
             raise ValueError("Количество кур должно быть больше нуля.")
         if reason not in EXCLUSION_REASON_LABELS:
             raise ValueError("Неизвестная причина.")
-        current_date = started_at or date.today()
+        current_date = started_at or self.current_date()
         total_hens = self.total_laying_hens(user_id)
         if total_hens > 0 and hens_count > total_hens:
             raise ValueError(f"В поголовье сейчас {total_hens} несушек. Укажите число не больше этого.")
@@ -138,7 +141,7 @@ class EggService:
         return self.eggs.finish_exclusion(
             exclusion_id=exclusion_id,
             user_id=user_id,
-            ended_at=ended_at or date.today(),
+            ended_at=ended_at or self.current_date(),
         )
 
     def get_weather_settings(self, user_id: int) -> WeatherSettings:
@@ -163,7 +166,7 @@ class EggService:
         )
 
     def get_daily_weather(self, user_id: int, *, today: date | None = None) -> DailyWeather | None:
-        return self.eggs.get_daily_weather(user_id=user_id, weather_date=today or date.today())
+        return self.eggs.get_daily_weather(user_id=user_id, weather_date=today or self.current_date())
 
     def refresh_weather(
         self,
@@ -172,7 +175,7 @@ class EggService:
         today: date | None = None,
         force: bool = False,
     ) -> DailyWeather | None:
-        current_date = today or date.today()
+        current_date = today or self.current_date()
         settings = self.eggs.get_weather_settings(user_id)
         stored = self.eggs.get_daily_weather(user_id=user_id, weather_date=current_date)
         if not force and stored is not None and stored.city == settings.city:
@@ -235,7 +238,7 @@ class EggService:
         today: date | None = None,
         max_age: timedelta = timedelta(hours=6),
     ) -> bool:
-        current_date = today or date.today()
+        current_date = today or self.current_date()
         settings = self.eggs.get_weather_settings(user_id)
         stored = self.eggs.get_daily_weather(user_id=user_id, weather_date=current_date)
         if stored is None or stored.city != settings.city:
@@ -251,6 +254,12 @@ class EggService:
             for group in self.feeds.list_bird_groups(user_id)
             if group.is_active and group.group_kind == "adult" and group.role == "hens"
         )
+
+    def current_date(self, now: datetime | None = None) -> date:
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        return current.astimezone(self._timezone()).date()
 
     def excluded_hens_count(self, user_id: int, *, on_date: date, total_hens_count: int | None = None) -> int:
         total_hens = self.total_laying_hens(user_id) if total_hens_count is None else total_hens_count
@@ -288,3 +297,9 @@ class EggService:
         if precipitation >= 10:
             note += " Сильные осадки могут дополнительно снижать активность птицы."
         return percent, note
+
+    def _timezone(self) -> ZoneInfo:
+        try:
+            return ZoneInfo(self.timezone_name)
+        except ZoneInfoNotFoundError:
+            return ZoneInfo("UTC")

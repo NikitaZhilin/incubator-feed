@@ -98,6 +98,7 @@ async def main() -> None:
             EggRepository(database),
             feed_repository,
             OpenMeteoWeatherClient(),
+            timezone_name=config.timezone,
         )
         stock_service = StockService(StockRepository(database), feed_repository, analytics)
         admin_service = AdminService(

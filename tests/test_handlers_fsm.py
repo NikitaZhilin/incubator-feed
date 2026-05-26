@@ -150,11 +150,6 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Главное меню", message.answers[-1][0])
 
     async def test_egg_entry_can_be_recorded_for_yesterday(self) -> None:
-        class FixedDate(date):
-            @classmethod
-            def today(cls):
-                return cls(2026, 5, 27)
-
         state = FakeState()
         add_callback = FakeCallback("eggs:add")
 
@@ -163,9 +158,9 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("За какой день", add_callback.message.answers[-1][0])
         self.assertTrue(add_callback.answered)
 
-        with patch("app.handlers.eggs.date", FixedDate):
+        with patch.object(self.egg_service, "current_date", return_value=date(2026, 5, 27)):
             date_callback = FakeCallback("eggs:add_date:yesterday")
-            await eggs_add_date(date_callback, state)
+            await eggs_add_date(date_callback, state, self.egg_service)
 
             self.assertEqual(state.state, EggEntryFlow.count)
             self.assertEqual(state.data["entry_date"], "2026-05-26")

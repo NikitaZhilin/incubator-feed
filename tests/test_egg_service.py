@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 import tempfile
 import unittest
@@ -85,6 +85,17 @@ class EggServiceTest(unittest.TestCase):
         rows = self.egg_service.history(1, days=3, today=date(2026, 5, 26))
 
         self.assertEqual(rows, [(date(2026, 5, 26), 0), (date(2026, 5, 25), 0), (date(2026, 5, 24), 0)])
+
+    def test_current_date_uses_bot_timezone_not_server_utc_date(self) -> None:
+        service = EggService(
+            EggRepository(self.database),
+            self.feed_repository,
+            timezone_name="Europe/Moscow",
+        )
+
+        current_date = service.current_date(datetime(2026, 5, 26, 23, 45, tzinfo=timezone.utc))
+
+        self.assertEqual(current_date, date(2026, 5, 27))
 
     def test_weather_is_loaded_and_applied_to_forecast(self) -> None:
         class FakeWeatherClient:
@@ -254,7 +265,25 @@ class EggServiceTest(unittest.TestCase):
 
         self.assertIn("День: 14...22 °C", text)
         self.assertIn("Ночь: 10...15 °C", text)
-        self.assertIn("Завтра: 2026-05-28: 11...23 °C, дождь", text)
+        self.assertIn("Завтра: 28.05.2026: 11...23 °C, дождь", text)
+
+    def test_weather_brief_uses_legacy_daily_values_when_day_part_is_missing(self) -> None:
+        weather = self.egg_service.eggs.upsert_daily_weather(
+            user_id=1,
+            weather_date=date(2026, 5, 27),
+            city="Курск, Курская область",
+            temperature_avg_c=16,
+            temperature_min_c=10,
+            temperature_max_c=22,
+            precipitation_mm=0,
+            condition="переменная облачность",
+            provider="open-meteo",
+        )
+
+        text = _format_weather_brief(weather)
+
+        self.assertIn("День: 10...22 °C, переменная облачность", text)
+        self.assertNotIn("День: температура нет данных", text)
 
 
 if __name__ == "__main__":
