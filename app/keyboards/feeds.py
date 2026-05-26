@@ -7,7 +7,7 @@ def feeds_menu_keyboard(feed_buttons: list[tuple[int, str]] | None = None) -> In
         rows.append([InlineKeyboardButton(text=f"🌾 {name[:28]}", callback_data=f"feeds:view:{feed_id}")])
     rows.append(
         [
-            InlineKeyboardButton(text="➕ Добавить корм", callback_data="feeds:add"),
+            InlineKeyboardButton(text="➕ Добавить корм", callback_data="stock:purchase"),
             InlineKeyboardButton(text="🧮 Смесь", callback_data="feeds:mix"),
         ]
     )
@@ -37,18 +37,6 @@ def feed_rate_keyboard() -> InlineKeyboardMarkup:
 def feed_cancel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")],
-        ]
-    )
-
-
-def grain_base_keyboard(prefix: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="Пшеница", callback_data=f"{prefix}:wheat"),
-                InlineKeyboardButton(text="Зерносмесь", callback_data=f"{prefix}:layer_grain_mix"),
-            ],
             [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")],
         ]
     )
@@ -180,6 +168,39 @@ def stock_confirm_mix_keyboard(mix_count: float, grain_base: str = "wheat") -> I
             [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")],
         ]
     )
+
+
+def stock_mix_quick_keyboard(grain_base: str, max_mix_count: int) -> InlineKeyboardMarkup:
+    rows = []
+    quick_limit = min(max_mix_count, 9)
+    for start in range(1, quick_limit + 1, 3):
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"Сделать {count}",
+                    callback_data=f"stock:mix_confirm:{grain_base}:{count}",
+                )
+                for count in range(start, min(start + 3, quick_limit + 1))
+            ]
+        )
+    if max_mix_count > quick_limit:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"Сделать максимум ({max_mix_count})",
+                    callback_data=f"stock:mix_confirm:{grain_base}:{max_mix_count}",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(text="Пшеница", callback_data="stock:mix_grain:wheat"),
+            InlineKeyboardButton(text="Зерносмесь", callback_data="stock:mix_grain:layer_grain_mix"),
+        ]
+    )
+    rows.append([InlineKeyboardButton(text="Ввести вручную", callback_data=f"stock:mix_manual:{grain_base}")])
+    rows.append([InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def stock_assign_groups_keyboard(groups) -> InlineKeyboardMarkup:

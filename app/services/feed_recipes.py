@@ -5,6 +5,7 @@ from app.domain import CONTENT
 
 
 DEFAULT_BAG_KG = 25.0
+DEFAULT_PACK_KG = 0.5
 
 
 @dataclass(frozen=True)
@@ -116,17 +117,31 @@ def load_chicken_mix_recipe(
 CHICKEN_MIX_RECIPE: tuple[MixIngredient, ...] = _load_recipe("chicken_mix")
 
 
-def parse_feed_amount(value: str, *, default_bag_kg: float = DEFAULT_BAG_KG) -> float:
-    """Parse kilograms or bags: '25', '25 кг', '1 мешок', '2 мешка по 25'."""
+def parse_feed_amount(
+    value: str,
+    *,
+    default_bag_kg: float = DEFAULT_BAG_KG,
+    default_pack_kg: float = DEFAULT_PACK_KG,
+) -> float:
+    """Parse kilograms, grams, bags or small packs."""
     raw = value.strip().lower().replace(",", ".")
     numbers = [float(item) for item in re.findall(r"\d+(?:\.\d+)?", raw)]
     if not numbers:
         raise ValueError("Не понял количество.")
 
+    has_grams = bool(re.search(r"(?<!к)(?:гр\.?|грамм\w*|г\b)", raw))
     if "меш" in raw:
         bags = numbers[0]
         bag_kg = numbers[1] if len(numbers) > 1 else default_bag_kg
         kg = bags * bag_kg
+    elif "пач" in raw or "упак" in raw:
+        packs = numbers[0]
+        pack_kg = numbers[1] if len(numbers) > 1 else default_pack_kg
+        if len(numbers) > 1 and has_grams:
+            pack_kg = pack_kg / 1000
+        kg = packs * pack_kg
+    elif has_grams:
+        kg = numbers[0] / 1000
     else:
         kg = numbers[0]
 

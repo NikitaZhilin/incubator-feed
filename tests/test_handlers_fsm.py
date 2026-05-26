@@ -11,11 +11,14 @@ from app.handlers.feeds import (
     StockPurchaseFlow,
     feed_amount,
     feed_change_amount,
+    feed_command,
     feed_edit_value,
     feed_hens,
     feed_name_with_service,
     feed_roosters,
     feed_threshold,
+    feed_add,
+    stock_mix_confirm,
     stock_purchase_amount,
     stock_purchase_name,
 )
@@ -48,6 +51,17 @@ class FakeMessage:
 
     async def answer(self, text: str, reply_markup=None, **kwargs) -> None:
         self.answers.append((text, reply_markup))
+
+
+class FakeCallback:
+    def __init__(self, data: str = "") -> None:
+        self.data = data
+        self.from_user = FakeUser()
+        self.message = FakeMessage()
+        self.answered = False
+
+    async def answer(self, *args, **kwargs) -> None:
+        self.answered = True
 
 
 class FakeState:
@@ -224,6 +238,50 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Покупка добавлена", amount_message.answers[-1][0])
         estimates = self.stock_service.list_estimates(1)
         self.assertEqual(estimates[0].remaining_kg, 50)
+
+    async def test_feed_add_redirects_to_stock_purchase(self) -> None:
+        state = FakeState()
+        callback = FakeCallback("feeds:add")
+
+        await feed_add(callback, state)
+
+        self.assertEqual(state.state, StockPurchaseFlow.name)
+        self.assertIn("позиции склада", callback.message.answers[-1][0])
+        self.assertTrue(callback.answered)
+
+    async def test_feed_command_redirects_to_stock_purchase(self) -> None:
+        state = FakeState()
+        message = FakeMessage("/feed")
+
+        await feed_command(message, state)
+
+        self.assertEqual(state.state, StockPurchaseFlow.name)
+        self.assertIn("позиции склада", message.answers[-1][0])
+
+    async def test_stale_mix_button_returns_actual_mix_dashboard(self) -> None:
+        for name in [
+            "Кукуруза",
+            "Пшеница",
+            "Ячмень",
+            "Комбикорм",
+            "Мясокостная мука",
+            "Рыбная мука",
+            "Ракушка",
+            "Премикс",
+        ]:
+            self.stock_service.add_purchase(
+                user_id=1,
+                name=name,
+                kind="ingredient",
+                amount_kg=1,
+            )
+        callback = FakeCallback("stock:mix_confirm:wheat:2")
+
+        await stock_mix_confirm(callback, self.stock_service)
+
+        self.assertIn("Остатки могли измениться", callback.message.answers[-1][0])
+        self.assertIn("Актуальный расчет", callback.message.answers[-1][0])
+        self.assertTrue(callback.answered)
 
 
 if __name__ == "__main__":

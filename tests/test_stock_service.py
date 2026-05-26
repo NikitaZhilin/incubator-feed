@@ -76,6 +76,7 @@ class StockServiceTest(unittest.TestCase):
             )
 
         default_plan = self.service.plan_mix(user_id=1, mix_count=3)
+        best_plan = self.service.best_available_mix_plan(user_id=1)
         grain_mix_plan = self.service.produce_mix(
             user_id=1,
             mix_count=3,
@@ -84,6 +85,8 @@ class StockServiceTest(unittest.TestCase):
         estimates = {item.item.name: item for item in self.service.list_estimates(1)}
 
         self.assertFalse(default_plan.can_produce)
+        self.assertEqual(best_plan.grain_base_code, "layer_grain_mix")
+        self.assertGreaterEqual(int(best_plan.max_mix_count), 3)
         self.assertTrue(grain_mix_plan.can_produce)
         self.assertEqual(grain_mix_plan.grain_base_label, "Зерносмесь")
         self.assertLess(estimates["Зерносмесь"].remaining_kg, 100)

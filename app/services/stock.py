@@ -6,6 +6,7 @@ from app.domain import CONTENT, FeedingAssignment, StockEstimate, StockItem
 from app.services.feed_recipes import (
     DEFAULT_GRAIN_BASE,
     get_grain_base_option,
+    list_grain_base_options,
     load_chicken_mix_recipe,
 )
 from app.services.feeds import FeedService
@@ -190,6 +191,23 @@ class StockService:
             output_kg=one_cycle_kg * mix_count,
             ingredients=tuple(ingredients),
         )
+
+    def best_available_mix_plan(
+        self,
+        *,
+        user_id: int,
+        now: datetime | None = None,
+    ) -> MixPlan:
+        plans = tuple(
+            self.plan_mix(
+                user_id=user_id,
+                mix_count=1,
+                grain_base=option.code,
+                now=now,
+            )
+            for option in list_grain_base_options()
+        )
+        return max(plans, key=lambda plan: (int(plan.max_mix_count), plan.max_mix_count))
 
     def produce_mix(
         self,

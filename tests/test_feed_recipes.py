@@ -9,6 +9,11 @@ class FeedRecipesTest(unittest.TestCase):
         self.assertEqual(parse_feed_amount("30кг"), 30)
         self.assertEqual(parse_feed_amount("1 мешок"), 25)
         self.assertEqual(parse_feed_amount("2 мешка по 30"), 60)
+        self.assertEqual(parse_feed_amount("500 г"), 0.5)
+        self.assertEqual(parse_feed_amount("500гр"), 0.5)
+        self.assertEqual(parse_feed_amount("1 пачка"), 0.5)
+        self.assertEqual(parse_feed_amount("2 пачки по 0.5"), 1)
+        self.assertEqual(parse_feed_amount("2 пачки по 500 г"), 1)
 
     def test_chicken_mix_totals_match_target(self) -> None:
         calculation = calculate_chicken_mix(25)
