@@ -42,13 +42,28 @@ class ReleaseNotificationTest(unittest.IsolatedAsyncioTestCase):
         text = build_release_notice(
             "0.1.42-beta",
             "Добавлена ссылка на web-версию; Web-ключ теперь удобно копируется",
+            importance="major",
         )
 
         self.assertIn("Важное обновление бота: 0.1.42-beta.", text)
         self.assertIn("- Добавлена ссылка на web-версию", text)
         self.assertIn("- Web-ключ теперь удобно копируется", text)
         self.assertIn("Подробнее: Настройки -> О боте.", text)
+        self.assertIn("Главное меню открыто ниже.", text)
         self.assertIn("Бот находится в тестировании", text)
+
+    def test_medium_release_message_is_short_without_change_details(self) -> None:
+        text = build_release_notice(
+            "0.1.43-beta",
+            "Эта строка не должна попасть в короткое сообщение",
+            importance="medium",
+        )
+
+        self.assertIn("Бот обновлен до версии 0.1.43-beta и перезапущен.", text)
+        self.assertIn("Спасибо за терпение", text)
+        self.assertIn("Главное меню открыто ниже", text)
+        self.assertIn("Настройки -> О боте", text)
+        self.assertNotIn("Эта строка", text)
 
     async def test_release_notice_is_sent_once_to_active_service_users(self) -> None:
         self.users.upsert(user_id=1, username="active")
@@ -67,11 +82,13 @@ class ReleaseNotificationTest(unittest.IsolatedAsyncioTestCase):
         first = await service.send_release_notice(
             version="0.1.42-beta",
             notes="Добавлена ссылка на web-версию",
+            importance="major",
             now=now,
         )
         second = await service.send_release_notice(
             version="0.1.42-beta",
             notes="Добавлена ссылка на web-версию",
+            importance="major",
             now=now,
         )
 

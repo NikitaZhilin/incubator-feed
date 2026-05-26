@@ -134,6 +134,7 @@ async def main() -> None:
                 ).send_release_notice(
                     version=config.release_version,
                     notes=config.release_notes,
+                    importance=config.release_importance,
                 )
                 logging.info(
                     "Release notice completed: sent=%s skipped=%s failed=%s",

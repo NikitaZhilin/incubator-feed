@@ -74,7 +74,7 @@ class ConfigTest(unittest.TestCase):
         self.assertFalse(config.release_notice_enabled)
         self.assertFalse(should_send_release_notice(config))
 
-    def test_release_notice_policy_requires_enabled_major_or_critical(self) -> None:
+    def test_release_notice_policy_requires_enabled_medium_major_or_critical(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             db_path = root / "test.db"
@@ -88,11 +88,15 @@ class ConfigTest(unittest.TestCase):
             with patch.dict(os.environ, {**base_env, "RELEASE_IMPORTANCE": "minor"}, clear=True):
                 with patch("app.config.get_project_root", return_value=root):
                     minor = load_config()
+            with patch.dict(os.environ, {**base_env, "RELEASE_IMPORTANCE": "medium"}, clear=True):
+                with patch("app.config.get_project_root", return_value=root):
+                    medium = load_config()
             with patch.dict(os.environ, {**base_env, "RELEASE_IMPORTANCE": "major"}, clear=True):
                 with patch("app.config.get_project_root", return_value=root):
                     major = load_config()
 
         self.assertFalse(should_send_release_notice(minor))
+        self.assertTrue(should_send_release_notice(medium))
         self.assertTrue(should_send_release_notice(major))
 
 

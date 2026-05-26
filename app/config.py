@@ -149,7 +149,7 @@ def load_config() -> AppConfig:
 def should_send_release_notice(config: AppConfig) -> bool:
     if not config.release_notice_enabled or not config.release_version:
         return False
-    return config.release_importance in {"major", "critical"}
+    return config.release_importance in {"medium", "major", "critical"}
 
 
 def _parse_admin_ids(raw: str) -> set[int]:

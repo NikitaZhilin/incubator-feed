@@ -43,9 +43,11 @@ Docker container with `--restart unless-stopped`.
 
 Regular deploys are silent for users. Version, GitHub and changelog links are
 available in Telegram under `Настройки -> О боте`. A release notice is sent only
-when it is explicitly enabled and marked as `major` or `critical`. The notice is
-deduplicated in `notification_log` by release version, so re-running or
-restarting the same version does not send the same update twice.
+when it is explicitly enabled. `medium` sends a short "bot was updated and
+restarted" message with the main menu; `major` and `critical` also include
+release notes. The notice is deduplicated in `notification_log` by release
+version, so re-running or restarting the same version does not send the same
+update twice.
 
 For a manual GitHub Actions run you can fill:
 
@@ -55,8 +57,9 @@ release_notes=Добавлена ссылка на web-версию; Web-клю�
 ```
 
 The main bot process sends this notice on startup only when
-`RELEASE_NOTICE_ENABLED=1` and `RELEASE_IMPORTANCE` is `major` or `critical`.
-The version should be a numeric beta version, for example `0.1.42-beta`.
+`RELEASE_NOTICE_ENABLED=1` and `RELEASE_IMPORTANCE` is `medium`, `major`, or
+`critical`. The version should be a numeric beta version, for example
+`0.1.42-beta`.
 
 ## Manual VPS deploy
 
@@ -78,8 +81,9 @@ Use a non-default port or path if needed:
   -DeployPath /opt/incubator-feed
 ```
 
-Pass `-AnnounceRelease` and release text only when the deploy should explicitly
-announce a user-visible change:
+Pass `-AnnounceRelease` only when the deploy should explicitly announce a
+user-visible change. Use `medium` for a short generic restart notice and `major`
+or `critical` for a detailed notice with release notes:
 
 ```powershell
 .\scripts\deploy-vps.ps1 `

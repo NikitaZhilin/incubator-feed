@@ -22,8 +22,21 @@ class ReleaseNoticeResult:
     failed: int = 0
 
 
-def build_release_notice(version: str, notes: str = "") -> str:
+def build_release_notice(version: str, notes: str = "", *, importance: str = "major") -> str:
     version = version.strip()
+    importance = importance.strip().lower()
+    if importance == "medium":
+        return "\n".join(
+            [
+                f"Бот обновлен до версии {version} и перезапущен.",
+                "Спасибо за терпение, извините за доставленные неудобства.",
+                "",
+                "Главное меню открыто ниже. Подробности: Настройки -> О боте.",
+                "",
+                DEFAULT_TESTING_DISCLAIMER,
+            ]
+        )
+
     note_items = _normalize_notes(notes)
     lines = [
         f"Важное обновление бота: {version}.",
@@ -35,6 +48,7 @@ def build_release_notice(version: str, notes: str = "") -> str:
         [
             "",
             "Подробнее: Настройки -> О боте.",
+            "Главное меню открыто ниже.",
             "",
             DEFAULT_TESTING_DISCLAIMER,
         ]
@@ -66,13 +80,14 @@ class ReleaseNotificationService:
         *,
         version: str,
         notes: str = "",
+        importance: str = "major",
         now: datetime | None = None,
     ) -> ReleaseNoticeResult:
         sent = 0
         skipped = 0
         failed = 0
         scheduled_for = now or datetime.now(timezone.utc)
-        text = build_release_notice(version, notes)
+        text = build_release_notice(version, notes, importance=importance)
 
         for settings in self.users.list_users_with_settings():
             user_id = int(settings["user_id"])
