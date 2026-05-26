@@ -12,15 +12,25 @@ def feeds_menu_keyboard(feed_buttons: list[tuple[int, str]] | None = None) -> In
         ]
     )
     rows.append([InlineKeyboardButton(text="📦 Склад", callback_data="stock:menu")])
-    rows.append(
-        [
-            InlineKeyboardButton(text="🐔 Поголовье", callback_data="feeds:groups"),
-            InlineKeyboardButton(text="🐓 Стада", callback_data="feeds:flocks"),
-        ]
-    )
+    rows.append([InlineKeyboardButton(text="🐔 Поголовье и стада", callback_data="feeds:livestock")])
     rows.append([InlineKeyboardButton(text="📊 Расчеты", callback_data="feeds:stats")])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def livestock_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🐔 Поголовье", callback_data="feeds:groups")],
+            [InlineKeyboardButton(text="🐓 Стада", callback_data="feeds:flocks")],
+            [
+                InlineKeyboardButton(text="➕ Добавить поголовье", callback_data="feeds:group_add"),
+                InlineKeyboardButton(text="➕ Создать стадо", callback_data="feeds:flock_add"),
+            ],
+            [InlineKeyboardButton(text="⬅️ К кормам", callback_data="feeds:menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
+        ]
+    )
 
 
 def feed_rate_keyboard() -> InlineKeyboardMarkup:
@@ -133,7 +143,7 @@ def bird_groups_keyboard(groups=None) -> InlineKeyboardMarkup:
     rows.extend(
         [
             [InlineKeyboardButton(text="➕ Создать поголовье", callback_data="feeds:group_add")],
-            [InlineKeyboardButton(text="⬅️ К кормам", callback_data="feeds:menu")],
+            [InlineKeyboardButton(text="⬅️ Поголовье и стада", callback_data="feeds:livestock")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
     )
@@ -162,6 +172,7 @@ def flocks_keyboard(flocks=None) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(text="➕ Создать стадо", callback_data="feeds:flock_add")],
             [InlineKeyboardButton(text="🐔 Поголовье", callback_data="feeds:groups")],
+            [InlineKeyboardButton(text="⬅️ Поголовье и стада", callback_data="feeds:livestock")],
             [InlineKeyboardButton(text="🌾 К кормам", callback_data="feeds:menu")],
         ]
     )

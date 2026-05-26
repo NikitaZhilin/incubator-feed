@@ -22,6 +22,7 @@ from app.keyboards.feeds import (
     flock_actions_keyboard,
     flock_member_select_keyboard,
     flocks_keyboard,
+    livestock_menu_keyboard,
     stock_assign_groups_keyboard,
     stock_cancel_keyboard,
     stock_confirm_mix_keyboard,
@@ -200,6 +201,18 @@ async def feed_add(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.answer(
         "Введите название позиции склада, например Кукуруза, Премикс, Зерносмесь или Комбикорм ПК-1.",
         reply_markup=stock_cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "feeds:livestock")
+async def livestock_menu(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.message.answer(
+        "🐔 Поголовье и стада\n\n"
+        "Поголовье - это отдельные группы птиц: несушки, петухи, цыплята.\n"
+        "Стадо - это набор групп поголовья, которые едят одну готовую смесь.",
+        reply_markup=livestock_menu_keyboard(),
     )
     await callback.answer()
 
@@ -869,7 +882,7 @@ async def stock_assignments(callback: CallbackQuery, state: FSMContext, stock_se
         lines.append("Рационы пока не заданы.")
     groups = feed_service.list_bird_groups(callback.from_user.id)
     if not groups:
-        lines.append("\nСначала создайте поголовье в разделе Корма -> Поголовье.")
+        lines.append("\nСначала создайте поголовье в разделе Корма -> Поголовье и стада -> Поголовье.")
         await callback.message.answer("\n".join(lines), reply_markup=stock_menu_keyboard())
     else:
         await callback.message.answer(
