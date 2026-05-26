@@ -31,7 +31,7 @@ async def start(message: Message, state: FSMContext, incubation_service: Incubat
     await state.clear()
     incubation_service.track("bot_started", user_id=message.from_user.id if message.from_user else None)
     await message.answer(
-        "Я помогу вести инкубацию яиц и контролировать запас кормов.\n\n"
+        "Я помогу вести инкубацию, учет яиц и контролировать запас кормов.\n\n"
         "Выберите раздел в меню ниже.",
         reply_markup=main_menu_keyboard(incubation_service.get_user_settings(message.from_user.id)),
     )
@@ -65,6 +65,8 @@ async def help_command(message: Message) -> None:
         "/calendar - что делать по дням инкубации\n"
         "/care - уход после вывода\n"
         "/feed - добавить корм или ингредиент на склад\n\n"
+        "Яйца:\n"
+        "Главное меню -> Яйца - ежедневный сбор, прогноз и куры, которые временно не несутся.\n\n"
         "Настройки:\n"
         "/settings - уведомления, хозяйство, единицы\n"
         "/timezone Europe/Moscow - часовой пояс\n"

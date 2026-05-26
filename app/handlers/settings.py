@@ -66,6 +66,7 @@ async def settings_toggle(callback: CallbackQuery, incubation_service: Incubatio
     if field not in {
         "notify_incubation",
         "notify_feed",
+        "notify_eggs",
         "notify_post_hatch_care",
         "notify_service",
     }:
@@ -235,6 +236,7 @@ def _format_sections(settings: dict) -> str:
         "Системные сообщения — это важные уведомления о работе бота и крупных обновлениях.\n\n"
         f"Инкубация: {status(bool(settings.get('notify_incubation', True)))}\n"
         f"Корма: {status(bool(settings.get('notify_feed', True)))}\n"
+        f"Яйца: {status(bool(settings.get('notify_eggs', True)))}\n"
         f"Уход после вывода: {status(bool(settings.get('notify_post_hatch_care', True)))}\n"
         f"Системные сообщения: {status(bool(settings.get('notify_service', True)))}"
     )

@@ -79,7 +79,7 @@ class UserRepository:
             rows = connection.execute(
                 """
                 SELECT user_id, timezone, notification_time, notify_incubation,
-                       notify_feed, notify_post_hatch_care, notify_service,
+                       notify_feed, notify_eggs, notify_post_hatch_care, notify_service,
                        units, farm_name, is_active
                 FROM users
                 ORDER BY user_id
@@ -105,7 +105,7 @@ class UserRepository:
             row = connection.execute(
                 """
                 SELECT user_id, timezone, notification_time, notify_incubation,
-                       notify_feed, notify_post_hatch_care, notify_service,
+                       notify_feed, notify_eggs, notify_post_hatch_care, notify_service,
                        units, farm_name, is_active
                 FROM users
                 WHERE user_id = ?
@@ -119,6 +119,7 @@ class UserRepository:
                 "notification_time": DEFAULT_NOTIFICATION_TIME,
                 "notify_incubation": True,
                 "notify_feed": True,
+                "notify_eggs": True,
                 "notify_post_hatch_care": True,
                 "notify_service": True,
                 "units": "metric",
@@ -133,6 +134,7 @@ class UserRepository:
             "notification_time",
             "notify_incubation",
             "notify_feed",
+            "notify_eggs",
             "notify_post_hatch_care",
             "notify_service",
             "units",
@@ -162,6 +164,7 @@ class UserRepository:
             "notification_time": str(row["notification_time"]),
             "notify_incubation": bool(row["notify_incubation"]),
             "notify_feed": bool(row["notify_feed"]),
+            "notify_eggs": bool(row["notify_eggs"]) if "notify_eggs" in row.keys() else True,
             "notify_post_hatch_care": bool(row["notify_post_hatch_care"]),
             "notify_service": bool(row["notify_service"]),
             "units": str(row["units"]),

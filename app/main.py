@@ -13,6 +13,7 @@ from app.handlers import register_handlers
 from app.middlewares.callbacks import StaleCallbackMiddleware
 from app.middlewares.users import UserTrackingMiddleware
 from app.services.incubation import IncubationService
+from app.services.eggs import EggService
 from app.services.feeds import FeedService
 from app.services.stock import StockService
 from app.services.admin import AdminService
@@ -21,6 +22,7 @@ from app.services.reminders import ReminderRunner
 from app.storage.database import Database
 from app.storage.repositories.analytics import AnalyticsRepository
 from app.storage.repositories.batches import BatchRepository
+from app.storage.repositories.eggs import EggRepository
 from app.storage.repositories.feeds import FeedRepository
 from app.storage.repositories.notifications import NotificationRepository
 from app.storage.repositories.reminders import ReminderRepository
@@ -91,6 +93,7 @@ async def main() -> None:
         )
         feed_repository = FeedRepository(database)
         feed_service = FeedService(feed_repository, analytics)
+        egg_service = EggService(EggRepository(database), feed_repository)
         stock_service = StockService(StockRepository(database), feed_repository, analytics)
         admin_service = AdminService(
             database=database,
@@ -107,6 +110,7 @@ async def main() -> None:
         dispatcher = Dispatcher(storage=MemoryStorage())
         dispatcher["incubation_service"] = incubation_service
         dispatcher["feed_service"] = feed_service
+        dispatcher["egg_service"] = egg_service
         dispatcher["stock_service"] = stock_service
         dispatcher["admin_service"] = admin_service
         dispatcher["analytics"] = analytics

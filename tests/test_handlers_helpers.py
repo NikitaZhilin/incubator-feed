@@ -27,6 +27,7 @@ from app.keyboards.feeds import (
     stock_items_keyboard,
     stock_mix_quick_keyboard,
 )
+from app.keyboards.eggs import eggs_menu_keyboard, exclusions_keyboard, weather_keyboard
 from app.keyboards.incubation import (
     batch_actions_keyboard,
     edit_batch_back_keyboard,
@@ -115,6 +116,7 @@ class HandlerHelpersTest(unittest.TestCase):
             {
                 "notify_incubation": False,
                 "notify_feed": True,
+                "notify_eggs": True,
                 "notify_post_hatch_care": False,
                 "notify_service": True,
             }
@@ -122,6 +124,7 @@ class HandlerHelpersTest(unittest.TestCase):
 
         self.assertIn("пропадает из главного меню", text)
         self.assertIn("Инкубация: выключено", text)
+        self.assertIn("Яйца: включено", text)
         self.assertIn("Системные сообщения: включено", text)
         self.assertNotIn("Сервисные", text)
 
@@ -136,14 +139,22 @@ class HandlerHelpersTest(unittest.TestCase):
         keyboard = main_menu_keyboard(
             {
                 "notify_feed": False,
+                "notify_eggs": False,
                 "notify_incubation": True,
             }
         )
         texts = _keyboard_texts(keyboard)
 
         self.assertNotIn("🌾 Корма", texts)
+        self.assertNotIn("🥚 Яйца", texts)
         self.assertIn("🥚 Инкубация", texts)
         self.assertIn("⚙️ Настройки", texts)
+
+    def test_eggs_keyboards_have_section_navigation(self) -> None:
+        self.assertIn("➕ Добавить яйца", _keyboard_texts(eggs_menu_keyboard()))
+        self.assertIn("📊 Расчеты", _keyboard_texts(eggs_menu_keyboard()))
+        self.assertIn("⬅️ К яйцам", _keyboard_texts(exclusions_keyboard([])))
+        self.assertIn("✏️ Изменить город", _keyboard_texts(weather_keyboard()))
 
     def test_incubation_menu_hides_post_hatch_care_when_disabled(self) -> None:
         keyboard = incubation_menu_keyboard({"notify_post_hatch_care": False})

@@ -5,6 +5,8 @@ def main_menu_keyboard(settings: dict | None = None) -> InlineKeyboardMarkup:
     feature_row: list[InlineKeyboardButton] = []
     if _enabled(settings, "notify_feed"):
         feature_row.append(InlineKeyboardButton(text="🌾 Корма", callback_data="feeds:menu"))
+    if _enabled(settings, "notify_eggs"):
+        feature_row.append(InlineKeyboardButton(text="🥚 Яйца", callback_data="eggs:menu"))
     if _enabled(settings, "notify_incubation"):
         feature_row.append(InlineKeyboardButton(text="🥚 Инкубация", callback_data="menu:incubation"))
 
@@ -90,6 +92,12 @@ def settings_sections_keyboard(settings: dict) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text=f"🌾 Корма: {_status_label(settings, 'notify_feed')}",
                     callback_data="settings:toggle:notify_feed",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"🥚 Яйца: {_status_label(settings, 'notify_eggs')}",
+                    callback_data="settings:toggle:notify_eggs",
                 )
             ],
             [

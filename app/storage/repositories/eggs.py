@@ -1,0 +1,292 @@
+from datetime import date, datetime, timezone
+import sqlite3
+
+from app.domain import EggEntry, HenLayingExclusion, WeatherSettings
+from app.storage.database import Database
+
+
+class EggRepository:
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    def create_entry(
+        self,
+        *,
+        user_id: int,
+        entry_date: date,
+        eggs_count: int,
+        active_hens_count: int,
+        total_hens_count: int,
+        excluded_hens_count: int,
+        note: str = "",
+    ) -> EggEntry:
+        now = datetime.now(timezone.utc).isoformat()
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO egg_entries (
+                    user_id, entry_date, eggs_count, active_hens_count,
+                    total_hens_count, excluded_hens_count, note, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    entry_date.isoformat(),
+                    eggs_count,
+                    active_hens_count,
+                    total_hens_count,
+                    excluded_hens_count,
+                    note[:255],
+                    now,
+                ),
+            )
+            entry_id = int(cursor.lastrowid)
+        return self.get_entry(entry_id, user_id)
+
+    def get_entry(self, entry_id: int, user_id: int) -> EggEntry | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, user_id, entry_date, eggs_count, active_hens_count,
+                       total_hens_count, excluded_hens_count, note, created_at
+                FROM egg_entries
+                WHERE id = ? AND user_id = ?
+                """,
+                (entry_id, user_id),
+            ).fetchone()
+        return self._entry_from_row(row) if row else None
+
+    def list_entries(self, user_id: int, *, limit: int = 20) -> list[EggEntry]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, user_id, entry_date, eggs_count, active_hens_count,
+                       total_hens_count, excluded_hens_count, note, created_at
+                FROM egg_entries
+                WHERE user_id = ?
+                ORDER BY entry_date DESC, created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (user_id, limit),
+            ).fetchall()
+        return [self._entry_from_row(row) for row in rows]
+
+    def sum_between(self, user_id: int, *, start_date: date, end_date: date) -> int:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT COALESCE(SUM(eggs_count), 0) AS total
+                FROM egg_entries
+                WHERE user_id = ? AND entry_date BETWEEN ? AND ?
+                """,
+                (user_id, start_date.isoformat(), end_date.isoformat()),
+            ).fetchone()
+        return int(row["total"] or 0)
+
+    def daily_totals(self, user_id: int, *, start_date: date, end_date: date) -> dict[date, int]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT entry_date, SUM(eggs_count) AS total
+                FROM egg_entries
+                WHERE user_id = ? AND entry_date BETWEEN ? AND ?
+                GROUP BY entry_date
+                ORDER BY entry_date DESC
+                """,
+                (user_id, start_date.isoformat(), end_date.isoformat()),
+            ).fetchall()
+        return {date.fromisoformat(str(row["entry_date"])): int(row["total"] or 0) for row in rows}
+
+    def create_exclusion(
+        self,
+        *,
+        user_id: int,
+        hens_count: int,
+        reason: str,
+        started_at: date,
+        expected_until: date | None = None,
+        bird_group_id: int | None = None,
+        note: str = "",
+    ) -> HenLayingExclusion:
+        now = datetime.now(timezone.utc).isoformat()
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO hen_laying_exclusions (
+                    user_id, bird_group_id, hens_count, reason, started_at,
+                    expected_until, note, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    bird_group_id,
+                    hens_count,
+                    reason[:80],
+                    started_at.isoformat(),
+                    expected_until.isoformat() if expected_until else None,
+                    note[:255],
+                    now,
+                    now,
+                ),
+            )
+            exclusion_id = int(cursor.lastrowid)
+        return self.get_exclusion(exclusion_id, user_id)
+
+    def get_exclusion(self, exclusion_id: int, user_id: int) -> HenLayingExclusion | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                self._exclusion_select_sql("WHERE hle.id = ? AND hle.user_id = ?"),
+                (exclusion_id, user_id),
+            ).fetchone()
+        return self._exclusion_from_row(row) if row else None
+
+    def list_active_exclusions(self, user_id: int, *, on_date: date) -> list[HenLayingExclusion]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                self._exclusion_select_sql(
+                    """
+                    WHERE hle.user_id = ?
+                      AND hle.is_active = 1
+                      AND hle.started_at <= ?
+                      AND hle.actual_ended_at IS NULL
+                      AND (hle.expected_until IS NULL OR hle.expected_until >= ?)
+                    ORDER BY hle.started_at DESC, hle.id DESC
+                    """
+                ),
+                (user_id, on_date.isoformat(), on_date.isoformat()),
+            ).fetchall()
+        return [self._exclusion_from_row(row) for row in rows]
+
+    def list_open_exclusions(self, user_id: int) -> list[HenLayingExclusion]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                self._exclusion_select_sql(
+                    """
+                    WHERE hle.user_id = ?
+                      AND hle.is_active = 1
+                      AND hle.actual_ended_at IS NULL
+                    ORDER BY hle.started_at DESC, hle.id DESC
+                    """
+                ),
+                (user_id,),
+            ).fetchall()
+        return [self._exclusion_from_row(row) for row in rows]
+
+    def finish_exclusion(self, *, exclusion_id: int, user_id: int, ended_at: date) -> bool:
+        now = datetime.now(timezone.utc).isoformat()
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE hen_laying_exclusions
+                SET actual_ended_at = ?,
+                    is_active = 0,
+                    updated_at = ?
+                WHERE id = ? AND user_id = ? AND is_active = 1
+                """,
+                (ended_at.isoformat(), now, exclusion_id, user_id),
+            )
+        return cursor.rowcount > 0
+
+    def get_weather_settings(self, user_id: int) -> WeatherSettings:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT user_id, city, latitude, longitude, provider, updated_at
+                FROM weather_settings
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+            if row is None:
+                now = datetime.now(timezone.utc).isoformat()
+                connection.execute(
+                    """
+                    INSERT INTO weather_settings (user_id, city, provider, updated_at)
+                    VALUES (?, 'Курск', 'manual', ?)
+                    """,
+                    (user_id, now),
+                )
+                row = connection.execute(
+                    """
+                    SELECT user_id, city, latitude, longitude, provider, updated_at
+                    FROM weather_settings
+                    WHERE user_id = ?
+                    """,
+                    (user_id,),
+                ).fetchone()
+        return self._weather_from_row(row)
+
+    def update_weather_city(self, *, user_id: int, city: str) -> WeatherSettings:
+        now = datetime.now(timezone.utc).isoformat()
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO weather_settings (user_id, city, provider, updated_at)
+                VALUES (?, ?, 'manual', ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    city = excluded.city,
+                    provider = excluded.provider,
+                    updated_at = excluded.updated_at
+                """,
+                (user_id, city[:120], now),
+            )
+        return self.get_weather_settings(user_id)
+
+    @staticmethod
+    def _exclusion_select_sql(where_sql: str) -> str:
+        return (
+            """
+            SELECT hle.id, hle.user_id, hle.bird_group_id, hle.hens_count,
+                   hle.reason, hle.started_at, hle.expected_until,
+                   hle.actual_ended_at, hle.note, hle.is_active,
+                   hle.created_at, hle.updated_at, bg.name AS bird_group_name
+            FROM hen_laying_exclusions AS hle
+            LEFT JOIN bird_groups AS bg ON bg.id = hle.bird_group_id
+            """
+            + where_sql
+        )
+
+    @staticmethod
+    def _entry_from_row(row: sqlite3.Row) -> EggEntry:
+        return EggEntry(
+            id=int(row["id"]),
+            user_id=int(row["user_id"]),
+            entry_date=date.fromisoformat(str(row["entry_date"])),
+            eggs_count=int(row["eggs_count"]),
+            active_hens_count=int(row["active_hens_count"]),
+            total_hens_count=int(row["total_hens_count"]),
+            excluded_hens_count=int(row["excluded_hens_count"]),
+            note=str(row["note"] or ""),
+            created_at=datetime.fromisoformat(str(row["created_at"])),
+        )
+
+    @staticmethod
+    def _exclusion_from_row(row: sqlite3.Row) -> HenLayingExclusion:
+        return HenLayingExclusion(
+            id=int(row["id"]),
+            user_id=int(row["user_id"]),
+            bird_group_id=int(row["bird_group_id"]) if row["bird_group_id"] is not None else None,
+            hens_count=int(row["hens_count"]),
+            reason=str(row["reason"]),
+            started_at=date.fromisoformat(str(row["started_at"])),
+            expected_until=date.fromisoformat(str(row["expected_until"])) if row["expected_until"] else None,
+            actual_ended_at=date.fromisoformat(str(row["actual_ended_at"])) if row["actual_ended_at"] else None,
+            note=str(row["note"] or ""),
+            is_active=bool(row["is_active"]),
+            created_at=datetime.fromisoformat(str(row["created_at"])),
+            updated_at=datetime.fromisoformat(str(row["updated_at"])),
+            bird_group_name=str(row["bird_group_name"]) if row["bird_group_name"] else None,
+        )
+
+    @staticmethod
+    def _weather_from_row(row: sqlite3.Row) -> WeatherSettings:
+        return WeatherSettings(
+            user_id=int(row["user_id"]),
+            city=str(row["city"]),
+            latitude=float(row["latitude"]) if row["latitude"] is not None else None,
+            longitude=float(row["longitude"]) if row["longitude"] is not None else None,
+            provider=str(row["provider"]),
+            updated_at=datetime.fromisoformat(str(row["updated_at"])),
+        )

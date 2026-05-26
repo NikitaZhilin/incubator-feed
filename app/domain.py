@@ -266,6 +266,63 @@ class FlockReport:
     daily_usage_kg: float
 
 
+@dataclass(frozen=True)
+class EggEntry:
+    id: int
+    user_id: int
+    entry_date: date
+    eggs_count: int
+    active_hens_count: int
+    total_hens_count: int
+    excluded_hens_count: int
+    note: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class HenLayingExclusion:
+    id: int
+    user_id: int
+    hens_count: int
+    reason: str
+    started_at: date
+    expected_until: date | None
+    is_active: bool
+    note: str
+    created_at: datetime
+    updated_at: datetime
+    bird_group_id: int | None = None
+    actual_ended_at: date | None = None
+    bird_group_name: str | None = None
+
+
+@dataclass(frozen=True)
+class WeatherSettings:
+    user_id: int
+    city: str
+    latitude: float | None
+    longitude: float | None
+    provider: str
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class EggStats:
+    today: date
+    total_hens_count: int
+    excluded_hens_count: int
+    active_hens_count: int
+    today_eggs: int
+    week_eggs: int
+    week_average: float
+    month_eggs: int
+    month_average: float
+    eggs_per_active_hen: float | None
+    next_week_forecast: int
+    active_exclusions: tuple[HenLayingExclusion, ...]
+    weather_city: str
+
+
 def content_path() -> Path:
     return Path(__file__).resolve().parent / "content" / "incubation.json"
 

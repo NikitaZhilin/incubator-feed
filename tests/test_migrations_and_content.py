@@ -34,6 +34,9 @@ class MigrationsAndContentTest(unittest.TestCase):
         self.assertIn("stock_transactions", tables)
         self.assertIn("mix_productions", tables)
         self.assertIn("feeding_assignments", tables)
+        self.assertIn("egg_entries", tables)
+        self.assertIn("hen_laying_exclusions", tables)
+        self.assertIn("weather_settings", tables)
         self.assertIn("group_kind", bird_group_columns)
         self.assertIn("hatched_at", bird_group_columns)
         self.assertIn("joined_at", bird_group_columns)
@@ -109,7 +112,7 @@ class MigrationsAndContentTest(unittest.TestCase):
             with database.connect() as migrated:
                 row = migrated.execute(
                     """
-                    SELECT notification_time, notify_incubation
+                    SELECT notification_time, notify_incubation, notify_eggs
                     FROM users
                     WHERE user_id = 7
                     """
@@ -117,6 +120,7 @@ class MigrationsAndContentTest(unittest.TestCase):
 
         self.assertEqual(row["notification_time"], "08:30")
         self.assertEqual(row["notify_incubation"], 1)
+        self.assertEqual(row["notify_eggs"], 1)
 
     def test_content_structure_is_valid(self) -> None:
         self.assertTrue(CONTENT["version"])

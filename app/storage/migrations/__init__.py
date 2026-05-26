@@ -16,6 +16,7 @@ MIGRATIONS = (
     "008_bird_group_lifecycle",
     "009_stock_warehouse",
     "010_flocks",
+    "011_eggs",
 )
 
 
