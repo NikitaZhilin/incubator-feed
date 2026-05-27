@@ -85,6 +85,7 @@ docker run -d --name "$WEB_CONTAINER_NAME" --restart unless-stopped \
   -e WEB_PORT=8080 \
   -e RELEASE_COMMIT="${target_commit:0:12}" \
   -e RELEASE_DEPLOYED_AT="$release_deployed_at" \
+  -p 127.0.0.1:8080:8080 \
   --network rememberme_bot_network \
   -v "$DEPLOY_PATH/data:/app/data:ro" \
   "$IMAGE_NAME" python -B scripts/web_app.py

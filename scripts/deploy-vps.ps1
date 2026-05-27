@@ -16,6 +16,8 @@ param(
 
     [string]$ContainerName = "incubator-feed-bot",
 
+    [string]$WebContainerName = "incubator-feed-web",
+
     [string]$ReleaseVersion = "",
 
     [string]$ReleaseNotes = "",
@@ -79,6 +81,7 @@ scp -P $Port $EnvFile "$SshTarget`:$DeployPath/.env.prod"
 
 $quotedImageName = ConvertTo-ShellSingleQuoted $ImageName
 $quotedContainerName = ConvertTo-ShellSingleQuoted $ContainerName
+$quotedWebContainerName = ConvertTo-ShellSingleQuoted $WebContainerName
 
 if ($AnnounceRelease -and -not $SkipReleaseNotice) {
     $releaseNoticeEnabled = "1"
@@ -119,6 +122,7 @@ set -e
 cd $quotedDeployPath
 IMAGE_NAME=$quotedImageName
 CONTAINER_NAME=$quotedContainerName
+WEB_CONTAINER_NAME=$quotedWebContainerName
 RELEASE_NOTICE_ENABLED=$quotedReleaseNoticeEnabled
 RELEASE_VERSION=$quotedReleaseVersion
 RELEASE_NOTES=$quotedReleaseNotes
@@ -132,6 +136,7 @@ docker run --rm --env-file .env.prod \
   -v "$DeployPath/backups:/app/backups" \
   "`$IMAGE_NAME" python -B scripts/migrate.py
 docker rm -f "`$CONTAINER_NAME" >/dev/null 2>&1 || true
+docker rm -f "`$WEB_CONTAINER_NAME" >/dev/null 2>&1 || true
 docker run -d --name "`$CONTAINER_NAME" --restart unless-stopped \
   --env-file "$DeployPath/.env.prod" \
   -e RELEASE_NOTICE_ENABLED="`$RELEASE_NOTICE_ENABLED" \
@@ -144,8 +149,18 @@ docker run -d --name "`$CONTAINER_NAME" --restart unless-stopped \
   -v "$DeployPath/logs:/app/logs" \
   -v "$DeployPath/backups:/app/backups" \
   "`$IMAGE_NAME" python main.py
+docker run -d --name "`$WEB_CONTAINER_NAME" --restart unless-stopped \
+  --env-file "$DeployPath/.env.prod" \
+  -e WEB_ENABLED=true \
+  -e WEB_HOST=0.0.0.0 \
+  -e WEB_PORT=8080 \
+  -p 127.0.0.1:8080:8080 \
+  -v "$DeployPath/data:/app/data:ro" \
+  "`$IMAGE_NAME" python -B scripts/web_app.py
 docker ps --filter "name=`$CONTAINER_NAME"
+docker ps --filter "name=`$WEB_CONTAINER_NAME"
 docker logs --tail=80 "`$CONTAINER_NAME"
+docker logs --tail=50 "`$WEB_CONTAINER_NAME"
 "@
 
 ssh -p $Port $SshTarget $runCommand

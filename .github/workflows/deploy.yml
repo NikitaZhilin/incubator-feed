@@ -53,6 +53,7 @@ jobs:
       VPS_USER: ${{ secrets.VPS_USER || 'root' }}
       IMAGE_NAME: incubator-feed:latest
       CONTAINER_NAME: incubator-feed-bot
+      WEB_CONTAINER_NAME: incubator-feed-web
 
     steps:
       - name: Check out repository
@@ -112,6 +113,8 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
+          WEB_PUBLIC_URL: ${{ secrets.WEB_PUBLIC_URL }}
+          WEB_LINK_TOKEN: ${{ secrets.WEB_LINK_TOKEN }}
           RELEASE_VERSION_INPUT: ${{ github.event.inputs.release_version || '' }}
           RELEASE_NOTES_INPUT: ${{ github.event.inputs.release_notes || '' }}
           SKIP_RELEASE_NOTICE: ${{ github.event.inputs.skip_release_notice || 'false' }}
@@ -120,6 +123,20 @@ jobs:
           RELEASE_NOTES="$RELEASE_NOTES_INPUT"
           RELEASE_COMMIT="${GITHUB_SHA::12}"
           RELEASE_DEPLOYED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          if [ -z "$WEB_PUBLIC_URL" ]; then
+            WEB_PUBLIC_URL="$(ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "
+              if [ -s '$DEPLOY_PATH/.env.prod' ]; then
+                grep -E '^WEB_PUBLIC_URL=' '$DEPLOY_PATH/.env.prod' | tail -n 1 | cut -d= -f2-
+              fi
+            " | tr -d '\r')"
+          fi
+          if [ -z "$WEB_LINK_TOKEN" ]; then
+            WEB_LINK_TOKEN="$(ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "
+              if [ -s '$DEPLOY_PATH/.env.prod' ]; then
+                grep -E '^WEB_LINK_TOKEN=' '$DEPLOY_PATH/.env.prod' | tail -n 1 | cut -d= -f2-
+              fi
+            " | tr -d '\r')"
+          fi
           if [ -z "$ADMIN_IDS" ]; then
             ADMIN_IDS="$(ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "
               if [ -s '$DEPLOY_PATH/.env.prod' ]; then
@@ -162,6 +179,11 @@ jobs:
           RELEASE_NOTES=$RELEASE_NOTES
           RELEASE_COMMIT=$RELEASE_COMMIT
           RELEASE_DEPLOYED_AT=$RELEASE_DEPLOYED_AT
+          WEB_ENABLED=true
+          WEB_HOST=0.0.0.0
+          WEB_PORT=8080
+          WEB_PUBLIC_URL=$WEB_PUBLIC_URL
+          WEB_LINK_TOKEN=$WEB_LINK_TOKEN
           EOF
             sed -i 's/^          //' .env.prod.deploy
             scp -i ~/.ssh/deploy_key -P "$VPS_PORT" .env.prod.deploy "$VPS_USER@$VPS_HOST:$DEPLOY_PATH/.env.prod"
@@ -172,6 +194,8 @@ jobs:
             RELEASE_NOTES_B64="$(printf '%s' "$RELEASE_NOTES" | base64 -w0)"
             RELEASE_COMMIT_B64="$(printf '%s' "$RELEASE_COMMIT" | base64 -w0)"
             RELEASE_DEPLOYED_AT_B64="$(printf '%s' "$RELEASE_DEPLOYED_AT" | base64 -w0)"
+            WEB_PUBLIC_URL_B64="$(printf '%s' "$WEB_PUBLIC_URL" | base64 -w0)"
+            WEB_LINK_TOKEN_B64="$(printf '%s' "$WEB_LINK_TOKEN" | base64 -w0)"
             cat > update_env_release.py <<'PY'
           import base64
           import os
@@ -185,6 +209,11 @@ jobs:
               'RELEASE_NOTES': base64.b64decode(os.environ['RELEASE_NOTES_B64']).decode(),
               'RELEASE_COMMIT': base64.b64decode(os.environ['RELEASE_COMMIT_B64']).decode(),
               'RELEASE_DEPLOYED_AT': base64.b64decode(os.environ['RELEASE_DEPLOYED_AT_B64']).decode(),
+              'WEB_ENABLED': 'true',
+              'WEB_HOST': '0.0.0.0',
+              'WEB_PORT': '8080',
+              'WEB_PUBLIC_URL': base64.b64decode(os.environ['WEB_PUBLIC_URL_B64']).decode(),
+              'WEB_LINK_TOKEN': base64.b64decode(os.environ['WEB_LINK_TOKEN_B64']).decode(),
           }
           lines = path.read_text(encoding='utf-8').splitlines()
           seen = set()
@@ -215,6 +244,8 @@ jobs:
               RELEASE_NOTES_B64='$RELEASE_NOTES_B64' \
               RELEASE_COMMIT_B64='$RELEASE_COMMIT_B64' \
               RELEASE_DEPLOYED_AT_B64='$RELEASE_DEPLOYED_AT_B64' \
+              WEB_PUBLIC_URL_B64='$WEB_PUBLIC_URL_B64' \
+              WEB_LINK_TOKEN_B64='$WEB_LINK_TOKEN_B64' \
               ENV_PATH='$DEPLOY_PATH/.env.prod' \
               python3 '$DEPLOY_PATH/.update_env_release.py'
               rm -f '$DEPLOY_PATH/.update_env_release.py'
@@ -238,6 +269,7 @@ jobs:
               -v '$DEPLOY_PATH/backups:/app/backups' \
               '$IMAGE_NAME' python -B scripts/migrate.py
             docker rm -f '$CONTAINER_NAME' >/dev/null 2>&1 || true
+            docker rm -f '$WEB_CONTAINER_NAME' >/dev/null 2>&1 || true
             docker run -d --name '$CONTAINER_NAME' --restart unless-stopped \
               --env-file '$DEPLOY_PATH/.env.prod' \
               -e ADMIN_STARTUP_NOTICE_MODE='once_per_deploy' \
@@ -247,7 +279,17 @@ jobs:
               -v '$DEPLOY_PATH/logs:/app/logs' \
               -v '$DEPLOY_PATH/backups:/app/backups' \
               '$IMAGE_NAME' python main.py
+            docker run -d --name '$WEB_CONTAINER_NAME' --restart unless-stopped \
+              --env-file '$DEPLOY_PATH/.env.prod' \
+              -e WEB_ENABLED=true \
+              -e WEB_HOST=0.0.0.0 \
+              -e WEB_PORT=8080 \
+              -p 127.0.0.1:8080:8080 \
+              -v '$DEPLOY_PATH/data:/app/data:ro' \
+              '$IMAGE_NAME' python -B scripts/web_app.py
             docker ps --filter name='$CONTAINER_NAME'
+            docker ps --filter name='$WEB_CONTAINER_NAME'
             docker exec '$CONTAINER_NAME' python -B -c 'from app.version import APP_VERSION; print(\"container app version\", APP_VERSION)'
             docker logs --tail=80 '$CONTAINER_NAME'
+            docker logs --tail=50 '$WEB_CONTAINER_NAME'
           "

@@ -29,6 +29,8 @@ VPS_HOST=server host or IP
 VPS_USER=SSH user, for example root
 VPS_PORT=22
 VPS_SSH_KEY=private SSH key allowed to connect to the VPS
+WEB_PUBLIC_URL=public web URL, for example https://your-domain.ngrok-free.app
+WEB_LINK_TOKEN=long random token for link-based web access
 ```
 
 Optional repository variable:
@@ -166,6 +168,10 @@ The VPS must have:
 - Docker.
 
 Runtime state is stored on the VPS in `data/`, `logs/`, and `backups/`.
+The deploy starts two Docker containers: `incubator-feed-bot` for Telegram
+polling and `incubator-feed-web` for the web interface. The web container is
+bound to `127.0.0.1:8080`; expose it through ngrok, Caddy, Nginx, or another
+reverse proxy, then put that public address into `WEB_PUBLIC_URL`.
 
 ## VPS auto deploy fallback
 
