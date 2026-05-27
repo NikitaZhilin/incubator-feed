@@ -15,6 +15,7 @@ from app.middlewares.users import UserTrackingMiddleware
 from app.services.incubation import IncubationService
 from app.services.eggs import EggService
 from app.services.feeds import FeedService
+from app.services.heartbeats import HeartbeatLoop
 from app.services.stock import StockService
 from app.services.admin import AdminService
 from app.services.release_notifications import AdminStartupNotificationService, ReleaseNotificationService
@@ -25,11 +26,13 @@ from app.storage.repositories.analytics import AnalyticsRepository
 from app.storage.repositories.batches import BatchRepository
 from app.storage.repositories.eggs import EggRepository
 from app.storage.repositories.feeds import FeedRepository
+from app.storage.repositories.heartbeats import HeartbeatRepository
 from app.storage.repositories.notifications import NotificationRepository
 from app.storage.repositories.reminders import ReminderRepository
 from app.storage.repositories.users import UserRepository
 from app.storage.repositories.stock import StockRepository
 from app.utils.single_instance import SingleInstanceLock
+from app.version import APP_VERSION
 
 
 def setup_logging(log_file, level: int) -> None:
@@ -85,6 +88,8 @@ async def main() -> None:
         users = UserRepository(database)
         analytics = AnalyticsRepository(database)
         notifications = NotificationRepository(database)
+        heartbeats = HeartbeatRepository(database)
+        heartbeat_version = config.release_version or APP_VERSION
 
         incubation_service = IncubationService(
             BatchRepository(database),
@@ -131,9 +136,24 @@ async def main() -> None:
             incubation_service=incubation_service,
             feed_service=feed_service,
             notifications=notifications,
+            heartbeats=heartbeats,
+            heartbeat_version=heartbeat_version,
+            started_at=config.runtime_started_at,
             timezone=config.timezone,
             interval_seconds=config.reminder_interval_seconds,
         )
+        polling_heartbeat = HeartbeatLoop(
+            heartbeats=heartbeats,
+            service_name="polling_bot",
+            version=heartbeat_version,
+            started_at=config.runtime_started_at,
+            interval_seconds=30,
+            metadata={
+                "environment": config.environment,
+                "handlers_registered": True,
+            },
+        )
+        polling_heartbeat.start()
         reminder_runner.start()
         if should_send_release_notice(config):
             try:
@@ -193,6 +213,7 @@ async def main() -> None:
                 await notify_admins_about_failure(bot, config.admin_ids, exc)
                 raise
         finally:
+            await polling_heartbeat.stop()
             await reminder_runner.stop()
             await bot.session.close()
     finally:

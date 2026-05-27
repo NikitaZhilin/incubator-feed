@@ -18,6 +18,7 @@ MIGRATIONS = (
     "010_flocks",
     "011_eggs",
     "012_weather_parts",
+    "013_service_heartbeats",
 )
 
 

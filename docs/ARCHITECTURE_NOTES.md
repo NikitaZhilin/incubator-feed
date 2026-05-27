@@ -94,3 +94,19 @@ Admin startup notice отделен от пользовательских рел
 служебное сообщение только `ADMIN_IDS`: факт перезапуска, версию, commit и время
 запуска. Режим `once_per_deploy` дедуплицирует это сообщение по commit/deploy id
 через `notification_log`; режим `always` полезен только для отладки перезапусков.
+
+## Service heartbeats
+
+Runtime-статус пишется в таблицу `service_heartbeats`. Обязательные сервисы:
+
+- `polling_bot`;
+- `reminder_runner`.
+
+В проекте нет API-сервиса, поэтому `api` heartbeat не используется. Внешний
+статус-бот должен читать состояние через `scripts/status_probe.py`: скрипт
+открывает SQLite в read-only режиме, не отправляет Telegram-сообщения и не
+меняет бизнес-данные.
+
+`polling_bot` пишет heartbeat отдельным фоновым loop. `reminder_runner` пишет
+heartbeat после успешного цикла напоминаний; если цикл упал, но runner продолжил
+работать, heartbeat становится `degraded` с коротким `last_error`.

@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone as datetime_timezone
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
@@ -11,6 +11,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, Teleg
 from app.services.incubation import IncubationService
 from app.services.guides import post_hatch_care
 from app.services.feeds import FeedService
+from app.storage.repositories.heartbeats import HeartbeatRepository
 from app.storage.repositories.notifications import NotificationRepository
 
 
@@ -25,6 +26,9 @@ class ReminderRunner:
         incubation_service: IncubationService,
         feed_service: FeedService | None = None,
         notifications: NotificationRepository | None = None,
+        heartbeats: HeartbeatRepository | None = None,
+        heartbeat_version: str = "",
+        started_at: datetime | None = None,
         timezone: str,
         interval_seconds: int = 60,
     ) -> None:
@@ -32,11 +36,15 @@ class ReminderRunner:
         self.incubation_service = incubation_service
         self.feed_service = feed_service
         self.notifications = notifications
+        self.heartbeats = heartbeats
+        self.heartbeat_version = heartbeat_version
+        self.started_at = started_at or datetime.now(datetime_timezone.utc)
         self.timezone = ZoneInfo(timezone)
         self.interval_seconds = interval_seconds
         self._task: asyncio.Task | None = None
 
     def start(self) -> None:
+        self._write_heartbeat(status="ok")
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run())
 
@@ -51,12 +59,14 @@ class ReminderRunner:
         while True:
             try:
                 await self._send_due_reminders()
+                self._write_heartbeat(status="ok")
             except Exception:
                 logger.exception("Reminder loop failed")
+                self._write_heartbeat(status="degraded", last_error="Reminder loop failed")
             await asyncio.sleep(self.interval_seconds)
 
     async def _send_due_reminders(self, now_utc: datetime | None = None) -> None:
-        now = now_utc or datetime.now(timezone.utc)
+        now = now_utc or datetime.now(datetime_timezone.utc)
         await self._send_incubation_reminders(now)
         await self._send_post_hatch_reminders(now)
         await self._send_feed_reminders(now)
@@ -191,6 +201,24 @@ class ReminderRunner:
                 self.notifications.mark_sent(event_key, local_now)
             self.feed_service.mark_purchase_reminded(feed.id, now)
 
+    def _write_heartbeat(self, *, status: str, last_error: str | None = None) -> None:
+        if self.heartbeats is None:
+            return
+        try:
+            self.heartbeats.upsert(
+                service_name="reminder_runner",
+                status=status,
+                version=self.heartbeat_version,
+                started_at=self.started_at,
+                last_error=last_error,
+                metadata={
+                    "interval_seconds": self.interval_seconds,
+                    "timezone": str(self.timezone),
+                },
+            )
+        except Exception:
+            logger.exception("Failed to write reminder_runner heartbeat")
+
 
 def classify_telegram_error(exc: Exception) -> str:
     text = str(exc).lower()
@@ -223,7 +251,7 @@ def _settings_allow_notification(settings: dict, flag: str, now_utc: datetime) -
 
 def _local_now_for_settings(settings: dict, now_utc: datetime) -> datetime:
     if now_utc.tzinfo is None:
-        now_utc = now_utc.replace(tzinfo=timezone.utc)
+        now_utc = now_utc.replace(tzinfo=datetime_timezone.utc)
     try:
         user_timezone = ZoneInfo(str(settings.get("timezone", "Europe/Moscow")))
     except Exception:

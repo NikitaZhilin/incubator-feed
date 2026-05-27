@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
@@ -11,6 +12,7 @@ from app.storage.database import Database
 from app.storage.repositories.analytics import AnalyticsRepository
 from app.storage.repositories.batches import BatchRepository
 from app.storage.repositories.feeds import FeedRepository
+from app.storage.repositories.heartbeats import HeartbeatRepository
 from app.storage.repositories.notifications import NotificationRepository
 from app.storage.repositories.reminders import ReminderRepository
 from app.storage.repositories.users import UserRepository
@@ -81,6 +83,35 @@ class FakeFeedService:
 
 
 class ReminderRunnerTest(unittest.IsolatedAsyncioTestCase):
+    async def test_runner_writes_degraded_heartbeat_after_loop_error(self) -> None:
+        class FailingRunner(ReminderRunner):
+            async def _send_due_reminders(self, now_utc=None) -> None:
+                raise RuntimeError("boom")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Database(Path(temp_dir) / "test.db")
+            database.initialize()
+            heartbeats = HeartbeatRepository(database)
+            runner = FailingRunner(
+                bot=FakeBot(),
+                incubation_service=FakeIncubationService(),
+                heartbeats=heartbeats,
+                heartbeat_version="0.1.3-beta",
+                started_at=datetime(2026, 5, 25, 9, 0, tzinfo=timezone.utc),
+                timezone="Europe/Moscow",
+                interval_seconds=60,
+            )
+
+            runner.start()
+            await asyncio.sleep(0)
+            await runner.stop()
+
+            rows = heartbeats.list_all()
+
+        reminder = next(item for item in rows if item["service_name"] == "reminder_runner")
+        self.assertEqual(reminder["status"], "degraded")
+        self.assertIn("Reminder loop failed", reminder["last_error"])
+
     async def test_feed_reminder_failure_does_not_block_next_feed(self) -> None:
         bot = FakeBot()
         feed_service = FakeFeedService()

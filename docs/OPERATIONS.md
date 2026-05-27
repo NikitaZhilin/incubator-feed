@@ -68,6 +68,29 @@ python -B scripts/notify_admin_failure.py docker-healthcheck-failed
 
 Скрипт использует только `BOT_TOKEN` и `ADMIN_IDS` из окружения или `.env.prod`.
 
+## Read-only status probe
+
+Бот пишет heartbeat в SQLite для двух обязательных runtime-сервисов:
+
+- `polling_bot` - основной Telegram polling;
+- `reminder_runner` - фоновый runner напоминаний.
+
+Проверить состояние без изменения БД:
+
+```bash
+python -B scripts/status_probe.py
+```
+
+Скрипт открывает SQLite в read-only режиме и печатает JSON в stdout. Exit code:
+
+- `0` - общий статус `ok`;
+- `1` - общий статус `degraded` или `down`;
+- `2` - база недоступна или probe не смог выполниться.
+
+Сервис считается `down`, если heartbeat отсутствует или старше 120 секунд.
+`degraded` выставляется при свежем heartbeat со статусом `degraded`, `last_error`
+или накопленных `critical_errors`.
+
 ## Rollback
 
 1. Остановить сервис.
