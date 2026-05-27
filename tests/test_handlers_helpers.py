@@ -214,6 +214,7 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("➕ Добавить яйца", _keyboard_texts(eggs_menu_keyboard()))
         self.assertIn("📊 Расчеты", _keyboard_texts(eggs_menu_keyboard()))
         self.assertIn("❓ FAQ", _keyboard_texts(eggs_menu_keyboard()))
+        self.assertIn("✏️ Исправить запись", _keyboard_texts(eggs_history_keyboard()))
         self.assertIn("❓ FAQ", _keyboard_texts(eggs_history_keyboard()))
         self.assertIn("Сегодня", _keyboard_texts(egg_entry_date_keyboard()))
         self.assertIn("Вчера", _keyboard_texts(egg_entry_date_keyboard()))

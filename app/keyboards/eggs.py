@@ -1,5 +1,6 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from app.domain import EggEntry
 from app.services.eggs import EXCLUSION_REASON_LABELS
 
 
@@ -34,9 +35,42 @@ def eggs_back_keyboard() -> InlineKeyboardMarkup:
 def eggs_history_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ Исправить запись", callback_data="eggs:edit_list")],
             [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:egg_history")],
             [InlineKeyboardButton(text="⬅️ К яйцам", callback_data="eggs:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
+        ]
+    )
+
+
+def egg_entries_keyboard(entries: list[EggEntry]) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=f"{entry.entry_date.isoformat()} - {entry.eggs_count} шт.",
+                callback_data=f"eggs:edit:{entry.id}",
+            )
+        ]
+        for entry in entries
+    ]
+    rows.extend(
+        [
+            [InlineKeyboardButton(text="⬅️ К истории", callback_data="eggs:history")],
+            [InlineKeyboardButton(text="Отмена", callback_data="eggs:menu")],
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def egg_entry_edit_keyboard(entry_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✏️ Количество", callback_data=f"eggs:edit_count:{entry_id}"),
+                InlineKeyboardButton(text="📅 Дата", callback_data=f"eggs:edit_date:{entry_id}"),
+            ],
+            [InlineKeyboardButton(text="⬅️ К записям", callback_data="eggs:edit_list")],
+            [InlineKeyboardButton(text="Отмена", callback_data="eggs:menu")],
         ]
     )
 

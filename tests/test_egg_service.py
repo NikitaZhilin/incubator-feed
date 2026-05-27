@@ -81,6 +81,20 @@ class EggServiceTest(unittest.TestCase):
         self.assertEqual(stats.next_week_forecast, 7)
         self.assertEqual(round(stats.eggs_per_active_hen, 2), 0.1)
 
+    def test_update_entry_moves_eggs_to_correct_day(self) -> None:
+        entry = self.egg_service.record_today(1, 7, today=date(2026, 5, 25))
+
+        updated = self.egg_service.update_entry(
+            user_id=1,
+            entry_id=entry.id,
+            entry_date=date(2026, 5, 26),
+        )
+        history = self.egg_service.history(1, days=3, today=date(2026, 5, 27))
+
+        self.assertEqual(updated.entry_date, date(2026, 5, 26))
+        self.assertEqual(updated.eggs_count, 7)
+        self.assertEqual(history, [(date(2026, 5, 27), 0), (date(2026, 5, 26), 7), (date(2026, 5, 25), 0)])
+
     def test_history_returns_zero_days_without_entries(self) -> None:
         rows = self.egg_service.history(1, days=3, today=date(2026, 5, 26))
 

@@ -5,7 +5,15 @@ import unittest
 from unittest.mock import patch
 
 from app.handlers.common import cancel_any, my_id_command
-from app.handlers.eggs import EggEntryFlow, eggs_add, eggs_add_date, eggs_count as egg_entry_count
+from app.handlers.eggs import (
+    EggEditFlow,
+    EggEntryFlow,
+    eggs_add,
+    eggs_add_date,
+    eggs_count as egg_entry_count,
+    eggs_edit_date_save,
+    eggs_edit_date_start,
+)
 from app.handlers.feeds import (
     ChangeFeed,
     EditFeed,
@@ -182,6 +190,25 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Дата: 2026-05-26", count_message.answers[-1][0])
         history = self.egg_service.history(1, days=2, today=date(2026, 5, 27))
         self.assertEqual(history, [(date(2026, 5, 27), 0), (date(2026, 5, 26), 6)])
+
+    async def test_egg_entry_date_can_be_edited(self) -> None:
+        entry = self.egg_service.record_today(1, 7, today=date(2026, 5, 25))
+        state = FakeState()
+        callback = FakeCallback(f"eggs:edit_date:{entry.id}")
+
+        await eggs_edit_date_start(callback, state, self.egg_service)
+
+        self.assertEqual(state.state, EggEditFlow.entry_date)
+        self.assertEqual(state.data["entry_id"], entry.id)
+        self.assertIn("Формат:", callback.message.answers[-1][0])
+
+        message = FakeMessage("26.05.2026")
+        await eggs_edit_date_save(message, state, self.egg_service)
+
+        self.assertTrue(state.cleared)
+        self.assertIn("Дата: 2026-05-26", message.answers[-1][0])
+        history = self.egg_service.history(1, days=3, today=date(2026, 5, 27))
+        self.assertEqual(history, [(date(2026, 5, 27), 0), (date(2026, 5, 26), 7), (date(2026, 5, 25), 0)])
 
     async def test_feed_creation_fsm_critical_path(self) -> None:
         state = FakeState()

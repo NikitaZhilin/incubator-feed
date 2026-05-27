@@ -7,8 +7,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
-from app.domain import DailyWeather, EggStats, HenLayingExclusion
+from app.domain import DailyWeather, EggEntry, EggStats, HenLayingExclusion
 from app.keyboards.eggs import (
+    egg_entries_keyboard,
+    egg_entry_edit_keyboard,
     eggs_back_keyboard,
     eggs_cancel_keyboard,
     egg_entry_date_keyboard,
@@ -27,6 +29,11 @@ router = Router()
 
 class EggEntryFlow(StatesGroup):
     count = State()
+
+
+class EggEditFlow(StatesGroup):
+    count = State()
+    entry_date = State()
 
 
 class EggExclusionFlow(StatesGroup):
@@ -113,6 +120,107 @@ async def eggs_history(callback: CallbackQuery, egg_service: EggService) -> None
             lines.append(f"- {day.isoformat()}: {total} шт.")
     await callback.message.answer("\n".join(lines), reply_markup=eggs_history_keyboard())
     await callback.answer()
+
+
+@router.callback_query(F.data == "eggs:edit_list")
+async def eggs_edit_list(callback: CallbackQuery, state: FSMContext, egg_service: EggService) -> None:
+    await state.clear()
+    entries = egg_service.list_entries(callback.from_user.id, limit=20)
+    if not entries:
+        await callback.message.answer("Записей по яйцам пока нет.", reply_markup=eggs_history_keyboard())
+        await callback.answer()
+        return
+    await callback.message.answer(
+        "Выберите запись, которую нужно исправить.",
+        reply_markup=egg_entries_keyboard(entries),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("eggs:edit:"))
+async def eggs_edit_entry(callback: CallbackQuery, egg_service: EggService) -> None:
+    entry_id = int(str(callback.data).rsplit(":", 1)[1])
+    entry = egg_service.get_entry(callback.from_user.id, entry_id)
+    if entry is None:
+        await callback.answer("Запись не найдена.", show_alert=True)
+        return
+    await callback.message.answer(
+        _format_egg_entry_edit(entry),
+        reply_markup=egg_entry_edit_keyboard(entry.id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("eggs:edit_count:"))
+async def eggs_edit_count_start(callback: CallbackQuery, state: FSMContext, egg_service: EggService) -> None:
+    entry_id = int(str(callback.data).rsplit(":", 1)[1])
+    entry = egg_service.get_entry(callback.from_user.id, entry_id)
+    if entry is None:
+        await callback.answer("Запись не найдена.", show_alert=True)
+        return
+    await state.update_data(entry_id=entry.id)
+    await state.set_state(EggEditFlow.count)
+    await callback.message.answer(
+        f"Введите новое количество яиц для записи от {entry.entry_date.isoformat()}.",
+        reply_markup=eggs_cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.message(EggEditFlow.count)
+async def eggs_edit_count_save(message: Message, state: FSMContext, egg_service: EggService) -> None:
+    try:
+        count = int((message.text or "").strip())
+        data = await state.get_data()
+        entry = egg_service.update_entry(
+            user_id=message.from_user.id,
+            entry_id=int(data["entry_id"]),
+            eggs_count=count,
+        )
+    except (KeyError, ValueError) as exc:
+        await message.answer(str(exc), reply_markup=eggs_cancel_keyboard())
+        return
+    await state.clear()
+    await message.answer(
+        "Запись обновлена.\n\n" + _format_egg_entry_edit(entry),
+        reply_markup=egg_entry_edit_keyboard(entry.id),
+    )
+
+
+@router.callback_query(F.data.startswith("eggs:edit_date:"))
+async def eggs_edit_date_start(callback: CallbackQuery, state: FSMContext, egg_service: EggService) -> None:
+    entry_id = int(str(callback.data).rsplit(":", 1)[1])
+    entry = egg_service.get_entry(callback.from_user.id, entry_id)
+    if entry is None:
+        await callback.answer("Запись не найдена.", show_alert=True)
+        return
+    await state.update_data(entry_id=entry.id)
+    await state.set_state(EggEditFlow.entry_date)
+    await callback.message.answer(
+        f"Введите новую дату для записи с {entry.eggs_count} шт.\n\nФормат: {DATE_FORMAT_HINT}.",
+        reply_markup=eggs_cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.message(EggEditFlow.entry_date)
+async def eggs_edit_date_save(message: Message, state: FSMContext, egg_service: EggService) -> None:
+    try:
+        entry_date = _parse_egg_manual_date(message.text or "", egg_service=egg_service)
+        data = await state.get_data()
+        entry = egg_service.update_entry(
+            user_id=message.from_user.id,
+            entry_id=int(data["entry_id"]),
+            entry_date=entry_date,
+        )
+    except (KeyError, ValueError) as exc:
+        await message.answer(str(exc), reply_markup=eggs_cancel_keyboard())
+        return
+    await state.clear()
+    await message.answer(
+        "Дата записи обновлена.\n\n" + _format_egg_entry_edit(entry),
+        reply_markup=egg_entry_edit_keyboard(entry.id),
+    )
 
 
 @router.callback_query(F.data == "eggs:exclusions")
@@ -292,6 +400,24 @@ async def eggs_weather_city_save(message: Message, state: FSMContext, egg_servic
 
 def _format_eggs_menu(stats: EggStats) -> str:
     return _format_eggs_menu_text(stats)
+
+
+def _format_egg_entry_edit(entry: EggEntry) -> str:
+    return (
+        f"Запись #{entry.id}\n"
+        f"Дата: {entry.entry_date.isoformat()}\n"
+        f"Яиц: {entry.eggs_count}\n"
+        f"Несушек в расчете: {entry.active_hens_count} из {entry.total_hens_count}"
+    )
+
+
+def _parse_egg_manual_date(value: str, *, egg_service: EggService) -> date:
+    cleaned = value.strip().lower()
+    if cleaned in {"сегодня", "today"}:
+        return egg_service.current_date()
+    if cleaned in {"вчера", "yesterday"}:
+        return egg_service.current_date() - timedelta(days=1)
+    return parse_user_date(value)
 
 
 async def _answer_eggs_menu(message: Message, user_id: int, egg_service: EggService) -> None:

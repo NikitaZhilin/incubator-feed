@@ -46,6 +46,42 @@ class EggService:
             note=note,
         )
 
+    def get_entry(self, user_id: int, entry_id: int) -> EggEntry | None:
+        return self.eggs.get_entry(entry_id, user_id)
+
+    def list_entries(self, user_id: int, *, limit: int = 20) -> list[EggEntry]:
+        return self.eggs.list_entries(user_id, limit=limit)
+
+    def update_entry(
+        self,
+        *,
+        user_id: int,
+        entry_id: int,
+        entry_date: date | None = None,
+        eggs_count: int | None = None,
+    ) -> EggEntry:
+        current = self.eggs.get_entry(entry_id, user_id)
+        if current is None:
+            raise ValueError("Запись по яйцам не найдена.")
+        next_date = entry_date or current.entry_date
+        next_count = current.eggs_count if eggs_count is None else eggs_count
+        if next_count < 0:
+            raise ValueError("Количество яиц не может быть отрицательным.")
+        total_hens = self.total_laying_hens(user_id)
+        excluded = self.excluded_hens_count(user_id, on_date=next_date, total_hens_count=total_hens)
+        updated = self.eggs.update_entry(
+            entry_id=entry_id,
+            user_id=user_id,
+            entry_date=next_date,
+            eggs_count=next_count,
+            active_hens_count=max(total_hens - excluded, 0),
+            total_hens_count=total_hens,
+            excluded_hens_count=excluded,
+        )
+        if updated is None:
+            raise ValueError("Запись по яйцам не найдена.")
+        return updated
+
     def stats(
         self,
         user_id: int,
