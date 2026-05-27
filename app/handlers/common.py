@@ -326,13 +326,8 @@ async def web_unconfigured_callback(callback: CallbackQuery, config: AppConfig) 
             f"{config.web_open_url}"
         )
     else:
-        await callback.message.answer(
-            "🌐 Web-версия\n\n"
-            "Кнопка уже добавлена, но публичный адрес сайта пока не настроен.\n\n"
-            "Чтобы кнопка открывала сайт, нужно указать на сервере:\n"
-            "WEB_PUBLIC_URL=https://ваш-домен-или-ngrok-url\n\n"
-            "После изменения .env перезапустите Telegram-бота."
-        )
+        user_id = callback.from_user.id if callback.from_user else 0
+        await callback.message.answer(format_web_unavailable_text(is_admin=user_id in config.admin_ids))
     await callback.answer()
 
 
@@ -429,6 +424,20 @@ async def _get_bot_username(message: Message) -> str | None:
 def format_faq(section: str) -> str:
     data = FAQ_SECTIONS[section]
     return f"{data['title']}\n\n{data['text']}"
+
+
+def format_web_unavailable_text(*, is_admin: bool = False) -> str:
+    text = (
+        "🌐 Web-версия\n\n"
+        "Сайт пока не подключен к этому боту.\n\n"
+        "Когда web-версия будет опубликована, эта кнопка будет сразу открывать личный кабинет."
+    )
+    if not is_admin:
+        return text
+    return (
+        f"{text}\n\n"
+        "Для администратора: укажите на сервере WEB_PUBLIC_URL и перезапустите Telegram-бота."
+    )
 
 
 def faq_keyboard(section: str) -> InlineKeyboardMarkup:

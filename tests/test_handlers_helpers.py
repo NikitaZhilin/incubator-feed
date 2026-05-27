@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from app.config import AppConfig
-from app.handlers.common import build_share_text, faq_keyboard, format_faq
+from app.handlers.common import build_share_text, faq_keyboard, format_faq, format_web_unavailable_text
 from app.handlers.incubation import _adjust_number
 from app.handlers.feeds import _format_flock_reports
 from app.handlers.settings import (
@@ -65,6 +65,19 @@ class HandlerHelpersTest(unittest.TestCase):
 
         self.assertIn("https://t.me/test_incubator_bot?start=share", text)
         self.assertIn("Каждый Telegram-аккаунт работает изолированно", text)
+
+    def test_web_unavailable_text_hides_technical_details_for_users(self) -> None:
+        text = format_web_unavailable_text()
+
+        self.assertIn("Сайт пока не подключен", text)
+        self.assertIn("личный кабинет", text)
+        self.assertNotIn("WEB_PUBLIC_URL", text)
+        self.assertNotIn(".env", text)
+
+        admin_text = format_web_unavailable_text(is_admin=True)
+
+        self.assertIn("Для администратора", admin_text)
+        self.assertIn("WEB_PUBLIC_URL", admin_text)
 
     def test_faq_text_and_navigation_are_available(self) -> None:
         main_text = format_faq("main")
