@@ -100,14 +100,18 @@ class WebAppTest(unittest.TestCase):
         incubation_response = self.client.get("/incubation?auth=link-token")
 
         self.assertEqual(index_response.status_code, 200)
+        self.assertIn('aria-label="Основные разделы"', index_response.text)
         self.assertIn("/feeds?auth=link-token", index_response.text)
         self.assertIn("/eggs?auth=link-token", index_response.text)
         self.assertIn("/incubation?auth=link-token", index_response.text)
         self.assertEqual(feeds_response.status_code, 200)
+        self.assertIn('aria-current="page"', feeds_response.text)
         self.assertIn("/?auth=link-token", feeds_response.text)
         self.assertEqual(eggs_response.status_code, 200)
+        self.assertIn('aria-current="page"', eggs_response.text)
         self.assertIn("/?auth=link-token", eggs_response.text)
         self.assertEqual(incubation_response.status_code, 200)
+        self.assertIn('aria-current="page"', incubation_response.text)
         self.assertIn("/?auth=link-token", incubation_response.text)
 
     def test_service_status_accepts_x_admin_token(self) -> None:

@@ -284,6 +284,161 @@ def _status_bot_service_name(item: dict) -> str:
     }.get(service_name, service_name)
 
 
+def _page_style() -> str:
+    return """<style>
+    :root {
+      color-scheme: light dark;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      margin: 0;
+      background: #f4f1ea;
+      color: #222;
+    }
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 28px 18px 48px;
+    }
+    header {
+      margin-bottom: 24px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+    h2 {
+      margin: 28px 0 12px;
+      font-size: 18px;
+    }
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .nav a {
+      border: 1px solid #cfc5b4;
+      border-radius: 6px;
+      padding: 7px 10px;
+      background: #fffaf2;
+      text-decoration: none;
+      color: #245b78;
+      font-size: 14px;
+    }
+    .nav a.active {
+      background: #e6f1f5;
+      border-color: #8bb8ca;
+      color: #153d52;
+      font-weight: 700;
+    }
+    .summary, .wide-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 12px;
+      margin: 20px 0;
+    }
+    .metric, .note {
+      border: 1px solid #d5cec1;
+      border-radius: 8px;
+      padding: 14px;
+      background: #fffaf2;
+    }
+    .label {
+      display: block;
+      color: #665f54;
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+    .value {
+      font-size: 22px;
+      font-weight: 700;
+    }
+    .small {
+      color: #665f54;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fffaf2;
+      border: 1px solid #d5cec1;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid #ddd4c5;
+      vertical-align: top;
+    }
+    th {
+      color: #4d463d;
+      font-size: 13px;
+    }
+    ul {
+      margin: 8px 0 0 18px;
+      padding: 0;
+    }
+    li {
+      margin: 4px 0;
+    }
+    a {
+      color: #245b78;
+    }
+    @media (prefers-color-scheme: dark) {
+      body {
+        background: #111820;
+        color: #f1f4f7;
+      }
+      .metric, .note, table, .nav a {
+        background: #1b2835;
+        border-color: #2d3f50;
+      }
+      .nav a.active {
+        background: #254050;
+        border-color: #44718a;
+        color: #d9f1ff;
+      }
+      th, td {
+        border-color: #2d3f50;
+      }
+      th, .label, .small {
+        color: #b8c2ca;
+      }
+      a, .nav a {
+        color: #88c7ef;
+      }
+    }
+  </style>"""
+
+
+def _page_header(title: str, subtitle: str, auth_token: str, *, active_path: str) -> str:
+    return (
+        "  <header>\n"
+        f"    <h1>{escape(title)}</h1>\n"
+        f"    <div>{escape(subtitle)}</div>\n"
+        f"    {_nav_links(auth_token, active_path=active_path)}\n"
+        "  </header>"
+    )
+
+
+def _nav_links(auth_token: str, *, active_path: str) -> str:
+    links = (
+        ("/", "Сводка"),
+        ("/feeds", "Корма и склад"),
+        ("/eggs", "Яйца"),
+        ("/incubation", "Инкубация"),
+    )
+    rendered = []
+    for path, label in links:
+        class_attr = ' class="active"' if path == active_path else ""
+        current_attr = ' aria-current="page"' if path == active_path else ""
+        rendered.append(
+            f'<a href="{escape(_link(path, auth_token))}"{class_attr}{current_attr}>{escape(label)}</a>'
+        )
+    return '<nav class="nav" aria-label="Основные разделы">' + "\n      ".join(rendered) + "</nav>"
+
+
 def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token: str = "") -> str:
     status_value = escape(str(report.get("status", "unknown")))
     db_status = escape(str(report.get("db", {}).get("status", "unknown")))
@@ -315,112 +470,11 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>tg_bot_inkubator</title>
-  <style>
-    :root {{
-      color-scheme: light dark;
-      font-family: Arial, sans-serif;
-    }}
-    body {{
-      margin: 0;
-      background: #f4f1ea;
-      color: #222;
-    }}
-    main {{
-      max-width: 1080px;
-      margin: 0 auto;
-      padding: 28px 18px 48px;
-    }}
-    header {{
-      margin-bottom: 24px;
-    }}
-    h1 {{
-      margin: 0 0 8px;
-      font-size: 28px;
-    }}
-    h2 {{
-      margin: 26px 0 12px;
-      font-size: 18px;
-    }}
-    .summary {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-      gap: 12px;
-    }}
-    .wide-summary {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-      gap: 12px;
-      margin-top: 12px;
-    }}
-    .metric {{
-      border: 1px solid #d5cec1;
-      border-radius: 8px;
-      padding: 14px;
-      background: #fffaf2;
-    }}
-    .label {{
-      display: block;
-      color: #665f54;
-      font-size: 13px;
-      margin-bottom: 6px;
-    }}
-    .value {{
-      font-size: 22px;
-      font-weight: 700;
-    }}
-    .small {{
-      color: #665f54;
-      font-size: 13px;
-      line-height: 1.45;
-    }}
-    table {{
-      width: 100%;
-      border-collapse: collapse;
-      background: #fffaf2;
-      border: 1px solid #d5cec1;
-    }}
-    th, td {{
-      text-align: left;
-      padding: 10px 12px;
-      border-bottom: 1px solid #ddd4c5;
-    }}
-    th {{
-      color: #4d463d;
-      font-size: 13px;
-    }}
-    a {{
-      color: #245b78;
-    }}
-    @media (prefers-color-scheme: dark) {{
-      body {{
-        background: #111820;
-        color: #f1f4f7;
-      }}
-      .metric, table {{
-        background: #1b2835;
-        border-color: #2d3f50;
-      }}
-      th, td {{
-        border-color: #2d3f50;
-      }}
-      th, .label {{
-        color: #b8c2ca;
-      }}
-      .small {{
-        color: #b8c2ca;
-      }}
-      a {{
-        color: #88c7ef;
-      }}
-    }}
-  </style>
+  {_page_style()}
 </head>
 <body>
 <main>
-  <header>
-    <h1>tg_bot_inkubator</h1>
-    <div>Web-сводка хозяйства и технического состояния.</div>
-  </header>
+{_page_header("tg_bot_inkubator", "Web-сводка хозяйства и технического состояния.", auth_token, active_path="/")}
 
   <section class="summary" aria-label="Сводка">
     <div class="metric"><span class="label">Статус</span><span class="value">{status_value}</span></div>
@@ -507,9 +561,6 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
     Последний деплой: {escape(config.release_deployed_at or "не указан")}
   </p>
   <p>
-    <a href="{escape(_link('/feeds', auth_token))}">Корма и склад</a> ·
-    <a href="{escape(_link('/eggs', auth_token))}">Яйца</a> ·
-    <a href="{escape(_link('/incubation', auth_token))}">Инкубация</a> ·
     <a href="{escape(config.github_url)}">GitHub</a> ·
     <a href="{escape(config.changelog_url)}">История изменений</a>
   </p>
@@ -555,36 +606,11 @@ def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = ""
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Корма и склад</title>
-  <style>
-    :root {{ color-scheme: light dark; font-family: Arial, sans-serif; }}
-    body {{ margin: 0; background: #f4f1ea; color: #222; }}
-    main {{ max-width: 1120px; margin: 0 auto; padding: 28px 18px 48px; }}
-    h1 {{ margin: 0 0 8px; font-size: 28px; }}
-    h2 {{ margin: 28px 0 12px; font-size: 18px; }}
-    .summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 20px 0; }}
-    .metric {{ border: 1px solid #d5cec1; border-radius: 8px; padding: 14px; background: #fffaf2; }}
-    .label {{ display: block; color: #665f54; font-size: 13px; margin-bottom: 6px; }}
-    .value {{ font-size: 22px; font-weight: 700; }}
-    table {{ width: 100%; border-collapse: collapse; background: #fffaf2; border: 1px solid #d5cec1; }}
-    th, td {{ text-align: left; padding: 10px 12px; border-bottom: 1px solid #ddd4c5; vertical-align: top; }}
-    th {{ color: #4d463d; font-size: 13px; }}
-    a {{ color: #245b78; }}
-    @media (prefers-color-scheme: dark) {{
-      body {{ background: #111820; color: #f1f4f7; }}
-      .metric, table {{ background: #1b2835; border-color: #2d3f50; }}
-      th, td {{ border-color: #2d3f50; }}
-      th, .label {{ color: #b8c2ca; }}
-      a {{ color: #88c7ef; }}
-    }}
-  </style>
+  {_page_style()}
 </head>
 <body>
 <main>
-  <header>
-    <h1>Корма и склад</h1>
-    <div>Read-only просмотр запасов, смеси, стад и последних операций.</div>
-    <p><a href="{escape(_link('/', auth_token))}">Сводка</a></p>
-  </header>
+{_page_header("Корма и склад", "Read-only просмотр запасов, смеси, стад и последних операций.", auth_token, active_path="/feeds")}
 
   <section class="summary">
     <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
@@ -640,40 +666,11 @@ def _render_eggs_page(config: WebConfig, payload: dict, *, auth_token: str = "")
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Яйца</title>
-  <style>
-    :root {{ color-scheme: light dark; font-family: Arial, sans-serif; }}
-    body {{ margin: 0; background: #f4f1ea; color: #222; }}
-    main {{ max-width: 1120px; margin: 0 auto; padding: 28px 18px 48px; }}
-    h1 {{ margin: 0 0 8px; font-size: 28px; }}
-    h2 {{ margin: 28px 0 12px; font-size: 18px; }}
-    .summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 20px 0; }}
-    .metric {{ border: 1px solid #d5cec1; border-radius: 8px; padding: 14px; background: #fffaf2; }}
-    .label {{ display: block; color: #665f54; font-size: 13px; margin-bottom: 6px; }}
-    .value {{ font-size: 22px; font-weight: 700; }}
-    .small {{ color: #665f54; font-size: 13px; line-height: 1.45; }}
-    table {{ width: 100%; border-collapse: collapse; background: #fffaf2; border: 1px solid #d5cec1; }}
-    th, td {{ text-align: left; padding: 10px 12px; border-bottom: 1px solid #ddd4c5; vertical-align: top; }}
-    th {{ color: #4d463d; font-size: 13px; }}
-    a {{ color: #245b78; }}
-    @media (prefers-color-scheme: dark) {{
-      body {{ background: #111820; color: #f1f4f7; }}
-      .metric, table {{ background: #1b2835; border-color: #2d3f50; }}
-      th, td {{ border-color: #2d3f50; }}
-      th, .label, .small {{ color: #b8c2ca; }}
-      a {{ color: #88c7ef; }}
-    }}
-  </style>
+  {_page_style()}
 </head>
 <body>
 <main>
-  <header>
-    <h1>Яйца</h1>
-    <div>Read-only просмотр сбора, прогноза, исключений несушек и сохраненной погоды.</div>
-    <p>
-      <a href="{escape(_link('/', auth_token))}">Сводка</a> ·
-      <a href="{escape(_link('/feeds', auth_token))}">Корма и склад</a>
-    </p>
-  </header>
+{_page_header("Яйца", "Read-only просмотр сбора, прогноза, исключений несушек и сохраненной погоды.", auth_token, active_path="/eggs")}
 
   <section class="summary">
     <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
@@ -734,43 +731,11 @@ def _render_incubation_page(config: WebConfig, payload: dict, *, auth_token: str
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Инкубация</title>
-  <style>
-    :root {{ color-scheme: light dark; font-family: Arial, sans-serif; }}
-    body {{ margin: 0; background: #f4f1ea; color: #222; }}
-    main {{ max-width: 1120px; margin: 0 auto; padding: 28px 18px 48px; }}
-    h1 {{ margin: 0 0 8px; font-size: 28px; }}
-    h2 {{ margin: 28px 0 12px; font-size: 18px; }}
-    .summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 20px 0; }}
-    .metric, .note {{ border: 1px solid #d5cec1; border-radius: 8px; padding: 14px; background: #fffaf2; }}
-    .label {{ display: block; color: #665f54; font-size: 13px; margin-bottom: 6px; }}
-    .value {{ font-size: 22px; font-weight: 700; }}
-    .small {{ color: #665f54; font-size: 13px; line-height: 1.45; }}
-    table {{ width: 100%; border-collapse: collapse; background: #fffaf2; border: 1px solid #d5cec1; }}
-    th, td {{ text-align: left; padding: 10px 12px; border-bottom: 1px solid #ddd4c5; vertical-align: top; }}
-    th {{ color: #4d463d; font-size: 13px; }}
-    ul {{ margin: 8px 0 0 18px; padding: 0; }}
-    li {{ margin: 4px 0; }}
-    a {{ color: #245b78; }}
-    @media (prefers-color-scheme: dark) {{
-      body {{ background: #111820; color: #f1f4f7; }}
-      .metric, .note, table {{ background: #1b2835; border-color: #2d3f50; }}
-      th, td {{ border-color: #2d3f50; }}
-      th, .label, .small {{ color: #b8c2ca; }}
-      a {{ color: #88c7ef; }}
-    }}
-  </style>
+  {_page_style()}
 </head>
 <body>
 <main>
-  <header>
-    <h1>Инкубация</h1>
-    <div>Read-only просмотр активных партий, этапов, ближайшего вывода и истории.</div>
-    <p>
-      <a href="{escape(_link('/', auth_token))}">Сводка</a> ·
-      <a href="{escape(_link('/feeds', auth_token))}">Корма и склад</a> ·
-      <a href="{escape(_link('/eggs', auth_token))}">Яйца</a>
-    </p>
-  </header>
+{_page_header("Инкубация", "Read-only просмотр активных партий, этапов, ближайшего вывода и истории.", auth_token, active_path="/incubation")}
 
   <section class="summary">
     <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
