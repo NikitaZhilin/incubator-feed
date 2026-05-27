@@ -6,7 +6,6 @@
 - Добавлена read-only web-страница `Инкубация` с JSON endpoint `/incubation/data`: активные партии, день, этап, режим, рекомендации и история завершенных выводов.
 - Добавлена read-only web-страница `Яйца` с JSON endpoint `/eggs/data`: история сбора, прогноз, активные исключения несушек и сохраненная погода.
 - Добавлена read-only web-страница `Корма и склад` с JSON endpoint `/feeds/data`; подготовлен каркас авторизации по ссылке через `WEB_LINK_TOKEN`.
-- Web-сервис получил admin endpoints для мониторинга и заявки на перезапуск: `/admin/service-status` и `/admin/restart`.
 - Web-сводка расширена read-only данными хозяйства: яйца, готовая смесь, возможные замесы, поголовье, стада и активная инкубация.
 - Добавлен первый этап web-версии: отдельный FastAPI-сервис с `/health`, защищенными `/status`, `/version` и HTML-сводкой.
 - Добавлен read-only heartbeat для внешнего статус-бота: `polling_bot`, `reminder_runner`, таблица `service_heartbeats` и `scripts/status_probe.py`.

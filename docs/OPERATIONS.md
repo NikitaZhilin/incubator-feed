@@ -129,18 +129,12 @@ python -B scripts/web_app.py
 - `GET /status` - JSON-статус на базе read-only status probe;
 - `GET /summary` - JSON-сводка хозяйства: яйца, корма, стада, инкубация;
 - `GET /version` - версия, окружение, commit и ссылки.
-- `GET /admin/service-status` - compact JSON для внешнего мониторинга;
-- `POST /admin/restart` - создает файл-заявку на перезапуск в `RESTART_REQUEST_DIR`.
 
 Если не задан ни `WEB_ADMIN_TOKEN`, ни `WEB_LINK_TOKEN`, обычные закрытые
-web-страницы возвращают `503`. Admin endpoints всегда требуют `WEB_ADMIN_TOKEN`.
+web-страницы возвращают `503`.
 Для обычных web-страниц заготовлена авторизация по ссылке: если задан
 `WEB_LINK_TOKEN`, страницы `/`, `/feeds`, `/summary`, `/feeds/data`, `/status`,
-`/eggs`, `/eggs/data`, `/incubation`, `/incubation/data` и `/version` можно открыть с `?auth=<WEB_LINK_TOKEN>`. Admin endpoints
-`/admin/*` по link-token не открываются и требуют именно admin-token.
-Для `/admin/restart` нужно передать `confirm: "restart:incubator"` и target
-`bot`, `worker` или `all`; сам web-сервис только пишет заявку, фактический
-перезапуск должен выполнять внешний runner/monitor.
+`/eggs`, `/eggs/data`, `/incubation`, `/incubation/data` и `/version` можно открыть с `?auth=<WEB_LINK_TOKEN>`.
 
 ## Rollback
 

@@ -22,7 +22,6 @@ class WebConfig:
     release_commit: str
     github_url: str
     changelog_url: str
-    restart_request_dir: Path = Path("/app/restart-requests")
     timezone_name: str = "Europe/Moscow"
     link_token: str = ""
 
@@ -57,7 +56,6 @@ def load_web_config() -> WebConfig:
         github_url=os.getenv("GITHUB_URL", default_github_url).strip() or default_github_url,
         changelog_url=os.getenv("CHANGELOG_URL", default_changelog_url).strip()
         or default_changelog_url,
-        restart_request_dir=Path(os.getenv("RESTART_REQUEST_DIR", "/app/restart-requests")).expanduser(),
         timezone_name=os.getenv("BOT_TIMEZONE", "Europe/Moscow").strip() or "Europe/Moscow",
         link_token=os.getenv("WEB_LINK_TOKEN", "").strip(),
     )

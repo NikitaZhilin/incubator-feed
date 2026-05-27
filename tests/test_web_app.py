@@ -39,7 +39,6 @@ class WebAppTest(unittest.TestCase):
             release_commit="abc123",
             github_url="https://github.com/example/project",
             changelog_url="https://github.com/example/project/blob/main/docs/CHANGELOG.md",
-            restart_request_dir=Path(self.temp_dir.name) / "restart-requests",
             link_token="link-token",
         )
         self.client = TestClient(create_app(self.config))
@@ -86,10 +85,8 @@ class WebAppTest(unittest.TestCase):
         client = TestClient(create_app(config))
 
         response = client.get("/summary?auth=link-only-token")
-        admin_response = client.get("/admin/service-status?auth=link-only-token")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(admin_response.status_code, 503)
 
     def test_link_token_navigation_keeps_auth_query(self) -> None:
         self._create_household_data()
@@ -113,41 +110,6 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(incubation_response.status_code, 200)
         self.assertIn('aria-current="page"', incubation_response.text)
         self.assertIn("/?auth=link-token", incubation_response.text)
-
-    def test_service_status_accepts_x_admin_token(self) -> None:
-        self._write_ok_heartbeats()
-
-        response = self.client.get("/admin/service-status", headers={"X-Admin-Token": "secret-token"})
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["status"], "ok")
-        self.assertIn("bot", payload["services"])
-        self.assertIn("worker", payload["services"])
-
-    def test_restart_writes_allowlisted_request(self) -> None:
-        response = self.client.post(
-            "/admin/restart",
-            headers={"X-Admin-Token": "secret-token"},
-            json={
-                "target": "bot",
-                "confirm": "restart:incubator",
-                "requested_by": "pytest",
-                "reason": "test",
-            },
-        )
-        bad_response = self.client.post(
-            "/admin/restart",
-            headers={"X-Admin-Token": "secret-token"},
-            json={"target": "postgres", "confirm": "restart:incubator"},
-        )
-
-        self.assertEqual(response.status_code, 202)
-        self.assertEqual(response.json()["target"], "bot")
-        self.assertEqual(bad_response.status_code, 400)
-        files = list((Path(self.temp_dir.name) / "restart-requests").glob("incubator-*.json"))
-        self.assertEqual(len(files), 1)
-        self.assertIn('"bot_key": "incubator"', files[0].read_text(encoding="utf-8"))
 
     def test_version_returns_release_metadata(self) -> None:
         response = self.client.get("/version", headers=self._auth())

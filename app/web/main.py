@@ -1,26 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from html import escape
-import json
 import secrets
 from urllib.parse import urlencode
-from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
 
 from app.services.status_probe import build_status_report
 from app.web.config import WebConfig, load_web_config
 from app.web.summary import build_web_eggs, build_web_feeds, build_web_incubation, build_web_summary
-
-
-class RestartRequest(BaseModel):
-    target: str = "all"
-    confirm: str
-    requested_by: str = ""
-    reason: str = ""
 
 
 def create_app(config: WebConfig | None = None) -> FastAPI:
@@ -28,33 +17,13 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
     app = FastAPI(title="tg_bot_inkubator web", version=web_config.release_version)
     app.state.web_config = web_config
 
-    def require_admin(
-        authorization: str | None = Header(default=None),
-        x_web_token: str | None = Header(default=None),
-        x_admin_token: str | None = Header(default=None),
-    ) -> None:
-        expected = app.state.web_config.admin_token
-        if not expected:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="WEB_ADMIN_TOKEN is not configured.",
-            )
-        provided = _extract_token(authorization, x_web_token, x_admin_token)
-        if not provided or not secrets.compare_digest(provided, expected):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication required.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
     def require_web_access(
         authorization: str | None = Header(default=None),
         x_web_token: str | None = Header(default=None),
-        x_admin_token: str | None = Header(default=None),
         auth: str | None = Query(default=None),
     ) -> None:
         current = app.state.web_config
-        provided = _extract_access_token(authorization, x_web_token, x_admin_token, auth)
+        provided = _extract_access_token(authorization, x_web_token, auth)
         configured_tokens = [token for token in (current.admin_token, current.link_token) if token]
         if not configured_tokens:
             raise HTTPException(
@@ -76,31 +45,6 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
     def status_report() -> dict:
         return build_status_report(app.state.web_config.db_path)
 
-    @app.get("/admin/service-status", dependencies=[Depends(require_admin)])
-    def service_status() -> dict:
-        report = build_status_report(app.state.web_config.db_path)
-        services = {
-            _status_bot_service_name(item): {
-                "status": item.get("status", "unknown"),
-                "last_seen_at": item.get("last_seen_at"),
-                "last_error": item.get("last_error"),
-                "required": item.get("required", True),
-                "stale": item.get("stale", True),
-                "seconds_since_seen": item.get("seconds_since_seen"),
-            }
-            for item in report.get("heartbeats", [])
-        }
-        return {
-            "status": report.get("status", "unknown"),
-            "version": report.get("version", ""),
-            "generated_at": report.get("generated_at"),
-            "database": report.get("db", {}).get("status", "unknown"),
-            "db": report.get("db", {}),
-            "last_errors_count": report.get("errors", {}).get("critical_total", 0),
-            "heartbeat_down_after_seconds": report.get("heartbeat_down_after_seconds", 120),
-            "services": services,
-        }
-
     @app.get("/version", dependencies=[Depends(require_web_access)])
     def version() -> dict:
         current = app.state.web_config
@@ -114,43 +58,6 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             "changelog_url": current.changelog_url,
         }
 
-    @app.post("/admin/restart", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(require_admin)])
-    def restart(payload: RestartRequest) -> dict:
-        allowed_targets = {"bot", "worker", "all"}
-        target = payload.target.strip().lower()
-        if payload.confirm != "restart:incubator":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid restart confirmation.")
-        if target not in allowed_targets:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid restart target.")
-
-        operation_id = f"incubator-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:8]}"
-        request_dir = app.state.web_config.restart_request_dir
-        try:
-            request_dir.mkdir(parents=True, exist_ok=True)
-            request_path = request_dir / f"{operation_id}.json"
-            tmp_path = request_path.with_suffix(".tmp")
-            request_payload = {
-                "bot_key": "incubator",
-                "target": target,
-                "operation_id": operation_id,
-                "requested_by": payload.requested_by[:120],
-                "reason": payload.reason[:500],
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }
-            tmp_path.write_text(json.dumps(request_payload, ensure_ascii=False), encoding="utf-8")
-            tmp_path.replace(request_path)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Restart request storage is unavailable: {exc}",
-            ) from exc
-
-        return {
-            "status": "accepted",
-            "operation_id": operation_id,
-            "target": target,
-            "message": "restart scheduled",
-        }
 
     @app.get("/summary", dependencies=[Depends(require_web_access)])
     def summary(user_id: int | None = Query(default=None)) -> dict:
@@ -248,13 +155,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
     return app
 
 
-def _extract_token(
-    authorization: str | None,
-    x_web_token: str | None,
-    x_admin_token: str | None = None,
-) -> str:
-    if x_admin_token:
-        return x_admin_token.strip()
+def _extract_token(authorization: str | None, x_web_token: str | None) -> str:
     if x_web_token:
         return x_web_token.strip()
     if not authorization:
@@ -268,20 +169,11 @@ def _extract_token(
 def _extract_access_token(
     authorization: str | None,
     x_web_token: str | None,
-    x_admin_token: str | None,
     auth: str | None,
 ) -> str:
     if auth:
         return auth.strip()
-    return _extract_token(authorization, x_web_token, x_admin_token)
-
-
-def _status_bot_service_name(item: dict) -> str:
-    service_name = str(item.get("service_name", ""))
-    return {
-        "polling_bot": "bot",
-        "reminder_runner": "worker",
-    }.get(service_name, service_name)
+    return _extract_token(authorization, x_web_token)
 
 
 def _page_style() -> str:
