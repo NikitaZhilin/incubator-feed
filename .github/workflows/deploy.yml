@@ -299,10 +299,12 @@ jobs:
             docker rm -f '$CONTAINER_NAME' >/dev/null 2>&1 || true
             docker rm -f '$WEB_CONTAINER_NAME' >/dev/null 2>&1 || true
             docker rm -f '$NGROK_CONTAINER_NAME' >/dev/null 2>&1 || true
+            docker network inspect incubator_feed_network >/dev/null 2>&1 || docker network create incubator_feed_network
             update_env_var WEB_ENABLED true
             update_env_var WEB_HOST 0.0.0.0
             update_env_var WEB_PORT 8080
             docker run -d --name '$WEB_CONTAINER_NAME' --restart unless-stopped \
+              --network incubator_feed_network \
               --env-file '$DEPLOY_PATH/.env.prod' \
               -e WEB_ENABLED=true \
               -e WEB_HOST=0.0.0.0 \
@@ -314,10 +316,10 @@ jobs:
             curl -fsS http://127.0.0.1:8080/health
             if [ -n \"\$NGROK_AUTHTOKEN\" ]; then
               docker run -d --name '$NGROK_CONTAINER_NAME' --restart unless-stopped \
-                --add-host=host.docker.internal:host-gateway \
+                --network incubator_feed_network \
                 -p 127.0.0.1:4041:4040 \
                 -e NGROK_AUTHTOKEN=\"\$NGROK_AUTHTOKEN\" \
-                ngrok/ngrok:latest http http://host.docker.internal:8080 --log=stdout
+                ngrok/ngrok:latest http http://incubator-feed-web:8080 --log=stdout
               sleep 12
               NGROK_PUBLIC_URL=\"\$(python3 - <<'PY'
           import json
@@ -340,6 +342,7 @@ jobs:
               echo \"WEB_PUBLIC_URL=\$NGROK_PUBLIC_URL\"
             fi
             docker run -d --name '$CONTAINER_NAME' --restart unless-stopped \
+              --network incubator_feed_network \
               --env-file '$DEPLOY_PATH/.env.prod' \
               -e ADMIN_STARTUP_NOTICE_MODE='once_per_deploy' \
               -e RELEASE_COMMIT=\"\$RELEASE_COMMIT\" \

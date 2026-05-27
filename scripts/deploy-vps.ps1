@@ -137,7 +137,9 @@ docker run --rm --env-file .env.prod \
   "`$IMAGE_NAME" python -B scripts/migrate.py
 docker rm -f "`$CONTAINER_NAME" >/dev/null 2>&1 || true
 docker rm -f "`$WEB_CONTAINER_NAME" >/dev/null 2>&1 || true
+docker network inspect incubator_feed_network >/dev/null 2>&1 || docker network create incubator_feed_network
 docker run -d --name "`$CONTAINER_NAME" --restart unless-stopped \
+  --network incubator_feed_network \
   --env-file "$DeployPath/.env.prod" \
   -e RELEASE_NOTICE_ENABLED="`$RELEASE_NOTICE_ENABLED" \
   -e RELEASE_VERSION="`$RELEASE_VERSION" \
@@ -150,6 +152,7 @@ docker run -d --name "`$CONTAINER_NAME" --restart unless-stopped \
   -v "$DeployPath/backups:/app/backups" \
   "`$IMAGE_NAME" python main.py
 docker run -d --name "`$WEB_CONTAINER_NAME" --restart unless-stopped \
+  --network incubator_feed_network \
   --env-file "$DeployPath/.env.prod" \
   -e WEB_ENABLED=true \
   -e WEB_HOST=0.0.0.0 \

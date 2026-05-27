@@ -77,7 +77,7 @@ docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
   -v "$DEPLOY_PATH/backups:/app/backups" \
   "$IMAGE_NAME" python main.py
 
-docker network inspect rememberme_bot_network >/dev/null 2>&1 || docker network create rememberme_bot_network
+docker network inspect incubator_feed_network >/dev/null 2>&1 || docker network create incubator_feed_network
 docker run -d --name "$WEB_CONTAINER_NAME" --restart unless-stopped \
   --env-file "$DEPLOY_PATH/.env.prod" \
   -e WEB_ENABLED=true \
@@ -86,7 +86,7 @@ docker run -d --name "$WEB_CONTAINER_NAME" --restart unless-stopped \
   -e RELEASE_COMMIT="${target_commit:0:12}" \
   -e RELEASE_DEPLOYED_AT="$release_deployed_at" \
   -p 127.0.0.1:8080:8080 \
-  --network rememberme_bot_network \
+  --network incubator_feed_network \
   -v "$DEPLOY_PATH/data:/app/data:ro" \
   "$IMAGE_NAME" python -B scripts/web_app.py
 
