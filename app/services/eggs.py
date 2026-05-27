@@ -99,8 +99,10 @@ class EggService:
         month_start = current_date - timedelta(days=29)
         week_eggs = self.eggs.sum_between(user_id, start_date=week_start, end_date=current_date)
         month_eggs = self.eggs.sum_between(user_id, start_date=month_start, end_date=current_date)
-        week_average = week_eggs / 7
-        month_average = month_eggs / 30
+        week_recorded_days = len(self.eggs.daily_totals(user_id, start_date=week_start, end_date=current_date))
+        month_recorded_days = len(self.eggs.daily_totals(user_id, start_date=month_start, end_date=current_date))
+        week_average = week_eggs / week_recorded_days if week_recorded_days else 0
+        month_average = month_eggs / month_recorded_days if month_recorded_days else 0
         eggs_per_active_hen = (week_average / active_hens) if active_hens > 0 else None
         weather_settings = self.eggs.get_weather_settings(user_id)
         weather = (
@@ -110,7 +112,7 @@ class EggService:
         )
         weather_impact_percent, weather_note = self._weather_impact(weather)
         weather_adjusted_week_forecast = (
-            max(round(week_average * 7 * (1 + weather_impact_percent / 100)), 0)
+            max(self._round_forecast(week_average * 7 * (1 + weather_impact_percent / 100)), 0)
             if weather is not None
             else None
         )
@@ -125,7 +127,7 @@ class EggService:
             month_eggs=month_eggs,
             month_average=month_average,
             eggs_per_active_hen=eggs_per_active_hen,
-            next_week_forecast=round(week_average * 7),
+            next_week_forecast=self._round_forecast(week_average * 7),
             weather_adjusted_week_forecast=weather_adjusted_week_forecast,
             weather_impact_percent=weather_impact_percent,
             weather_note=weather_note,
@@ -301,6 +303,10 @@ class EggService:
         total_hens = self.total_laying_hens(user_id) if total_hens_count is None else total_hens_count
         active_exclusions = self.eggs.list_active_exclusions(user_id, on_date=on_date)
         return min(sum(item.hens_count for item in active_exclusions), total_hens)
+
+    @staticmethod
+    def _round_forecast(value: float) -> int:
+        return int(value + 0.5)
 
     @staticmethod
     def _weather_impact(weather: DailyWeather | None) -> tuple[int, str]:

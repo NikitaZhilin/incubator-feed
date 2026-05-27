@@ -78,8 +78,29 @@ class EggServiceTest(unittest.TestCase):
         self.assertEqual(entry.excluded_hens_count, 1)
         self.assertEqual(entry.active_hens_count, 10)
         self.assertEqual(stats.week_eggs, 7)
-        self.assertEqual(stats.next_week_forecast, 7)
-        self.assertEqual(round(stats.eggs_per_active_hen, 2), 0.1)
+        self.assertEqual(stats.next_week_forecast, 49)
+        self.assertEqual(round(stats.eggs_per_active_hen, 2), 0.7)
+
+    def test_stats_average_uses_days_with_entries(self) -> None:
+        self.feed_service.create_bird_group(
+            user_id=1,
+            name="Несушки",
+            bird_count=12,
+            species="chicken",
+            role="hens",
+        )
+
+        self.egg_service.record_today(1, 7, today=date(2026, 5, 27))
+        self.egg_service.record_today(1, 8, today=date(2026, 5, 28))
+
+        stats = self.egg_service.stats(1, today=date(2026, 5, 28))
+
+        self.assertEqual(stats.week_eggs, 15)
+        self.assertEqual(stats.month_eggs, 15)
+        self.assertEqual(stats.week_average, 7.5)
+        self.assertEqual(stats.month_average, 7.5)
+        self.assertEqual(stats.next_week_forecast, 53)
+        self.assertEqual(round(stats.eggs_per_active_hen, 3), 0.625)
 
     def test_update_entry_moves_eggs_to_correct_day(self) -> None:
         entry = self.egg_service.record_today(1, 7, today=date(2026, 5, 25))
@@ -134,8 +155,8 @@ class EggServiceTest(unittest.TestCase):
             species="chicken",
             role="hens",
         )
-        for _ in range(7):
-            service.record_today(1, 10, today=date(2026, 5, 26))
+        for offset in range(7):
+            service.record_today(1, 10, today=date(2026, 5, 20 + offset))
 
         settings = service.update_weather_city(user_id=1, city="Курск")
         weather = service.refresh_weather(1, today=date(2026, 5, 26), force=True)

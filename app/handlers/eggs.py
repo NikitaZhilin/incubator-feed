@@ -498,11 +498,12 @@ def _format_stats(stats: EggStats) -> str:
         f"Временно не несутся: {stats.excluded_hens_count}",
         f"Учитываются в яйценоскости: {stats.active_hens_count}",
         "",
-        f"За 7 дней: {stats.week_eggs} шт., в среднем {stats.week_average:.1f} шт./день",
-        f"За 30 дней: {stats.month_eggs} шт., в среднем {stats.month_average:.1f} шт./день",
+        f"За 7 дней: {stats.week_eggs} шт., в среднем по дням с записями {stats.week_average:.1f} шт./день",
+        f"За 30 дней: {stats.month_eggs} шт., в среднем по дням с записями {stats.month_average:.1f} шт./день",
         f"На одну активную несушку: {per_hen}",
         "",
         f"Прогноз на следующую неделю: примерно {stats.next_week_forecast} шт.",
+        f"Прогноз на 30 дней: примерно {_round_forecast(stats.month_average * 30)} шт.",
         _format_weather_forecast_line(stats),
         "",
         f"Город для погодной привязки: {stats.weather_city}",
@@ -530,6 +531,10 @@ def _format_exclusions(exclusions: list[HenLayingExclusion]) -> str:
     else:
         lines.extend(f"- {_format_exclusion(item)}" for item in exclusions)
     return "\n".join(lines)
+
+
+def _round_forecast(value: float) -> int:
+    return int(value + 0.5)
 
 
 def _format_exclusion(exclusion: HenLayingExclusion) -> str:
