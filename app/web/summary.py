@@ -146,6 +146,67 @@ def build_web_feeds(
     }
 
 
+def build_web_eggs(
+    db_path: Path,
+    *,
+    user_id: int | None = None,
+    now: datetime | None = None,
+    timezone_name: str = "Europe/Moscow",
+) -> dict:
+    summary = build_web_summary(
+        db_path,
+        user_id=user_id,
+        now=now,
+        timezone_name=timezone_name,
+    )
+    selected_user_id = summary.get("selected_user_id")
+    if selected_user_id is None or summary.get("db", {}).get("status") != "ok":
+        return {
+            "generated_at": summary.get("generated_at"),
+            "selected_user_id": selected_user_id,
+            "db": summary.get("db"),
+            "eggs": summary.get("eggs"),
+            "history": [],
+            "open_exclusions": [],
+        }
+
+    database = ReadOnlyDatabase(db_path)
+    eggs_repository = EggRepository(database)
+    history = [
+        {
+            "id": entry.id,
+            "entry_date": entry.entry_date.isoformat(),
+            "eggs_count": entry.eggs_count,
+            "active_hens_count": entry.active_hens_count,
+            "total_hens_count": entry.total_hens_count,
+            "excluded_hens_count": entry.excluded_hens_count,
+            "note": entry.note,
+            "created_at": entry.created_at.isoformat(),
+        }
+        for entry in eggs_repository.list_entries(int(selected_user_id), limit=30)
+    ]
+    open_exclusions = [
+        {
+            "id": item.id,
+            "hens_count": item.hens_count,
+            "reason": EXCLUSION_REASON_LABELS.get(item.reason, item.reason),
+            "started_at": item.started_at.isoformat(),
+            "expected_until": item.expected_until.isoformat() if item.expected_until else None,
+            "bird_group_name": item.bird_group_name,
+            "note": item.note,
+        }
+        for item in eggs_repository.list_open_exclusions(int(selected_user_id))
+    ]
+    return {
+        "generated_at": summary.get("generated_at"),
+        "selected_user_id": selected_user_id,
+        "db": summary.get("db"),
+        "eggs": summary.get("eggs"),
+        "history": history,
+        "open_exclusions": open_exclusions,
+    }
+
+
 class ManagedReadOnlyConnection(sqlite3.Connection):
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         try:

@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from app.services.status_probe import build_status_report
 from app.web.config import WebConfig, load_web_config
-from app.web.summary import build_web_feeds, build_web_summary
+from app.web.summary import build_web_eggs, build_web_feeds, build_web_summary
 
 
 class RestartRequest(BaseModel):
@@ -183,6 +183,29 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             timezone_name=current.timezone_name,
         )
         return _render_feeds_page(current, payload, auth_token=auth or "")
+
+    @app.get("/eggs/data", dependencies=[Depends(require_web_access)])
+    def eggs_data(user_id: int | None = Query(default=None)) -> dict:
+        current = app.state.web_config
+        return build_web_eggs(
+            current.db_path,
+            user_id=user_id,
+            timezone_name=current.timezone_name,
+        )
+
+    @app.get("/eggs", response_class=HTMLResponse, dependencies=[Depends(require_web_access)])
+    def eggs_page(
+        request: Request,
+        user_id: int | None = Query(default=None),
+        auth: str | None = Query(default=None),
+    ) -> str:
+        current = request.app.state.web_config
+        payload = build_web_eggs(
+            current.db_path,
+            user_id=user_id,
+            timezone_name=current.timezone_name,
+        )
+        return _render_eggs_page(current, payload, auth_token=auth or "")
 
     @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_web_access)])
     def index(
@@ -462,6 +485,7 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
   </p>
   <p>
     <a href="{escape(_link('/feeds', auth_token))}">Корма и склад</a> ·
+    <a href="{escape(_link('/eggs', auth_token))}">Яйца</a> ·
     <a href="{escape(config.github_url)}">GitHub</a> ·
     <a href="{escape(config.changelog_url)}">История изменений</a>
   </p>
@@ -575,6 +599,94 @@ def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = ""
 </html>"""
 
 
+def _render_eggs_page(config: WebConfig, payload: dict, *, auth_token: str = "") -> str:
+    eggs = payload.get("eggs") or {}
+    weather_text = _weather_text((eggs.get("weather") or {}))
+    history_rows = "\n".join(_render_egg_history_row(item) for item in payload.get("history", []))
+    if not history_rows:
+        history_rows = "<tr><td colspan=\"5\">Записей по яйцам пока нет.</td></tr>"
+    exclusion_rows = "\n".join(_render_exclusion_row(item) for item in payload.get("open_exclusions", []))
+    if not exclusion_rows:
+        exclusion_rows = "<tr><td colspan=\"4\">Активных исключений нет.</td></tr>"
+    selected_user = payload.get("selected_user_id")
+    selected_user_label = "не выбран" if selected_user is None else str(selected_user)
+    return f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Яйца</title>
+  <style>
+    :root {{ color-scheme: light dark; font-family: Arial, sans-serif; }}
+    body {{ margin: 0; background: #f4f1ea; color: #222; }}
+    main {{ max-width: 1120px; margin: 0 auto; padding: 28px 18px 48px; }}
+    h1 {{ margin: 0 0 8px; font-size: 28px; }}
+    h2 {{ margin: 28px 0 12px; font-size: 18px; }}
+    .summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 20px 0; }}
+    .metric {{ border: 1px solid #d5cec1; border-radius: 8px; padding: 14px; background: #fffaf2; }}
+    .label {{ display: block; color: #665f54; font-size: 13px; margin-bottom: 6px; }}
+    .value {{ font-size: 22px; font-weight: 700; }}
+    .small {{ color: #665f54; font-size: 13px; line-height: 1.45; }}
+    table {{ width: 100%; border-collapse: collapse; background: #fffaf2; border: 1px solid #d5cec1; }}
+    th, td {{ text-align: left; padding: 10px 12px; border-bottom: 1px solid #ddd4c5; vertical-align: top; }}
+    th {{ color: #4d463d; font-size: 13px; }}
+    a {{ color: #245b78; }}
+    @media (prefers-color-scheme: dark) {{
+      body {{ background: #111820; color: #f1f4f7; }}
+      .metric, table {{ background: #1b2835; border-color: #2d3f50; }}
+      th, td {{ border-color: #2d3f50; }}
+      th, .label, .small {{ color: #b8c2ca; }}
+      a {{ color: #88c7ef; }}
+    }}
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Яйца</h1>
+    <div>Read-only просмотр сбора, прогноза, исключений несушек и сохраненной погоды.</div>
+    <p>
+      <a href="{escape(_link('/', auth_token))}">Сводка</a> ·
+      <a href="{escape(_link('/feeds', auth_token))}">Корма и склад</a>
+    </p>
+  </header>
+
+  <section class="summary">
+    <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
+    <div class="metric"><span class="label">Сегодня</span><span class="value">{escape(str(eggs.get("today_eggs", 0)))} шт.</span></div>
+    <div class="metric"><span class="label">За 7 дней</span><span class="value">{escape(str(eggs.get("week_eggs", 0)))} шт.</span></div>
+    <div class="metric"><span class="label">За 30 дней</span><span class="value">{escape(str(eggs.get("month_eggs", 0)))} шт.</span></div>
+    <div class="metric"><span class="label">Прогноз на 7 дней</span><span class="value">{escape(str(eggs.get("next_week_forecast", 0)))} шт.</span></div>
+    <div class="metric">
+      <span class="label">Несутся сейчас</span>
+      <span class="value">{escape(str(eggs.get("active_hens", 0)))} из {escape(str(eggs.get("total_hens", 0)))}</span>
+      <div class="small">Исключено: {escape(str(eggs.get("excluded_hens", 0)))}</div>
+    </div>
+  </section>
+
+  <h2>Погода</h2>
+  <p>{escape(weather_text)}</p>
+
+  <h2>История сбора</h2>
+  <table>
+    <thead>
+      <tr><th>Дата</th><th>Яиц</th><th>Несушек</th><th>Исключено</th><th>Комментарий</th></tr>
+    </thead>
+    <tbody>{history_rows}</tbody>
+  </table>
+
+  <h2>Не несутся</h2>
+  <table>
+    <thead>
+      <tr><th>Кур</th><th>Причина</th><th>С</th><th>Ожидаемо до</th></tr>
+    </thead>
+    <tbody>{exclusion_rows}</tbody>
+  </table>
+</main>
+</body>
+</html>"""
+
+
 def _link(path: str, auth_token: str = "") -> str:
     if not auth_token:
         return path
@@ -642,6 +754,30 @@ def _render_history_row(item: dict) -> str:
         f"<td>{escape(str(item.get('type_label', item.get('type', ''))))}</td>"
         f"<td>{escape(_kg(item.get('amount_kg')))}</td>"
         f"<td>{escape(_kg(item.get('balance_after_kg')))}</td>"
+        "</tr>"
+    )
+
+
+def _render_egg_history_row(item: dict) -> str:
+    hens = f"{item.get('active_hens_count', 0)} из {item.get('total_hens_count', 0)}"
+    return (
+        "<tr>"
+        f"<td>{escape(str(item.get('entry_date', '')))}</td>"
+        f"<td>{escape(str(item.get('eggs_count', 0)))}</td>"
+        f"<td>{escape(hens)}</td>"
+        f"<td>{escape(str(item.get('excluded_hens_count', 0)))}</td>"
+        f"<td>{escape(str(item.get('note') or ''))}</td>"
+        "</tr>"
+    )
+
+
+def _render_exclusion_row(item: dict) -> str:
+    return (
+        "<tr>"
+        f"<td>{escape(str(item.get('hens_count', 0)))}</td>"
+        f"<td>{escape(str(item.get('reason', '')))}</td>"
+        f"<td>{escape(str(item.get('started_at') or ''))}</td>"
+        f"<td>{escape(str(item.get('expected_until') or 'не указано'))}</td>"
         "</tr>"
     )
 

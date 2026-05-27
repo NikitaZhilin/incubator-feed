@@ -57,6 +57,10 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(self.client.get("/status").status_code, 401)
         self.assertEqual(self.client.get("/version").status_code, 401)
         self.assertEqual(self.client.get("/summary").status_code, 401)
+        self.assertEqual(self.client.get("/feeds/data").status_code, 401)
+        self.assertEqual(self.client.get("/feeds").status_code, 401)
+        self.assertEqual(self.client.get("/eggs/data").status_code, 401)
+        self.assertEqual(self.client.get("/eggs").status_code, 401)
         self.assertEqual(self.client.get("/").status_code, 401)
 
     def test_protected_pages_accept_bearer_token(self) -> None:
@@ -90,11 +94,15 @@ class WebAppTest(unittest.TestCase):
 
         index_response = self.client.get("/?auth=link-token")
         feeds_response = self.client.get("/feeds?auth=link-token")
+        eggs_response = self.client.get("/eggs?auth=link-token")
 
         self.assertEqual(index_response.status_code, 200)
         self.assertIn("/feeds?auth=link-token", index_response.text)
+        self.assertIn("/eggs?auth=link-token", index_response.text)
         self.assertEqual(feeds_response.status_code, 200)
         self.assertIn("/?auth=link-token", feeds_response.text)
+        self.assertEqual(eggs_response.status_code, 200)
+        self.assertIn("/?auth=link-token", eggs_response.text)
 
     def test_service_status_accepts_x_admin_token(self) -> None:
         self._write_ok_heartbeats()
@@ -181,6 +189,23 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(page_response.status_code, 200)
         self.assertIn("Корма и склад", page_response.text)
         self.assertIn("Смесь для кур", page_response.text)
+
+    def test_eggs_data_and_page_return_egg_snapshot(self) -> None:
+        self._create_household_data()
+
+        data_response = self.client.get("/eggs/data", headers=self._auth())
+        page_response = self.client.get("/eggs", headers=self._auth())
+
+        self.assertEqual(data_response.status_code, 200)
+        payload = data_response.json()
+        self.assertEqual(payload["selected_user_id"], 1)
+        self.assertEqual(payload["eggs"]["today_eggs"], 7)
+        self.assertTrue(payload["history"])
+        self.assertTrue(payload["open_exclusions"])
+        self.assertEqual(payload["eggs"]["weather"]["city"], "Курск")
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("Яйца", page_response.text)
+        self.assertIn("наседка сидит на яйцах", page_response.text)
 
     def test_summary_does_not_create_default_weather_settings(self) -> None:
         UserRepository(self.database).upsert(user_id=1, first_name="Admin")
@@ -299,13 +324,50 @@ class WebAppTest(unittest.TestCase):
             flock_id=flock.id,
             stock_item_id=mix.item.id,
         )
-        EggRepository(self.database).create_entry(
+        eggs = EggRepository(self.database)
+        eggs.create_entry(
             user_id=1,
             entry_date=today,
             eggs_count=7,
             active_hens_count=12,
             total_hens_count=12,
             excluded_hens_count=0,
+        )
+        eggs.create_entry(
+            user_id=1,
+            entry_date=today - timedelta(days=1),
+            eggs_count=6,
+            active_hens_count=11,
+            total_hens_count=12,
+            excluded_hens_count=1,
+        )
+        eggs.create_exclusion(
+            user_id=1,
+            hens_count=1,
+            reason="broody",
+            started_at=today,
+            expected_until=today + timedelta(days=14),
+        )
+        eggs.upsert_daily_weather(
+            user_id=1,
+            weather_date=today,
+            city="Курск",
+            temperature_avg_c=12,
+            temperature_min_c=8,
+            temperature_max_c=17,
+            precipitation_mm=1.5,
+            condition="дождь",
+            provider="test",
+            day_temperature_min_c=11,
+            day_temperature_max_c=17,
+            day_condition="дождь",
+            night_temperature_min_c=8,
+            night_temperature_max_c=13,
+            night_condition="облачно",
+            tomorrow_date=today + timedelta(days=1),
+            tomorrow_temperature_min_c=9,
+            tomorrow_temperature_max_c=18,
+            tomorrow_condition="облачно",
         )
         BatchRepository(self.database).create(
             user_id=1,
