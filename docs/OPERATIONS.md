@@ -122,6 +122,8 @@ python -B scripts/web_app.py
 - `GET /` - HTML-сводка;
 - `GET /feeds` - HTML-страница кормов и склада;
 - `GET /feeds/data` - JSON для страницы кормов и склада;
+- `GET /livestock` - HTML-страница поголовья, стад, состава стад и назначенной смеси;
+- `GET /livestock/data` - JSON для страницы поголовья и стад;
 - `GET /eggs` - HTML-страница учета яиц, прогноза, исключений несушек и погоды;
 - `GET /eggs/data` - JSON для страницы яиц;
 - `GET /incubation` - HTML-страница активных и завершенных партий инкубации;
@@ -134,7 +136,7 @@ python -B scripts/web_app.py
 web-страницы возвращают `503`.
 Для обычных web-страниц заготовлена авторизация по ссылке: если задан
 `WEB_LINK_TOKEN`, страницы `/`, `/feeds`, `/summary`, `/feeds/data`, `/status`,
-`/eggs`, `/eggs/data`, `/incubation`, `/incubation/data` и `/version` можно открыть с `?auth=<WEB_LINK_TOKEN>`.
+`/livestock`, `/livestock/data`, `/eggs`, `/eggs/data`, `/incubation`, `/incubation/data` и `/version` можно открыть с `?auth=<WEB_LINK_TOKEN>`.
 
 ## Rollback
 

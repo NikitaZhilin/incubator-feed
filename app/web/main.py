@@ -9,7 +9,13 @@ from fastapi.responses import HTMLResponse
 
 from app.services.status_probe import build_status_report
 from app.web.config import WebConfig, load_web_config
-from app.web.summary import build_web_eggs, build_web_feeds, build_web_incubation, build_web_summary
+from app.web.summary import (
+    build_web_eggs,
+    build_web_feeds,
+    build_web_incubation,
+    build_web_livestock,
+    build_web_summary,
+)
 
 
 def create_app(config: WebConfig | None = None) -> FastAPI:
@@ -136,6 +142,29 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             timezone_name=current.timezone_name,
         )
         return _render_incubation_page(current, payload, auth_token=auth or "")
+
+    @app.get("/livestock/data", dependencies=[Depends(require_web_access)])
+    def livestock_data(user_id: int | None = Query(default=None)) -> dict:
+        current = app.state.web_config
+        return build_web_livestock(
+            current.db_path,
+            user_id=user_id,
+            timezone_name=current.timezone_name,
+        )
+
+    @app.get("/livestock", response_class=HTMLResponse, dependencies=[Depends(require_web_access)])
+    def livestock_page(
+        request: Request,
+        user_id: int | None = Query(default=None),
+        auth: str | None = Query(default=None),
+    ) -> str:
+        current = request.app.state.web_config
+        payload = build_web_livestock(
+            current.db_path,
+            user_id=user_id,
+            timezone_name=current.timezone_name,
+        )
+        return _render_livestock_page(current, payload, auth_token=auth or "")
 
     @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_web_access)])
     def index(
@@ -318,6 +347,7 @@ def _nav_links(auth_token: str, *, active_path: str) -> str:
     links = (
         ("/", "Сводка"),
         ("/feeds", "Корма и склад"),
+        ("/livestock", "Поголовье и стада"),
         ("/eggs", "Яйца"),
         ("/incubation", "Инкубация"),
     )
@@ -541,6 +571,75 @@ def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = ""
 </html>"""
 
 
+def _render_livestock_page(config: WebConfig, payload: dict, *, auth_token: str = "") -> str:
+    groups = payload.get("bird_groups", [])
+    flocks = payload.get("flocks", [])
+    feeds = payload.get("feeds") or {}
+    bird_groups = feeds.get("bird_groups") or {}
+    group_rows = "\n".join(_render_bird_group_row(item) for item in groups)
+    if not group_rows:
+        group_rows = "<tr><td colspan=\"7\">Поголовье пока не добавлено.</td></tr>"
+    flock_rows = "\n".join(_render_livestock_flock_row(item) for item in flocks)
+    if not flock_rows:
+        flock_rows = "<tr><td colspan=\"6\">Стада пока не созданы.</td></tr>"
+    assignment_rows = "\n".join(
+        _render_flock_assignment_row(flock, assignment)
+        for flock in flocks
+        for assignment in flock.get("assignments", [])
+    )
+    if not assignment_rows:
+        assignment_rows = "<tr><td colspan=\"8\">Назначенной готовой смеси пока нет.</td></tr>"
+    selected_user = payload.get("selected_user_id")
+    selected_user_label = "не выбран" if selected_user is None else str(selected_user)
+    return f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Поголовье и стада</title>
+  {_page_style()}
+</head>
+<body>
+<main>
+{_page_header("Поголовье и стада", "Read-only просмотр групп птиц, состава стад и назначенной смеси.", auth_token, active_path="/livestock")}
+
+  <section class="summary">
+    <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
+    <div class="metric"><span class="label">Всего птиц</span><span class="value">{escape(str(bird_groups.get("birds_total", 0)))}</span></div>
+    <div class="metric"><span class="label">Групп поголовья</span><span class="value">{escape(str(bird_groups.get("total", len(groups))))}</span></div>
+    <div class="metric"><span class="label">Стад</span><span class="value">{escape(str(len(flocks)))}</span></div>
+    <div class="metric"><span class="label">Несушки</span><span class="value">{escape(str(bird_groups.get("hens", 0)))}</span></div>
+    <div class="metric"><span class="label">Цыплята</span><span class="value">{escape(str(bird_groups.get("chicks", 0)))}</span></div>
+  </section>
+
+  <h2>Поголовье</h2>
+  <table>
+    <thead>
+      <tr><th>Группа</th><th>Птиц</th><th>Вид</th><th>Тип</th><th>Роль</th><th>Вывод</th><th>Подсадка</th></tr>
+    </thead>
+    <tbody>{group_rows}</tbody>
+  </table>
+
+  <h2>Стада</h2>
+  <table>
+    <thead>
+      <tr><th>Стадо</th><th>Птиц</th><th>Групп</th><th>Состав</th><th>Расход</th><th>Смесь</th></tr>
+    </thead>
+    <tbody>{flock_rows}</tbody>
+  </table>
+
+  <h2>Назначенная смесь</h2>
+  <table>
+    <thead>
+      <tr><th>Стадо</th><th>Смесь</th><th>Доля</th><th>Расход</th><th>Остаток</th><th>Хватит</th><th>Замесы</th><th>Всего дней</th></tr>
+    </thead>
+    <tbody>{assignment_rows}</tbody>
+  </table>
+</main>
+</body>
+</html>"""
+
+
 def _render_eggs_page(config: WebConfig, payload: dict, *, auth_token: str = "") -> str:
     eggs = payload.get("eggs") or {}
     weather_text = _weather_text((eggs.get("weather") or {}))
@@ -727,6 +826,57 @@ def _render_history_row(item: dict) -> str:
         f"<td>{escape(str(item.get('type_label', item.get('type', ''))))}</td>"
         f"<td>{escape(_kg(item.get('amount_kg')))}</td>"
         f"<td>{escape(_kg(item.get('balance_after_kg')))}</td>"
+        "</tr>"
+    )
+
+
+def _render_bird_group_row(item: dict) -> str:
+    return (
+        "<tr>"
+        f"<td>{escape(str(item.get('name', '')))}</td>"
+        f"<td>{escape(str(item.get('bird_count', 0)))}</td>"
+        f"<td>{escape(str(item.get('species_label', '')))}</td>"
+        f"<td>{escape(str(item.get('group_kind_label', '')))}</td>"
+        f"<td>{escape(str(item.get('role_label', '')))}</td>"
+        f"<td>{escape(str(item.get('hatched_at') or ''))}</td>"
+        f"<td>{escape(str(item.get('joined_at') or ''))}</td>"
+        "</tr>"
+    )
+
+
+def _render_livestock_flock_row(item: dict) -> str:
+    members = item.get("members") or []
+    member_text = "; ".join(
+        f"{member.get('bird_group_name') or 'без названия'}: {member.get('bird_count', 0)}"
+        for member in members
+    )
+    assignments = item.get("assignments") or []
+    feed_text = ", ".join(
+        str(assignment.get("feed_name") or "смесь не указана") for assignment in assignments
+    )
+    return (
+        "<tr>"
+        f"<td>{escape(str(item.get('name', '')))}</td>"
+        f"<td>{escape(str(item.get('birds_total', 0)))}</td>"
+        f"<td>{escape(str(item.get('members_count', 0)))}</td>"
+        f"<td>{escape(member_text or 'нет состава')}</td>"
+        f"<td>{escape(_kg(item.get('daily_usage_kg')))} / день</td>"
+        f"<td>{escape(feed_text or 'не назначена')}</td>"
+        "</tr>"
+    )
+
+
+def _render_flock_assignment_row(flock: dict, assignment: dict) -> str:
+    return (
+        "<tr>"
+        f"<td>{escape(str(flock.get('name', '')))}</td>"
+        f"<td>{escape(str(assignment.get('feed_name') or ''))}</td>"
+        f"<td>{escape(str(assignment.get('share_percent', 100)))}%</td>"
+        f"<td>{escape(_kg(assignment.get('daily_usage_kg')))} / день</td>"
+        f"<td>{escape(_kg(assignment.get('remaining_kg')))}</td>"
+        f"<td>{escape(_days(assignment.get('days_left')))}</td>"
+        f"<td>{escape(str(assignment.get('producible_mix_count', 0)))}</td>"
+        f"<td>{escape(_days(assignment.get('total_days_left')))}</td>"
         "</tr>"
     )
 

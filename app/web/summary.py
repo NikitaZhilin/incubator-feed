@@ -258,6 +258,109 @@ def build_web_incubation(
     }
 
 
+def build_web_livestock(
+    db_path: Path,
+    *,
+    user_id: int | None = None,
+    now: datetime | None = None,
+    timezone_name: str = "Europe/Moscow",
+) -> dict:
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    summary = build_web_summary(
+        db_path,
+        user_id=user_id,
+        now=current,
+        timezone_name=timezone_name,
+    )
+    selected_user_id = summary.get("selected_user_id")
+    if selected_user_id is None or summary.get("db", {}).get("status") != "ok":
+        return {
+            "generated_at": summary.get("generated_at"),
+            "selected_user_id": selected_user_id,
+            "db": summary.get("db"),
+            "feeds": summary.get("feeds"),
+            "bird_groups": [],
+            "flocks": [],
+        }
+
+    database = ReadOnlyDatabase(db_path)
+    feeds_repository = FeedRepository(database)
+    stock_repository = StockRepository(database)
+    feed_service = FeedService(feeds_repository)
+    stock_service = StockService(stock_repository, feeds_repository)
+    groups = [
+        {
+            "id": group.id,
+            "name": group.name,
+            "bird_count": group.bird_count,
+            "species": group.species,
+            "species_label": _species_label(group.species),
+            "group_kind": group.group_kind,
+            "group_kind_label": _bird_group_kind_label(group.group_kind),
+            "role": group.role,
+            "role_label": _bird_role_label(group.role),
+            "hatched_at": group.hatched_at.isoformat() if group.hatched_at else None,
+            "joined_at": group.joined_at.isoformat() if group.joined_at else None,
+            "reserve_percent": round(group.reserve_percent, 1),
+        }
+        for group in feed_service.list_bird_groups(int(selected_user_id))
+    ]
+    flocks = []
+    for report in stock_service.list_flock_reports(int(selected_user_id), now=current):
+        flocks.append(
+            {
+                "id": report.flock.id,
+                "name": report.flock.name,
+                "birds_total": sum(member.bird_count for member in report.members),
+                "members_count": len(report.members),
+                "daily_usage_kg": round(report.daily_usage_kg, 3),
+                "members": [
+                    {
+                        "id": member.id,
+                        "bird_group_id": member.bird_group_id,
+                        "bird_group_name": member.bird_group_name,
+                        "bird_count": member.bird_count,
+                        "group_kind": member.group_kind,
+                        "group_kind_label": _bird_group_kind_label(member.group_kind),
+                        "role": member.role,
+                        "role_label": _bird_role_label(member.role),
+                        "hatched_at": member.hatched_at.isoformat() if member.hatched_at else None,
+                        "joined_at": member.group_joined_at.isoformat()
+                        if member.group_joined_at
+                        else None,
+                    }
+                    for member in report.members
+                ],
+                "assignments": [
+                    {
+                        "feed_name": usage.assignment.stock_item_name,
+                        "share_percent": round(usage.assignment.share_percent, 1),
+                        "daily_usage_kg": round(usage.daily_usage_kg, 3),
+                        "remaining_kg": round(usage.remaining_kg, 3),
+                        "days_left": usage.days_left,
+                        "total_days_left": usage.total_days_left,
+                        "producible_mix_count": usage.producible_mix_count,
+                        "producible_mix_kg": round(usage.producible_mix_kg, 3),
+                        "grain_base_label": usage.grain_base_label,
+                        "limiting_ingredient": usage.limiting_ingredient_name,
+                        "missing_ingredients": list(usage.missing_ingredient_names),
+                    }
+                    for usage in report.assignments
+                ],
+            }
+        )
+    return {
+        "generated_at": summary.get("generated_at"),
+        "selected_user_id": selected_user_id,
+        "db": summary.get("db"),
+        "feeds": summary.get("feeds"),
+        "bird_groups": groups,
+        "flocks": flocks,
+    }
+
+
 class ManagedReadOnlyConnection(sqlite3.Connection):
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         try:
@@ -577,6 +680,32 @@ def _stock_transaction_label(value: str) -> str:
         "mix_input": "ингредиент в замес",
         "mix_output": "готовая смесь",
         "write_off": "списание",
+    }.get(value, value)
+
+
+def _species_label(value: str | None) -> str:
+    return {
+        "chicken": "куры",
+        "goose": "гуси",
+        "duck": "утки",
+        "muscovy_duck": "мускусные утки",
+        "quail": "перепела",
+    }.get(value or "", value or "не указан")
+
+
+def _bird_group_kind_label(value: str) -> str:
+    return {
+        "adult": "взрослая группа",
+        "chicks": "цыплята",
+    }.get(value, value)
+
+
+def _bird_role_label(value: str) -> str:
+    return {
+        "hens": "куры/несушки",
+        "roosters": "петухи",
+        "chicks": "цыплята",
+        "mixed": "смешанная группа",
     }.get(value, value)
 
 

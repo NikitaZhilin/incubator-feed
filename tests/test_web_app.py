@@ -58,6 +58,8 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(self.client.get("/summary").status_code, 401)
         self.assertEqual(self.client.get("/feeds/data").status_code, 401)
         self.assertEqual(self.client.get("/feeds").status_code, 401)
+        self.assertEqual(self.client.get("/livestock/data").status_code, 401)
+        self.assertEqual(self.client.get("/livestock").status_code, 401)
         self.assertEqual(self.client.get("/eggs/data").status_code, 401)
         self.assertEqual(self.client.get("/eggs").status_code, 401)
         self.assertEqual(self.client.get("/incubation/data").status_code, 401)
@@ -93,17 +95,22 @@ class WebAppTest(unittest.TestCase):
 
         index_response = self.client.get("/?auth=link-token")
         feeds_response = self.client.get("/feeds?auth=link-token")
+        livestock_response = self.client.get("/livestock?auth=link-token")
         eggs_response = self.client.get("/eggs?auth=link-token")
         incubation_response = self.client.get("/incubation?auth=link-token")
 
         self.assertEqual(index_response.status_code, 200)
         self.assertIn('aria-label="Основные разделы"', index_response.text)
         self.assertIn("/feeds?auth=link-token", index_response.text)
+        self.assertIn("/livestock?auth=link-token", index_response.text)
         self.assertIn("/eggs?auth=link-token", index_response.text)
         self.assertIn("/incubation?auth=link-token", index_response.text)
         self.assertEqual(feeds_response.status_code, 200)
         self.assertIn('aria-current="page"', feeds_response.text)
         self.assertIn("/?auth=link-token", feeds_response.text)
+        self.assertEqual(livestock_response.status_code, 200)
+        self.assertIn('aria-current="page"', livestock_response.text)
+        self.assertIn("/?auth=link-token", livestock_response.text)
         self.assertEqual(eggs_response.status_code, 200)
         self.assertIn('aria-current="page"', eggs_response.text)
         self.assertIn("/?auth=link-token", eggs_response.text)
@@ -161,6 +168,24 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(page_response.status_code, 200)
         self.assertIn("Корма и склад", page_response.text)
         self.assertIn("Смесь для кур", page_response.text)
+
+    def test_livestock_data_and_page_return_groups_and_flocks(self) -> None:
+        self._create_household_data()
+
+        data_response = self.client.get("/livestock/data", headers=self._auth())
+        page_response = self.client.get("/livestock", headers=self._auth())
+
+        self.assertEqual(data_response.status_code, 200)
+        payload = data_response.json()
+        self.assertEqual(payload["selected_user_id"], 1)
+        self.assertTrue(payload["bird_groups"])
+        self.assertTrue(payload["flocks"])
+        self.assertEqual(payload["bird_groups"][0]["role"], "hens")
+        self.assertTrue(payload["flocks"][0]["members"])
+        self.assertTrue(payload["flocks"][0]["assignments"])
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("Поголовье и стада", page_response.text)
+        self.assertIn("Основное стадо", page_response.text)
 
     def test_eggs_data_and_page_return_egg_snapshot(self) -> None:
         self._create_household_data()
