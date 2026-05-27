@@ -313,18 +313,45 @@ class FeedService:
         user_id: int,
         name: str | None = None,
         bird_count: int | None = None,
+        role: str | None = None,
+        hatched_at=None,
+        joined_at=None,
+        reserve_percent: float | None = None,
     ) -> BirdGroup | None:
+        current = self.feeds.get_bird_group(group_id, user_id)
+        if current is None:
+            return None
         if name is not None:
             name = name.strip()[:255]
             if not name:
                 raise ValueError("Название поголовья не может быть пустым.")
         if bird_count is not None and bird_count <= 0:
             raise ValueError("Количество птиц должно быть больше нуля.")
+        if role is not None:
+            role = role.strip()
+            if role not in {"hens", "roosters", "chicks", "mixed"}:
+                raise ValueError("Неизвестная роль поголовья.")
+            if current.group_kind == "chicks":
+                role = "chicks"
+            elif role == "chicks":
+                raise ValueError("Для взрослого поголовья выберите роль взрослых птиц.")
+        next_hatched_at = current.hatched_at if hatched_at is None else hatched_at
+        next_joined_at = current.joined_at if joined_at is None else joined_at
+        if current.group_kind == "chicks" and next_hatched_at is None:
+            raise ValueError("Для цыплят нужна дата вывода.")
+        if next_joined_at is not None and next_hatched_at is not None and next_joined_at < next_hatched_at:
+            raise ValueError("Дата подсадки не может быть раньше даты вывода.")
+        if reserve_percent is not None and reserve_percent < 0:
+            raise ValueError("Запас не может быть отрицательным.")
         return self.feeds.update_bird_group(
             group_id=group_id,
             user_id=user_id,
             name=name,
             bird_count=bird_count,
+            role=role,
+            hatched_at=hatched_at,
+            joined_at=joined_at,
+            reserve_percent=reserve_percent,
         )
 
     def archive_bird_group(self, group_id: int, user_id: int) -> bool:
@@ -353,6 +380,51 @@ class FeedService:
 
     def archive_flock(self, flock_id: int, user_id: int) -> bool:
         return self.feeds.archive_flock(flock_id, user_id)
+
+    def update_flock(
+        self,
+        *,
+        flock_id: int,
+        user_id: int,
+        name: str | None = None,
+        member_group_ids: list[int] | None = None,
+    ) -> Flock | None:
+        current = self.feeds.get_flock(flock_id, user_id)
+        if current is None or not current.is_active:
+            return None
+        if name is not None:
+            name = name.strip()[:255]
+            if not name:
+                raise ValueError("Название стада не может быть пустым.")
+        if member_group_ids is not None:
+            if not member_group_ids:
+                raise ValueError("В стаде должна быть хотя бы одна группа поголовья.")
+            for group_id in member_group_ids:
+                group = self.feeds.get_bird_group(group_id, user_id)
+                if group is None or not group.is_active:
+                    raise ValueError("Поголовье для стада не найдено.")
+        flock = self.feeds.update_flock(flock_id=flock_id, user_id=user_id, name=name)
+        if flock is None:
+            return None
+        if member_group_ids is not None:
+            current_members = {
+                member.bird_group_id
+                for member in self.feeds.list_flock_members(flock_id, user_id)
+            }
+            next_members = set(member_group_ids)
+            for group_id in current_members - next_members:
+                self.remove_flock_member(
+                    user_id=user_id,
+                    flock_id=flock_id,
+                    bird_group_id=group_id,
+                )
+            for group_id in next_members - current_members:
+                self.add_flock_member(
+                    user_id=user_id,
+                    flock_id=flock_id,
+                    bird_group_id=group_id,
+                )
+        return self.feeds.get_flock(flock_id, user_id)
 
     def add_flock_member(self, *, user_id: int, flock_id: int, bird_group_id: int) -> FlockMember:
         member = self.feeds.add_flock_member(

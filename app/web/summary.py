@@ -7,7 +7,11 @@ import sqlite3
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.services.eggs import EXCLUSION_REASON_LABELS
-from app.services.feed_recipes import DEFAULT_GRAIN_BASE
+from app.services.feed_recipes import (
+    DEFAULT_GRAIN_BASE,
+    list_grain_base_options,
+    load_chicken_mix_recipe,
+)
 from app.services.feeds import FeedService
 from app.services.incubation import IncubationService
 from app.services.stock import STOCK_KIND_LABELS, StockService
@@ -142,6 +146,122 @@ def build_web_feeds(
         "selected_user_id": selected_user_id,
         "db": summary.get("db"),
         "feeds": summary.get("feeds"),
+        "history": history,
+    }
+
+
+def build_web_mix(
+    db_path: Path,
+    *,
+    user_id: int | None = None,
+    now: datetime | None = None,
+    timezone_name: str = "Europe/Moscow",
+) -> dict:
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    summary = build_web_summary(
+        db_path,
+        user_id=user_id,
+        now=current,
+        timezone_name=timezone_name,
+    )
+    selected_user_id = summary.get("selected_user_id")
+    if selected_user_id is None or summary.get("db", {}).get("status") != "ok":
+        return {
+            "generated_at": summary.get("generated_at"),
+            "selected_user_id": selected_user_id,
+            "db": summary.get("db"),
+            "feeds": summary.get("feeds"),
+            "mix": None,
+            "history": [],
+        }
+
+    database = ReadOnlyDatabase(db_path)
+    feeds_repository = FeedRepository(database)
+    stock_repository = StockRepository(database)
+    stock_service = StockService(stock_repository, feeds_repository)
+    best_plan = stock_service.best_available_mix_plan(user_id=int(selected_user_id), now=current)
+    one_cycle_plan = stock_service.plan_mix(
+        user_id=int(selected_user_id),
+        mix_count=1,
+        grain_base=best_plan.grain_base_code,
+        now=current,
+    )
+    possible_mix_count = int(best_plan.max_mix_count)
+    recipe_items = load_chicken_mix_recipe(grain_base=best_plan.grain_base_code)
+    recipe_by_name = {item.name: item for item in recipe_items}
+    total_parts = sum(item.parts for item in recipe_items)
+    variants = [
+        _mix_plan_option_payload(
+            stock_service.plan_mix(
+                user_id=int(selected_user_id),
+                mix_count=1,
+                grain_base=option.code,
+                now=current,
+            )
+        )
+        for option in list_grain_base_options()
+    ]
+    history = []
+    for transaction in stock_service.list_history(int(selected_user_id), limit=60):
+        if transaction.type != "mix_output":
+            continue
+        item = stock_repository.get_item(transaction.stock_item_id, int(selected_user_id))
+        history.append(
+            {
+                "id": transaction.id,
+                "mix_id": transaction.related_mix_id,
+                "item_name": item.name if item else "",
+                "amount_kg": round(transaction.amount_kg, 3),
+                "balance_after_kg": round(transaction.balance_after_kg, 3),
+                "note": transaction.note,
+                "created_at": transaction.created_at.isoformat(),
+            }
+        )
+        if len(history) >= 20:
+            break
+
+    ingredients = []
+    for ingredient in one_cycle_plan.ingredients:
+        recipe_item = recipe_by_name.get(ingredient.name)
+        ingredients.append(
+            {
+                "name": ingredient.name,
+                "group": recipe_item.group if recipe_item else "",
+                "parts": ingredient.parts,
+                "required_kg": round(ingredient.required_kg, 3),
+                "available_kg": round(ingredient.available_kg, 3),
+                "missing_kg": round(ingredient.missing_kg, 3),
+                "stock_item_id": ingredient.stock_item_id,
+                "is_enough": ingredient.missing_kg <= 0,
+            }
+        )
+
+    limiting_ingredient = _mix_limit_ingredient(best_plan)
+    return {
+        "generated_at": summary.get("generated_at"),
+        "selected_user_id": selected_user_id,
+        "db": summary.get("db"),
+        "feeds": summary.get("feeds"),
+        "mix": {
+            "title": one_cycle_plan.title,
+            "recipe_code": one_cycle_plan.recipe_code,
+            "recipe_version": one_cycle_plan.recipe_version,
+            "grain_base_code": one_cycle_plan.grain_base_code,
+            "grain_base_label": one_cycle_plan.grain_base_label,
+            "one_cycle_parts": round(total_parts, 3),
+            "one_cycle_kg": round(one_cycle_plan.output_kg, 3),
+            "possible_mix_count": possible_mix_count,
+            "possible_output_kg": round(best_plan.output_kg * possible_mix_count, 3),
+            "limiting_ingredient": limiting_ingredient.name if limiting_ingredient else None,
+            "missing_ingredients": [
+                ingredient.name for ingredient in best_plan.ingredients if ingredient.missing_kg > 0
+            ],
+            "ingredients": ingredients,
+            "grain_base_options": variants,
+            "quick_mix_counts": list(range(1, min(possible_mix_count, 10) + 1)),
+        },
         "history": history,
     }
 
@@ -671,6 +791,20 @@ def _mix_limit_ingredient(plan):
     if not candidates:
         return None
     return min(candidates, key=lambda item: item.available_kg / item.required_kg)
+
+
+def _mix_plan_option_payload(plan) -> dict:
+    limiting_ingredient = _mix_limit_ingredient(plan)
+    return {
+        "code": plan.grain_base_code,
+        "label": plan.grain_base_label,
+        "possible_mix_count": int(plan.max_mix_count),
+        "one_cycle_kg": round(plan.output_kg, 3),
+        "limiting_ingredient": limiting_ingredient.name if limiting_ingredient else None,
+        "missing_ingredients": [
+            ingredient.name for ingredient in plan.ingredients if ingredient.missing_kg > 0
+        ],
+    }
 
 
 def _stock_transaction_label(value: str) -> str:

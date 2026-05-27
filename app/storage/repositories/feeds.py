@@ -471,6 +471,34 @@ class FeedRepository:
             ).fetchall()
         return [self._flock_from_row(row) for row in rows]
 
+    def update_flock(
+        self,
+        *,
+        flock_id: int,
+        user_id: int,
+        name: str | None = None,
+    ) -> Flock | None:
+        current = self.get_flock(flock_id, user_id)
+        if current is None:
+            return None
+        now = datetime.now(timezone.utc).isoformat()
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                UPDATE flocks
+                SET name = ?,
+                    updated_at = ?
+                WHERE id = ? AND user_id = ?
+                """,
+                (
+                    name if name is not None else current.name,
+                    now,
+                    flock_id,
+                    user_id,
+                ),
+            )
+        return self.get_flock(flock_id, user_id)
+
     def archive_flock(self, flock_id: int, user_id: int) -> bool:
         now = datetime.now(timezone.utc).isoformat()
         with self.database.connect() as connection:

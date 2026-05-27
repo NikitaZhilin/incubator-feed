@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import unittest
+from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 
@@ -40,6 +41,10 @@ class WebAppTest(unittest.TestCase):
             github_url="https://github.com/example/project",
             changelog_url="https://github.com/example/project/blob/main/docs/CHANGELOG.md",
             link_token="link-token",
+            release_notes="Добавлена web-страница смеси; Добавлен экран о боте",
+            release_importance="minor",
+            release_notice_enabled=False,
+            admin_startup_notice_mode="once_per_deploy",
         )
         self.client = TestClient(create_app(self.config))
 
@@ -58,13 +63,58 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(self.client.get("/summary").status_code, 401)
         self.assertEqual(self.client.get("/feeds/data").status_code, 401)
         self.assertEqual(self.client.get("/feeds").status_code, 401)
+        self.assertEqual(self.client.get("/mix/data").status_code, 401)
+        self.assertEqual(self.client.get("/mix").status_code, 401)
+        self.assertEqual(self.client.get("/mix/confirm").status_code, 401)
         self.assertEqual(self.client.get("/livestock/data").status_code, 401)
         self.assertEqual(self.client.get("/livestock").status_code, 401)
         self.assertEqual(self.client.get("/eggs/data").status_code, 401)
         self.assertEqual(self.client.get("/eggs").status_code, 401)
         self.assertEqual(self.client.get("/incubation/data").status_code, 401)
         self.assertEqual(self.client.get("/incubation").status_code, 401)
+        self.assertEqual(self.client.get("/about/data").status_code, 401)
+        self.assertEqual(self.client.get("/about").status_code, 401)
         self.assertEqual(self.client.get("/").status_code, 401)
+        self.assertEqual(
+            self.client.post("/eggs/entries", data={"eggs_count": "1"}).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.post("/stock/purchases", data={"name": "Премикс", "amount": "1 кг"}).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.post("/feeds/mixes", data={"mix_count": "1"}).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.post("/bird-groups", data={"name": "Несушки", "bird_count": "1"}).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.post("/flocks", data={"name": "Основное стадо"}).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.patch("/bird-groups/1", data={"name": "Несушки", "bird_count": "1"}).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.patch("/flocks/1", data={"name": "Основное стадо"}).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.post("/flock-feed-assignments", data={"flock_id": "1"}).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.post("/settings/weather", data={"city": "Курск"}).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.patch("/settings/sections", data={"sections": "feeds"}).status_code,
+            401,
+        )
 
     def test_protected_pages_accept_bearer_token(self) -> None:
         self._write_ok_heartbeats()
@@ -95,19 +145,26 @@ class WebAppTest(unittest.TestCase):
 
         index_response = self.client.get("/?auth=link-token")
         feeds_response = self.client.get("/feeds?auth=link-token")
+        mix_response = self.client.get("/mix?auth=link-token")
         livestock_response = self.client.get("/livestock?auth=link-token")
         eggs_response = self.client.get("/eggs?auth=link-token")
         incubation_response = self.client.get("/incubation?auth=link-token")
+        about_response = self.client.get("/about?auth=link-token")
 
         self.assertEqual(index_response.status_code, 200)
         self.assertIn('aria-label="Основные разделы"', index_response.text)
         self.assertIn("/feeds?auth=link-token", index_response.text)
+        self.assertIn("/mix?auth=link-token", index_response.text)
         self.assertIn("/livestock?auth=link-token", index_response.text)
         self.assertIn("/eggs?auth=link-token", index_response.text)
         self.assertIn("/incubation?auth=link-token", index_response.text)
+        self.assertIn("/about?auth=link-token", index_response.text)
         self.assertEqual(feeds_response.status_code, 200)
         self.assertIn('aria-current="page"', feeds_response.text)
         self.assertIn("/?auth=link-token", feeds_response.text)
+        self.assertEqual(mix_response.status_code, 200)
+        self.assertIn('aria-current="page"', mix_response.text)
+        self.assertIn("/?auth=link-token", mix_response.text)
         self.assertEqual(livestock_response.status_code, 200)
         self.assertIn('aria-current="page"', livestock_response.text)
         self.assertIn("/?auth=link-token", livestock_response.text)
@@ -117,6 +174,9 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(incubation_response.status_code, 200)
         self.assertIn('aria-current="page"', incubation_response.text)
         self.assertIn("/?auth=link-token", incubation_response.text)
+        self.assertEqual(about_response.status_code, 200)
+        self.assertIn('aria-current="page"', about_response.text)
+        self.assertIn("/?auth=link-token", about_response.text)
 
     def test_version_returns_release_metadata(self) -> None:
         response = self.client.get("/version", headers=self._auth())
@@ -126,6 +186,8 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(payload["version"], "0.1.3-beta")
         self.assertEqual(payload["commit"], "abc123")
         self.assertEqual(payload["environment"], "test")
+        self.assertEqual(payload["release_importance"], "minor")
+        self.assertEqual(payload["release_notes"], ["Добавлена web-страница смеси", "Добавлен экран о боте"])
 
     def test_index_returns_html_summary(self) -> None:
         self._write_ok_heartbeats()
@@ -167,7 +229,88 @@ class WebAppTest(unittest.TestCase):
         self.assertTrue(payload["history"])
         self.assertEqual(page_response.status_code, 200)
         self.assertIn("Корма и склад", page_response.text)
+        self.assertIn("Добавить покупку", page_response.text)
         self.assertIn("Смесь для кур", page_response.text)
+
+    def test_stock_purchase_can_be_created_from_web_form(self) -> None:
+        self._create_household_data()
+
+        post_response = self.client.post(
+            "/stock/purchases?auth=link-token",
+            data={
+                "user_id": "1",
+                "name": "Премикс web",
+                "kind": "ingredient",
+                "amount": "2 пачки 500 гр",
+                "note": "web покупка",
+            },
+            follow_redirects=False,
+        )
+        data_response = self.client.get("/feeds/data", headers=self._auth())
+        page_response = self.client.get(post_response.headers["location"], headers=self._auth())
+
+        self.assertEqual(post_response.status_code, 303)
+        self.assertIn("/feeds?auth=link-token", post_response.headers["location"])
+        self.assertEqual(data_response.status_code, 200)
+        payload = data_response.json()
+        stock_item = next(
+            item for item in payload["feeds"]["stock_items"] if item["name"] == "Премикс web"
+        )
+        self.assertEqual(stock_item["remaining_kg"], 1.0)
+        self.assertEqual(payload["history"][0]["item_name"], "Премикс web")
+        self.assertEqual(payload["history"][0]["note"], "web покупка")
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("Покупка добавлена", page_response.text)
+
+    def test_mix_data_and_page_return_recipe_and_history(self) -> None:
+        self._create_household_data()
+
+        data_response = self.client.get("/mix/data", headers=self._auth())
+        page_response = self.client.get("/mix", headers=self._auth())
+
+        self.assertEqual(data_response.status_code, 200)
+        payload = data_response.json()
+        self.assertEqual(payload["selected_user_id"], 1)
+        self.assertEqual(payload["mix"]["grain_base_label"], "Зерносмесь")
+        self.assertGreater(payload["mix"]["possible_mix_count"], 0)
+        self.assertTrue(payload["mix"]["ingredients"])
+        self.assertTrue(payload["mix"]["grain_base_options"])
+        self.assertTrue(payload["history"])
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("Формула одного замеса", page_response.text)
+        self.assertIn("Создать замес", page_response.text)
+        self.assertIn("Зерновая смесь для кур несушек", page_response.text)
+
+    def test_mix_can_be_confirmed_and_created_from_web_form(self) -> None:
+        self._create_household_data()
+
+        confirm_response = self.client.get(
+            "/mix/confirm?auth=link-token&user_id=1&mix_count=1&grain_base=layer_grain_mix"
+        )
+        post_response = self.client.post(
+            "/feeds/mixes?auth=link-token",
+            data={
+                "user_id": "1",
+                "mix_count": "1",
+                "grain_base": "layer_grain_mix",
+            },
+            follow_redirects=False,
+        )
+        data_response = self.client.get("/mix/data", headers=self._auth())
+        page_response = self.client.get(post_response.headers["location"], headers=self._auth())
+
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertIn("Подтверждение замеса", confirm_response.text)
+        self.assertIn("Создать замес и обновить склад", confirm_response.text)
+        self.assertEqual(post_response.status_code, 303)
+        self.assertIn("/mix?auth=link-token", post_response.headers["location"])
+        self.assertEqual(data_response.status_code, 200)
+        payload = data_response.json()
+        self.assertTrue(payload["history"])
+        self.assertIsNotNone(payload["history"][0]["mix_id"])
+        self.assertGreater(payload["history"][0]["amount_kg"], 0)
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("Замес создан", page_response.text)
 
     def test_livestock_data_and_page_return_groups_and_flocks(self) -> None:
         self._create_household_data()
@@ -185,7 +328,152 @@ class WebAppTest(unittest.TestCase):
         self.assertTrue(payload["flocks"][0]["assignments"])
         self.assertEqual(page_response.status_code, 200)
         self.assertIn("Поголовье и стада", page_response.text)
+        self.assertIn("Добавить поголовье", page_response.text)
+        self.assertIn("Создать стадо", page_response.text)
         self.assertIn("Основное стадо", page_response.text)
+
+    def test_bird_group_can_be_created_from_web_form(self) -> None:
+        self._create_household_data()
+        today = datetime.now(ZoneInfo("Europe/Moscow")).date()
+
+        post_response = self.client.post(
+            "/bird-groups?auth=link-token",
+            data={
+                "user_id": "1",
+                "name": "Цыплята май",
+                "bird_count": "11",
+                "species": "chicken",
+                "group_kind": "chicks",
+                "role": "chicks",
+                "hatched_at": today.isoformat(),
+                "joined_at": "",
+                "reserve_percent": "10",
+            },
+            follow_redirects=False,
+        )
+        data_response = self.client.get("/livestock/data", headers=self._auth())
+        page_response = self.client.get(post_response.headers["location"], headers=self._auth())
+
+        self.assertEqual(post_response.status_code, 303)
+        self.assertIn("/livestock?auth=link-token", post_response.headers["location"])
+        self.assertEqual(data_response.status_code, 200)
+        payload = data_response.json()
+        created = next(
+            item for item in payload["bird_groups"] if item["name"] == "Цыплята май"
+        )
+        self.assertEqual(created["bird_count"], 11)
+        self.assertEqual(created["group_kind"], "chicks")
+        self.assertEqual(created["role"], "chicks")
+        self.assertEqual(created["reserve_percent"], 10)
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("Поголовье добавлено", page_response.text)
+
+    def test_bird_group_can_be_updated_from_web_form(self) -> None:
+        self._create_household_data()
+        data_before = self.client.get("/livestock/data", headers=self._auth()).json()
+        group_id = data_before["bird_groups"][0]["id"]
+
+        post_response = self.client.patch(
+            f"/bird-groups/{group_id}?auth=link-token",
+            data={
+                "user_id": "1",
+                "name": "Несушки обновлено",
+                "bird_count": "13",
+                "role": "hens",
+                "hatched_at": "",
+                "joined_at": "",
+                "reserve_percent": "0",
+            },
+            follow_redirects=False,
+        )
+        data_response = self.client.get("/livestock/data", headers=self._auth())
+        page_response = self.client.get(post_response.headers["location"], headers=self._auth())
+
+        self.assertEqual(post_response.status_code, 303)
+        payload = data_response.json()
+        updated = next(item for item in payload["bird_groups"] if item["id"] == group_id)
+        self.assertEqual(updated["name"], "Несушки обновлено")
+        self.assertEqual(updated["bird_count"], 13)
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("Поголовье обновлено", page_response.text)
+
+    def test_flock_can_be_created_from_web_form(self) -> None:
+        self._create_household_data()
+        data_before = self.client.get("/livestock/data", headers=self._auth()).json()
+        group_id = data_before["bird_groups"][0]["id"]
+
+        post_response = self.client.post(
+            "/flocks?auth=link-token",
+            data={
+                "user_id": "1",
+                "name": "Молодняк",
+                "member_group_ids": str(group_id),
+            },
+            follow_redirects=False,
+        )
+        data_response = self.client.get("/livestock/data", headers=self._auth())
+        page_response = self.client.get(post_response.headers["location"], headers=self._auth())
+
+        self.assertEqual(post_response.status_code, 303)
+        self.assertIn("/livestock?auth=link-token", post_response.headers["location"])
+        self.assertEqual(data_response.status_code, 200)
+        payload = data_response.json()
+        created = next(item for item in payload["flocks"] if item["name"] == "Молодняк")
+        self.assertEqual(created["members_count"], 1)
+        self.assertEqual(created["members"][0]["bird_group_id"], group_id)
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("Стадо создано", page_response.text)
+
+    def test_flock_can_be_updated_from_web_form(self) -> None:
+        self._create_household_data()
+        data_before = self.client.get("/livestock/data", headers=self._auth()).json()
+        flock_id = data_before["flocks"][0]["id"]
+        group_id = data_before["bird_groups"][0]["id"]
+
+        post_response = self.client.patch(
+            f"/flocks/{flock_id}?auth=link-token",
+            data={
+                "user_id": "1",
+                "name": "Стадо web",
+                "member_group_ids": str(group_id),
+            },
+            follow_redirects=False,
+        )
+        data_response = self.client.get("/livestock/data", headers=self._auth())
+        page_response = self.client.get(post_response.headers["location"], headers=self._auth())
+
+        self.assertEqual(post_response.status_code, 303)
+        payload = data_response.json()
+        updated = next(item for item in payload["flocks"] if item["id"] == flock_id)
+        self.assertEqual(updated["name"], "Стадо web")
+        self.assertEqual(updated["members"][0]["bird_group_id"], group_id)
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("Стадо обновлено", page_response.text)
+
+    def test_flock_feed_can_be_assigned_from_web_form(self) -> None:
+        self._create_household_data()
+        data_before = self.client.get("/livestock/data", headers=self._auth()).json()
+        flock_id = data_before["flocks"][0]["id"]
+        mix_id = next(
+            item["id"]
+            for item in data_before["feeds"]["stock_items"]
+            if item["kind"] == "finished_mix"
+        )
+
+        post_response = self.client.post(
+            "/flock-feed-assignments?auth=link-token",
+            data={
+                "user_id": "1",
+                "flock_id": str(flock_id),
+                "stock_item_id": str(mix_id),
+            },
+            follow_redirects=False,
+        )
+        page_response = self.client.get(post_response.headers["location"], headers=self._auth())
+
+        self.assertEqual(post_response.status_code, 303)
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("Смесь назначена стаду", page_response.text)
 
     def test_eggs_data_and_page_return_egg_snapshot(self) -> None:
         self._create_household_data()
@@ -202,7 +490,50 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(payload["eggs"]["weather"]["city"], "Курск")
         self.assertEqual(page_response.status_code, 200)
         self.assertIn("Яйца", page_response.text)
+        self.assertIn("Добавить сбор", page_response.text)
         self.assertIn("наседка сидит на яйцах", page_response.text)
+
+    def test_egg_entry_can_be_created_from_web_form(self) -> None:
+        self._create_household_data()
+
+        post_response = self.client.post(
+            "/eggs/entries?auth=link-token",
+            data={
+                "user_id": "1",
+                "entry_day": "today",
+                "eggs_count": "4",
+                "note": "вечерний сбор",
+            },
+            follow_redirects=False,
+        )
+        data_response = self.client.get("/eggs/data", headers=self._auth())
+        page_response = self.client.get(post_response.headers["location"], headers=self._auth())
+
+        self.assertEqual(post_response.status_code, 303)
+        self.assertIn("/eggs?auth=link-token", post_response.headers["location"])
+        self.assertEqual(data_response.status_code, 200)
+        payload = data_response.json()
+        self.assertEqual(payload["eggs"]["today_eggs"], 11)
+        self.assertEqual(payload["history"][0]["eggs_count"], 4)
+        self.assertEqual(payload["history"][0]["note"], "вечерний сбор")
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("Запись добавлена", page_response.text)
+
+    def test_weather_city_can_be_updated_from_web_form(self) -> None:
+        self._create_household_data()
+
+        post_response = self.client.post(
+            "/settings/weather?auth=link-token",
+            data={"user_id": "1", "city": "Яценовская"},
+            follow_redirects=False,
+        )
+        settings = EggRepository(self.database).get_weather_settings(1)
+        page_response = self.client.get(post_response.headers["location"], headers=self._auth())
+
+        self.assertEqual(post_response.status_code, 303)
+        self.assertEqual(settings.city, "Яценовская")
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("Город погоды обновлен", page_response.text)
 
     def test_incubation_data_and_page_return_batch_snapshot(self) -> None:
         self._create_household_data()
@@ -221,6 +552,50 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(page_response.status_code, 200)
         self.assertIn("Инкубация", page_response.text)
         self.assertIn("Куриные яйца", page_response.text)
+
+    def test_about_data_and_page_return_release_settings_and_runtime(self) -> None:
+        self._write_ok_heartbeats()
+        self._create_household_data()
+
+        data_response = self.client.get("/about/data", headers=self._auth())
+        page_response = self.client.get("/about", headers=self._auth())
+
+        self.assertEqual(data_response.status_code, 200)
+        payload = data_response.json()
+        self.assertEqual(payload["selected_user_id"], 1)
+        self.assertEqual(payload["release"]["version"], "0.1.3-beta")
+        self.assertEqual(payload["release"]["user_release_messages"], "off")
+        self.assertEqual(payload["settings"]["timezone"], "Europe/Moscow")
+        self.assertEqual(payload["runtime"]["status"], "ok")
+        self.assertTrue(payload["runtime"]["heartbeats"])
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("О боте", page_response.text)
+        self.assertIn("Добавлена web-страница смеси", page_response.text)
+        self.assertIn("GitHub", page_response.text)
+
+    def test_sections_can_be_updated_from_web_form(self) -> None:
+        self._write_ok_heartbeats()
+        self._create_household_data()
+
+        post_response = self.client.patch(
+            "/settings/sections?auth=link-token",
+            data={
+                "user_id": "1",
+                "sections": ["feeds", "eggs"],
+            },
+            follow_redirects=False,
+        )
+        settings = UserRepository(self.database).get_settings(1)
+        page_response = self.client.get(post_response.headers["location"], headers=self._auth())
+
+        self.assertEqual(post_response.status_code, 303)
+        self.assertFalse(settings["notify_incubation"])
+        self.assertTrue(settings["notify_feed"])
+        self.assertTrue(settings["notify_eggs"])
+        self.assertFalse(settings["notify_post_hatch_care"])
+        self.assertFalse(settings["notify_service"])
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("Разделы Telegram-бота обновлены", page_response.text)
 
     def test_summary_does_not_create_default_weather_settings(self) -> None:
         UserRepository(self.database).upsert(user_id=1, first_name="Admin")
@@ -315,7 +690,7 @@ class WebAppTest(unittest.TestCase):
         return {"Authorization": "Bearer secret-token"}
 
     def _create_household_data(self) -> None:
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(ZoneInfo("Europe/Moscow")).date()
         UserRepository(self.database).upsert(user_id=1, first_name="Admin")
         feeds = FeedRepository(self.database)
         feed_service = FeedService(feeds)
@@ -339,6 +714,55 @@ class WebAppTest(unittest.TestCase):
             flock_id=flock.id,
             stock_item_id=mix.item.id,
         )
+        stock_service.add_purchase(
+            user_id=1,
+            name="Кукуруза дроблёная",
+            kind="ingredient",
+            amount_kg=60,
+        )
+        stock_service.add_purchase(
+            user_id=1,
+            name="Зерносмесь для кур несушек",
+            kind="ingredient",
+            amount_kg=40,
+        )
+        stock_service.add_purchase(
+            user_id=1,
+            name="Ячмень",
+            kind="ingredient",
+            amount_kg=40,
+        )
+        stock_service.add_purchase(
+            user_id=1,
+            name="Комбикорм Щигровский",
+            kind="ingredient",
+            amount_kg=25,
+        )
+        stock_service.add_purchase(
+            user_id=1,
+            name="Мясокостная мука",
+            kind="ingredient",
+            amount_kg=5,
+        )
+        stock_service.add_purchase(
+            user_id=1,
+            name="Рыбная мука",
+            kind="ingredient",
+            amount_kg=5,
+        )
+        stock_service.add_purchase(
+            user_id=1,
+            name="Ракушка дроблёная мелкая",
+            kind="ingredient",
+            amount_kg=10,
+        )
+        stock_service.add_purchase(
+            user_id=1,
+            name="Премикс",
+            kind="ingredient",
+            amount_kg=3,
+        )
+        stock_service.produce_mix(user_id=1, mix_count=1, grain_base="layer_grain_mix")
         eggs = EggRepository(self.database)
         eggs.create_entry(
             user_id=1,

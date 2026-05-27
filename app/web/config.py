@@ -24,6 +24,10 @@ class WebConfig:
     changelog_url: str
     timezone_name: str = "Europe/Moscow"
     link_token: str = ""
+    release_notes: str = ""
+    release_importance: str = "minor"
+    release_notice_enabled: bool = False
+    admin_startup_notice_mode: str = "once_per_deploy"
 
 
 def load_web_config() -> WebConfig:
@@ -50,7 +54,14 @@ def load_web_config() -> WebConfig:
         db_path=db_path,
         environment=environment,
         release_version=release_version or APP_VERSION,
+        release_notes=os.getenv("RELEASE_NOTES", "").strip(),
         release_channel=os.getenv("RELEASE_CHANNEL", "beta").strip() or "beta",
+        release_importance=os.getenv("RELEASE_IMPORTANCE", "minor").strip().lower() or "minor",
+        release_notice_enabled=_parse_bool("RELEASE_NOTICE_ENABLED", default=False),
+        admin_startup_notice_mode=os.getenv(
+            "ADMIN_STARTUP_NOTICE_MODE", "once_per_deploy"
+        ).strip()
+        or "once_per_deploy",
         release_deployed_at=os.getenv("RELEASE_DEPLOYED_AT", "").strip(),
         release_commit=os.getenv("RELEASE_COMMIT", "").strip(),
         github_url=os.getenv("GITHUB_URL", default_github_url).strip() or default_github_url,

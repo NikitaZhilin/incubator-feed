@@ -122,21 +122,37 @@ python -B scripts/web_app.py
 - `GET /` - HTML-сводка;
 - `GET /feeds` - HTML-страница кормов и склада;
 - `GET /feeds/data` - JSON для страницы кормов и склада;
+- `POST /stock/purchases` - добавление покупки на склад;
+- `GET /mix` - HTML-страница формулы смеси, доступных замесов и истории готовой смеси;
+- `GET /mix/data` - JSON для страницы смеси;
+- `GET /mix/confirm` - HTML-подтверждение замеса перед списанием ингредиентов;
+- `POST /feeds/mixes` - создание замеса, списание ингредиентов и добавление готовой смеси;
 - `GET /livestock` - HTML-страница поголовья, стад, состава стад и назначенной смеси;
 - `GET /livestock/data` - JSON для страницы поголовья и стад;
+- `POST /bird-groups` - добавление группы поголовья;
+- `PATCH /bird-groups/{id}` - редактирование группы поголовья;
+- `POST /flocks` - создание стада из групп поголовья;
+- `PATCH /flocks/{id}` - редактирование стада и его состава;
+- `POST /flock-feed-assignments` - назначение готовой смеси стаду;
 - `GET /eggs` - HTML-страница учета яиц, прогноза, исключений несушек и погоды;
 - `GET /eggs/data` - JSON для страницы яиц;
+- `POST /eggs/entries` - добавление записи сбора яиц за сегодня или вчера;
+- `POST /settings/weather` - изменение города погоды;
 - `GET /incubation` - HTML-страница активных и завершенных партий инкубации;
 - `GET /incubation/data` - JSON для страницы инкубации;
+- `GET /about` - HTML-страница версии, деплоя, ссылок, настроек и runtime-статуса;
+- `GET /about/data` - JSON для страницы `О боте`;
 - `GET /status` - JSON-статус на базе read-only status probe;
 - `GET /summary` - JSON-сводка хозяйства: яйца, корма, стада, инкубация;
-- `GET /version` - версия, окружение, commit и ссылки.
+- `GET /version` - версия, окружение, commit и ссылки;
+- `PATCH /settings/sections` - включение и выключение разделов Telegram-бота.
 
 Если не задан ни `WEB_ADMIN_TOKEN`, ни `WEB_LINK_TOKEN`, обычные закрытые
 web-страницы возвращают `503`.
 Для обычных web-страниц заготовлена авторизация по ссылке: если задан
-`WEB_LINK_TOKEN`, страницы `/`, `/feeds`, `/summary`, `/feeds/data`, `/status`,
-`/livestock`, `/livestock/data`, `/eggs`, `/eggs/data`, `/incubation`, `/incubation/data` и `/version` можно открыть с `?auth=<WEB_LINK_TOKEN>`.
+`WEB_LINK_TOKEN`, страницы `/`, `/feeds`, `/feeds/data`, `/mix`, `/mix/data`,
+`/summary`, `/status`, `/livestock`, `/livestock/data`, `/bird-groups`, `/flocks`, `/flock-feed-assignments`, `/eggs`, `/eggs/data`,
+`/settings/weather`, `/settings/sections`, `/incubation`, `/incubation/data`, `/about`, `/about/data` и `/version` можно открыть с `?auth=<WEB_LINK_TOKEN>`.
 
 ## Rollback
 
