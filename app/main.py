@@ -154,7 +154,11 @@ async def main() -> None:
                 )
             except Exception:
                 logging.exception("Release notice failed")
-        if should_send_admin_startup_notice(config):
+        if config.admin_startup_notice_mode == "off":
+            logging.info("Admin startup notice skipped: ADMIN_STARTUP_NOTICE_MODE=off")
+        elif not config.admin_ids:
+            logging.warning("Admin startup notice skipped: ADMIN_IDS is empty")
+        elif should_send_admin_startup_notice(config):
             try:
                 result = await AdminStartupNotificationService(
                     bot=bot,

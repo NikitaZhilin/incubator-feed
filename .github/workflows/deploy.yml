@@ -120,6 +120,16 @@ jobs:
           RELEASE_NOTES="$RELEASE_NOTES_INPUT"
           RELEASE_COMMIT="${GITHUB_SHA::12}"
           RELEASE_DEPLOYED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          if [ -z "$ADMIN_IDS" ]; then
+            ADMIN_IDS="$(ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "
+              if [ -s '$DEPLOY_PATH/.env.prod' ]; then
+                grep -E '^ADMIN_IDS=' '$DEPLOY_PATH/.env.prod' | tail -n 1 | cut -d= -f2-
+              fi
+            " | tr -d '\r')"
+          fi
+          if [ -z "$ADMIN_IDS" ]; then
+            echo "ADMIN_IDS is empty; admin startup notices cannot be sent." >&2
+          fi
           if [ "$SKIP_RELEASE_NOTICE" = "true" ]; then
             RELEASE_NOTICE_ENABLED="0"
             RELEASE_VERSION=""
