@@ -1,13 +1,25 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from html import escape
+import json
 import secrets
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
 from app.services.status_probe import build_status_report
 from app.web.config import WebConfig, load_web_config
+from app.web.summary import build_web_summary
+
+
+class RestartRequest(BaseModel):
+    target: str = "all"
+    confirm: str
+    requested_by: str = ""
+    reason: str = ""
 
 
 def create_app(config: WebConfig | None = None) -> FastAPI:
@@ -18,6 +30,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
     def require_admin(
         authorization: str | None = Header(default=None),
         x_web_token: str | None = Header(default=None),
+        x_admin_token: str | None = Header(default=None),
     ) -> None:
         expected = app.state.web_config.admin_token
         if not expected:
@@ -25,7 +38,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="WEB_ADMIN_TOKEN is not configured.",
             )
-        provided = _extract_token(authorization, x_web_token)
+        provided = _extract_token(authorization, x_web_token, x_admin_token)
         if not provided or not secrets.compare_digest(provided, expected):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -41,6 +54,31 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
     def status_report() -> dict:
         return build_status_report(app.state.web_config.db_path)
 
+    @app.get("/admin/service-status", dependencies=[Depends(require_admin)])
+    def service_status() -> dict:
+        report = build_status_report(app.state.web_config.db_path)
+        services = {
+            _status_bot_service_name(item): {
+                "status": item.get("status", "unknown"),
+                "last_seen_at": item.get("last_seen_at"),
+                "last_error": item.get("last_error"),
+                "required": item.get("required", True),
+                "stale": item.get("stale", True),
+                "seconds_since_seen": item.get("seconds_since_seen"),
+            }
+            for item in report.get("heartbeats", [])
+        }
+        return {
+            "status": report.get("status", "unknown"),
+            "version": report.get("version", ""),
+            "generated_at": report.get("generated_at"),
+            "database": report.get("db", {}).get("status", "unknown"),
+            "db": report.get("db", {}),
+            "last_errors_count": report.get("errors", {}).get("critical_total", 0),
+            "heartbeat_down_after_seconds": report.get("heartbeat_down_after_seconds", 120),
+            "services": services,
+        }
+
     @app.get("/version", dependencies=[Depends(require_admin)])
     def version() -> dict:
         current = app.state.web_config
@@ -54,16 +92,74 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             "changelog_url": current.changelog_url,
         }
 
+    @app.post("/admin/restart", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(require_admin)])
+    def restart(payload: RestartRequest) -> dict:
+        allowed_targets = {"bot", "worker", "all"}
+        target = payload.target.strip().lower()
+        if payload.confirm != "restart:incubator":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid restart confirmation.")
+        if target not in allowed_targets:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid restart target.")
+
+        operation_id = f"incubator-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:8]}"
+        request_dir = app.state.web_config.restart_request_dir
+        try:
+            request_dir.mkdir(parents=True, exist_ok=True)
+            request_path = request_dir / f"{operation_id}.json"
+            tmp_path = request_path.with_suffix(".tmp")
+            request_payload = {
+                "bot_key": "incubator",
+                "target": target,
+                "operation_id": operation_id,
+                "requested_by": payload.requested_by[:120],
+                "reason": payload.reason[:500],
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            tmp_path.write_text(json.dumps(request_payload, ensure_ascii=False), encoding="utf-8")
+            tmp_path.replace(request_path)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Restart request storage is unavailable: {exc}",
+            ) from exc
+
+        return {
+            "status": "accepted",
+            "operation_id": operation_id,
+            "target": target,
+            "message": "restart scheduled",
+        }
+
+    @app.get("/summary", dependencies=[Depends(require_admin)])
+    def summary(user_id: int | None = Query(default=None)) -> dict:
+        current = app.state.web_config
+        return build_web_summary(
+            current.db_path,
+            user_id=user_id,
+            timezone_name=current.timezone_name,
+        )
+
     @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_admin)])
-    def index(request: Request) -> str:
+    def index(request: Request, user_id: int | None = Query(default=None)) -> str:
         current = request.app.state.web_config
         report = build_status_report(current.db_path)
-        return _render_index(current, report)
+        summary_payload = build_web_summary(
+            current.db_path,
+            user_id=user_id,
+            timezone_name=current.timezone_name,
+        )
+        return _render_index(current, report, summary_payload)
 
     return app
 
 
-def _extract_token(authorization: str | None, x_web_token: str | None) -> str:
+def _extract_token(
+    authorization: str | None,
+    x_web_token: str | None,
+    x_admin_token: str | None = None,
+) -> str:
+    if x_admin_token:
+        return x_admin_token.strip()
     if x_web_token:
         return x_web_token.strip()
     if not authorization:
@@ -74,14 +170,38 @@ def _extract_token(authorization: str | None, x_web_token: str | None) -> str:
     return token.strip()
 
 
-def _render_index(config: WebConfig, report: dict) -> str:
+def _status_bot_service_name(item: dict) -> str:
+    service_name = str(item.get("service_name", ""))
+    return {
+        "polling_bot": "bot",
+        "reminder_runner": "worker",
+    }.get(service_name, service_name)
+
+
+def _render_index(config: WebConfig, report: dict, summary: dict) -> str:
     status_value = escape(str(report.get("status", "unknown")))
     db_status = escape(str(report.get("db", {}).get("status", "unknown")))
     users_total = escape(str(report.get("users", {}).get("total", 0)))
     critical_total = escape(str(report.get("errors", {}).get("critical_total", 0)))
+    selected_user = summary.get("selected_user_id")
+    selected_user_label = "не выбран" if selected_user is None else str(selected_user)
+    eggs = summary.get("eggs") or {}
+    feeds = summary.get("feeds") or {}
+    incubation = summary.get("incubation") or {}
+    settings = summary.get("settings") or {}
+    ready_mix = feeds.get("ready_mix") or {}
+    possible_mix = feeds.get("possible_mix") or {}
+    bird_groups = feeds.get("bird_groups") or {}
     heartbeat_rows = "\n".join(_render_heartbeat_row(item) for item in report.get("heartbeats", []))
     if not heartbeat_rows:
         heartbeat_rows = "<tr><td colspan=\"5\">Heartbeat пока не получен.</td></tr>"
+    flock_rows = "\n".join(_render_flock_row(item) for item in feeds.get("flocks", []))
+    if not flock_rows:
+        flock_rows = "<tr><td colspan=\"5\">Стада пока не созданы.</td></tr>"
+    batch_rows = "\n".join(_render_batch_row(item) for item in incubation.get("batches", []))
+    if not batch_rows:
+        batch_rows = "<tr><td colspan=\"5\">Активных партий нет.</td></tr>"
+    weather_text = _weather_text((eggs.get("weather") or {}))
 
     return f"""<!doctype html>
 <html lang="ru">
@@ -120,6 +240,12 @@ def _render_index(config: WebConfig, report: dict) -> str:
       grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
       gap: 12px;
     }}
+    .wide-summary {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }}
     .metric {{
       border: 1px solid #d5cec1;
       border-radius: 8px;
@@ -135,6 +261,11 @@ def _render_index(config: WebConfig, report: dict) -> str:
     .value {{
       font-size: 22px;
       font-weight: 700;
+    }}
+    .small {{
+      color: #665f54;
+      font-size: 13px;
+      line-height: 1.45;
     }}
     table {{
       width: 100%;
@@ -169,6 +300,9 @@ def _render_index(config: WebConfig, report: dict) -> str:
       th, .label {{
         color: #b8c2ca;
       }}
+      .small {{
+        color: #b8c2ca;
+      }}
       a {{
         color: #88c7ef;
       }}
@@ -188,6 +322,75 @@ def _render_index(config: WebConfig, report: dict) -> str:
     <div class="metric"><span class="label">Пользователей</span><span class="value">{users_total}</span></div>
     <div class="metric"><span class="label">Критичных ошибок</span><span class="value">{critical_total}</span></div>
   </section>
+
+  <h2>Хозяйство</h2>
+  <section class="wide-summary" aria-label="Хозяйственная сводка">
+    <div class="metric">
+      <span class="label">Пользователь</span>
+      <span class="value">{escape(selected_user_label)}</span>
+      <div class="small">Хозяйство: {escape(str(settings.get("farm_name") or "не указано"))}</div>
+    </div>
+    <div class="metric">
+      <span class="label">Яйца сегодня</span>
+      <span class="value">{escape(str(eggs.get("today_eggs", 0)))}</span>
+      <div class="small">Несутся: {escape(str(eggs.get("active_hens", 0)))} из {escape(str(eggs.get("total_hens", 0)))}. Прогноз на 7 дней: {escape(str(eggs.get("next_week_forecast", 0)))}</div>
+    </div>
+    <div class="metric">
+      <span class="label">Готовая смесь</span>
+      <span class="value">{escape(_kg(ready_mix.get("remaining_kg")))}</span>
+      <div class="small">Расход: {escape(_kg(ready_mix.get("daily_usage_kg")))} в день. Дней: {escape(_days(ready_mix.get("days_left")))}</div>
+    </div>
+    <div class="metric">
+      <span class="label">Возможные замесы</span>
+      <span class="value">{escape(str(possible_mix.get("mix_count", 0)))}</span>
+      <div class="small">Получится: {escape(_kg(possible_mix.get("output_kg")))}. Ограничивает: {escape(str(possible_mix.get("limiting_ingredient") or "не уточнено"))}</div>
+    </div>
+    <div class="metric">
+      <span class="label">Птицы</span>
+      <span class="value">{escape(str(bird_groups.get("birds_total", 0)))}</span>
+      <div class="small">Несушки: {escape(str(bird_groups.get("hens", 0)))}, петухи: {escape(str(bird_groups.get("roosters", 0)))}, цыплята: {escape(str(bird_groups.get("chicks", 0)))}</div>
+    </div>
+    <div class="metric">
+      <span class="label">Инкубация</span>
+      <span class="value">{escape(str(incubation.get("active_batches", 0)))}</span>
+      <div class="small">Активных партий. Завершено: {escape(str(incubation.get("completed_batches", 0)))}</div>
+    </div>
+  </section>
+
+  <h2>Погода</h2>
+  <p>{escape(weather_text)}</p>
+
+  <h2>Стада</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Стадо</th>
+        <th>Птиц</th>
+        <th>Расход</th>
+        <th>Запас</th>
+        <th>Замесы</th>
+      </tr>
+    </thead>
+    <tbody>
+      {flock_rows}
+    </tbody>
+  </table>
+
+  <h2>Активная инкубация</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Партия</th>
+        <th>Вид</th>
+        <th>День</th>
+        <th>Этап</th>
+        <th>Вывод</th>
+      </tr>
+    </thead>
+    <tbody>
+      {batch_rows}
+    </tbody>
+  </table>
 
   <h2>Версия</h2>
   <p>
@@ -234,4 +437,59 @@ def _render_heartbeat_row(item: dict) -> str:
         f"<td>{escape(str(item.get('uptime_seconds', 0)))} сек.</td>"
         f"<td>{escape(str(item.get('last_error') or ''))}</td>"
         "</tr>"
+    )
+
+
+def _render_flock_row(item: dict) -> str:
+    assignments = item.get("assignments") or []
+    first = assignments[0] if assignments else {}
+    return (
+        "<tr>"
+        f"<td>{escape(str(item.get('name', '')))}</td>"
+        f"<td>{escape(str(item.get('birds_total', 0)))}</td>"
+        f"<td>{escape(_kg(item.get('daily_usage_kg')))} / день</td>"
+        f"<td>{escape(_days(first.get('total_days_left') if first else None))}</td>"
+        f"<td>{escape(str(first.get('producible_mix_count', 0) if first else 0))}</td>"
+        "</tr>"
+    )
+
+
+def _render_batch_row(item: dict) -> str:
+    return (
+        "<tr>"
+        f"<td>{escape(str(item.get('title', '')))}</td>"
+        f"<td>{escape(str(item.get('species', '')))}</td>"
+        f"<td>{escape(str(item.get('day', '')))}</td>"
+        f"<td>{escape(str(item.get('stage', '')))}</td>"
+        f"<td>{escape(str(item.get('hatch_date', '')))} ({escape(_days(item.get('days_left')))} )</td>"
+        "</tr>"
+    )
+
+
+def _kg(value) -> str:
+    try:
+        return f"{float(value):.1f} кг"
+    except (TypeError, ValueError):
+        return "0.0 кг"
+
+
+def _days(value) -> str:
+    if value is None:
+        return "не рассчитано"
+    return f"{int(value)} дн."
+
+
+def _weather_text(weather: dict) -> str:
+    if not weather:
+        return "Погода за сегодня еще не загружена."
+    day = weather.get("day") or {}
+    night = weather.get("night") or {}
+    tomorrow = weather.get("tomorrow") or {}
+    return (
+        f"{weather.get('city', '')}: день {day.get('temperature_min_c')}.."
+        f"{day.get('temperature_max_c')} °C, {day.get('condition') or 'без описания'}; "
+        f"ночь {night.get('temperature_min_c')}..{night.get('temperature_max_c')} °C, "
+        f"{night.get('condition') or 'без описания'}; завтра "
+        f"{tomorrow.get('temperature_min_c')}..{tomorrow.get('temperature_max_c')} °C, "
+        f"{tomorrow.get('condition') or 'без описания'}."
     )

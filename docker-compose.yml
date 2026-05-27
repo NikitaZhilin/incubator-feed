@@ -16,6 +16,27 @@ services:
       retries: 3
       start_period: 30s
 
+  web:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      WEB_ENABLED: "true"
+      WEB_HOST: "0.0.0.0"
+      WEB_PORT: "8080"
+      RESTART_REQUEST_DIR: /app/restart-requests
+    volumes:
+      - ./data:/app/data:ro
+      - ./restart-requests:/app/restart-requests
+    command: ["python", "-B", "scripts/web_app.py"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
   backup:
     build: .
     profiles: ["manual"]

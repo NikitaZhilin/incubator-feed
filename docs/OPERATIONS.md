@@ -120,9 +120,15 @@ python -B scripts/web_app.py
 
 - `GET /` - HTML-сводка;
 - `GET /status` - JSON-статус на базе read-only status probe;
+- `GET /summary` - JSON-сводка хозяйства: яйца, корма, стада, инкубация;
 - `GET /version` - версия, окружение, commit и ссылки.
+- `GET /admin/service-status` - compact JSON для внешнего мониторинга;
+- `POST /admin/restart` - создает файл-заявку на перезапуск в `RESTART_REQUEST_DIR`.
 
 Если `WEB_ADMIN_TOKEN` не задан, закрытые endpoints возвращают `503`.
+Для `/admin/restart` нужно передать `confirm: "restart:incubator"` и target
+`bot`, `worker` или `all`; сам web-сервис только пишет заявку, фактический
+перезапуск должен выполнять внешний runner/monitor.
 
 ## Rollback
 

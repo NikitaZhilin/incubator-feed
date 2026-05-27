@@ -94,8 +94,9 @@ class StatusProbeTest(unittest.TestCase):
         self.assertEqual(status_exit_code(report), 2)
 
     def test_status_probe_script_prints_valid_json(self) -> None:
-        self._write_ok("polling_bot")
-        self._write_ok("reminder_runner")
+        now = datetime.now(timezone.utc)
+        self._write_ok("polling_bot", last_seen_at=now - timedelta(seconds=10))
+        self._write_ok("reminder_runner", last_seen_at=now - timedelta(seconds=10))
         env = {
             **os.environ,
             "ENVIRONMENT": "prod",

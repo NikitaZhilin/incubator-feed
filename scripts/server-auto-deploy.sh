@@ -6,7 +6,9 @@ REPO_URL="${REPO_URL:-https://github.com/NikitaZhilin/incubator-feed.git}"
 BRANCH="${BRANCH:-main}"
 IMAGE_NAME="${IMAGE_NAME:-incubator-feed:latest}"
 CONTAINER_NAME="${CONTAINER_NAME:-incubator-feed-bot}"
+WEB_CONTAINER_NAME="${WEB_CONTAINER_NAME:-incubator-feed-web}"
 LOCK_DIR="${LOCK_DIR:-/tmp/incubator-feed-auto-deploy.lock}"
+RESTART_REQUEST_DIR="${RESTART_REQUEST_DIR:-$DEPLOY_PATH/restart-requests}"
 
 if [ -z "$DEPLOY_PATH" ] || [ "$DEPLOY_PATH" = "/" ] || [ "$DEPLOY_PATH" = "/opt" ]; then
   echo "Refusing unsafe DEPLOY_PATH: $DEPLOY_PATH" >&2
@@ -50,17 +52,21 @@ echo "Deploying ${target_commit:0:12} over ${current_commit:0:12}"
 git checkout "$BRANCH"
 git reset --hard "origin/$BRANCH"
 
-mkdir -p data logs backups
+mkdir -p data logs backups "$RESTART_REQUEST_DIR"
 docker build -t "$IMAGE_NAME" .
 docker run --rm --env-file .env.prod \
   -v "$DEPLOY_PATH/data:/app/data" \
   -v "$DEPLOY_PATH/logs:/app/logs" \
   -v "$DEPLOY_PATH/backups:/app/backups" \
   "$IMAGE_NAME" python -B scripts/migrate.py
+docker run --rm --env-file .env.prod \
+  -v "$DEPLOY_PATH/data:/app/data" \
+  -v "$DEPLOY_PATH/backups:/app/backups" \
+  "$IMAGE_NAME" python -B scripts/backup.py
 
 release_deployed_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+docker rm -f "$CONTAINER_NAME" "$WEB_CONTAINER_NAME" >/dev/null 2>&1 || true
 docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
   --env-file "$DEPLOY_PATH/.env.prod" \
   -e RELEASE_NOTICE_ENABLED="${AUTO_DEPLOY_RELEASE_NOTICE_ENABLED:-0}" \
@@ -72,5 +78,21 @@ docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
   -v "$DEPLOY_PATH/backups:/app/backups" \
   "$IMAGE_NAME" python main.py
 
+docker network inspect rememberme_bot_network >/dev/null 2>&1 || docker network create rememberme_bot_network
+docker run -d --name "$WEB_CONTAINER_NAME" --restart unless-stopped \
+  --env-file "$DEPLOY_PATH/.env.prod" \
+  -e WEB_ENABLED=true \
+  -e WEB_HOST=0.0.0.0 \
+  -e WEB_PORT=8080 \
+  -e RESTART_REQUEST_DIR=/app/restart-requests \
+  -e RELEASE_COMMIT="${target_commit:0:12}" \
+  -e RELEASE_DEPLOYED_AT="$release_deployed_at" \
+  --network rememberme_bot_network \
+  -v "$DEPLOY_PATH/data:/app/data:ro" \
+  -v "$RESTART_REQUEST_DIR:/app/restart-requests" \
+  "$IMAGE_NAME" python -B scripts/web_app.py
+
 docker ps --filter "name=$CONTAINER_NAME"
+docker ps --filter "name=$WEB_CONTAINER_NAME"
 docker logs --tail=80 "$CONTAINER_NAME"
+docker logs --tail=80 "$WEB_CONTAINER_NAME"

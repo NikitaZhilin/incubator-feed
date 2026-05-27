@@ -2,6 +2,8 @@
 
 ## 2026-05-27
 
+- Web-сервис получил admin endpoints для мониторинга и заявки на перезапуск: `/admin/service-status` и `/admin/restart`.
+- Web-сводка расширена read-only данными хозяйства: яйца, готовая смесь, возможные замесы, поголовье, стада и активная инкубация.
 - Добавлен первый этап web-версии: отдельный FastAPI-сервис с `/health`, защищенными `/status`, `/version` и HTML-сводкой.
 - Добавлен read-only heartbeat для внешнего статус-бота: `polling_bot`, `reminder_runner`, таблица `service_heartbeats` и `scripts/status_probe.py`.
 - Служебное сообщение о старте снова строго admin-only: оно отправляется только ID из `ADMIN_IDS`; добавлена команда `/my_id`, чтобы быстро узнать Telegram ID для настройки.
