@@ -3,6 +3,7 @@ from datetime import datetime, timezone as datetime_timezone
 import logging
 import os
 from pathlib import Path
+from urllib.parse import urlencode
 
 from app.version import APP_VERSION
 
@@ -25,11 +26,23 @@ class AppConfig:
     release_importance: str
     github_url: str
     changelog_url: str
+    web_public_url: str = ""
+    web_link_token: str = ""
     timezone: str = "Europe/Moscow"
     admin_startup_notice_mode: str = "once_per_deploy"
     release_deployed_at: str = ""
     release_commit: str = ""
     runtime_started_at: datetime = field(default_factory=lambda: datetime.now(datetime_timezone.utc))
+
+    @property
+    def web_open_url(self) -> str:
+        """Return a Telegram-safe web URL if the public web endpoint is configured."""
+        base_url = self.web_public_url.strip().rstrip("/")
+        if not base_url:
+            return ""
+        if not self.web_link_token:
+            return base_url
+        return f"{base_url}/?{urlencode({'auth': self.web_link_token})}"
 
 
 def get_project_root() -> Path:
@@ -150,6 +163,8 @@ def load_config() -> AppConfig:
         github_url=os.getenv("GITHUB_URL", default_github_url).strip() or default_github_url,
         changelog_url=os.getenv("CHANGELOG_URL", default_changelog_url).strip()
         or default_changelog_url,
+        web_public_url=os.getenv("WEB_PUBLIC_URL", "").strip(),
+        web_link_token=os.getenv("WEB_LINK_TOKEN", "").strip(),
         timezone=os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
         release_deployed_at=os.getenv("RELEASE_DEPLOYED_AT", "").strip(),
         release_commit=os.getenv("RELEASE_COMMIT", "").strip(),

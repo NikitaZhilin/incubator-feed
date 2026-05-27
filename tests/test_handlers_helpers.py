@@ -55,6 +55,10 @@ def _keyboard_callbacks(keyboard) -> list[str | None]:
     return [button.callback_data for row in keyboard.inline_keyboard for button in row]
 
 
+def _keyboard_urls(keyboard) -> list[str | None]:
+    return [button.url for row in keyboard.inline_keyboard for button in row]
+
+
 class HandlerHelpersTest(unittest.TestCase):
     def test_share_text_explains_isolated_accounts(self) -> None:
         text = build_share_text("test_incubator_bot")
@@ -148,9 +152,36 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("Последний запуск: 26.05.2026 12:15", text)
         self.assertIn("Последний деплой: 26.05.2026 11:30", text)
         self.assertIn("Коммит: abcdef123456", text)
+        self.assertIn("сайт пока не подключен", text)
         self.assertIn("https://github.com/example/project", text)
         self.assertIn("- Исправлен расчет смеси", text)
         self.assertIn("Бот находится в тестировании", text)
+
+    def test_about_bot_contains_web_public_url_when_configured(self) -> None:
+        config = AppConfig(
+            bot_token="123:test",
+            db_path=Path("test.db"),
+            log_file=Path("bot.log"),
+            backup_dir=Path("backups"),
+            admin_ids=frozenset(),
+            environment="dev",
+            log_level=20,
+            reminder_interval_seconds=60,
+            min_free_disk_mb=512,
+            release_version="0.1.42-beta",
+            release_notes="",
+            release_notice_enabled=False,
+            release_channel="beta",
+            release_importance="minor",
+            github_url="https://github.com/example/project",
+            changelog_url="https://github.com/example/project/blob/main/CHANGELOG.md",
+            web_public_url="https://incubator.example.test/",
+        )
+
+        text = format_about_bot(config)
+
+        self.assertIn("сайт настроен", text)
+        self.assertIn("https://incubator.example.test", text)
 
     def test_settings_summary_is_russian_and_command_free(self) -> None:
         text = _format_settings(
@@ -209,6 +240,16 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("🥚 Инкубация", texts)
         self.assertIn("⚙️ Настройки", texts)
         self.assertIn("❓ FAQ", texts)
+        self.assertNotIn("🌐 Открыть сайт", texts)
+
+    def test_main_menu_and_settings_show_web_button_only_when_url_is_configured(self) -> None:
+        main_keyboard = main_menu_keyboard(web_url="https://incubator.example.test/?auth=secret")
+        settings_markup = settings_keyboard(web_url="https://incubator.example.test/?auth=secret")
+
+        self.assertIn("🌐 Открыть сайт", _keyboard_texts(main_keyboard))
+        self.assertIn("🌐 Открыть сайт", _keyboard_texts(settings_markup))
+        self.assertIn("https://incubator.example.test/?auth=secret", _keyboard_urls(main_keyboard))
+        self.assertNotIn("🌐 Открыть сайт", _keyboard_texts(settings_keyboard()))
 
     def test_eggs_keyboards_have_section_navigation(self) -> None:
         self.assertIn("➕ Добавить яйца", _keyboard_texts(eggs_menu_keyboard()))

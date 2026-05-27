@@ -1,7 +1,7 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
-def main_menu_keyboard(settings: dict | None = None) -> InlineKeyboardMarkup:
+def main_menu_keyboard(settings: dict | None = None, *, web_url: str = "") -> InlineKeyboardMarkup:
     feature_row: list[InlineKeyboardButton] = []
     if _enabled(settings, "notify_feed"):
         feature_row.append(InlineKeyboardButton(text="🌾 Корма", callback_data="feeds:menu"))
@@ -17,9 +17,11 @@ def main_menu_keyboard(settings: dict | None = None) -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:main")],
             [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings:menu")],
-            [InlineKeyboardButton(text="🔗 Поделиться ботом", callback_data="menu:share")],
         ]
     )
+    if web_url:
+        rows.append([InlineKeyboardButton(text="🌐 Открыть сайт", url=web_url)])
+    rows.append([InlineKeyboardButton(text="🔗 Поделиться ботом", callback_data="menu:share")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -66,20 +68,21 @@ def back_to_incubation_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def settings_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🏷 Название хозяйства", callback_data="settings:edit:farm_name")],
-            [
-                InlineKeyboardButton(text="🕘 Часовой пояс", callback_data="settings:edit:timezone"),
-                InlineKeyboardButton(text="🔔 Время уведомлений", callback_data="settings:edit:notification_time"),
-            ],
-            [InlineKeyboardButton(text="🧩 Разделы и уведомления", callback_data="settings:sections")],
-            [InlineKeyboardButton(text="ℹ️ О боте", callback_data="settings:about")],
-            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:settings")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
-        ]
-    )
+def settings_keyboard(*, web_url: str = "") -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="🏷 Название хозяйства", callback_data="settings:edit:farm_name")],
+        [
+            InlineKeyboardButton(text="🕘 Часовой пояс", callback_data="settings:edit:timezone"),
+            InlineKeyboardButton(text="🔔 Время уведомлений", callback_data="settings:edit:notification_time"),
+        ],
+        [InlineKeyboardButton(text="🧩 Разделы и уведомления", callback_data="settings:sections")],
+        [InlineKeyboardButton(text="ℹ️ О боте", callback_data="settings:about")],
+        [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:settings")],
+    ]
+    if web_url:
+        rows.append([InlineKeyboardButton(text="🌐 Открыть сайт", url=web_url)])
+    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def settings_sections_keyboard(settings: dict) -> InlineKeyboardMarkup:
@@ -131,17 +134,22 @@ def settings_back_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def about_bot_keyboard(*, github_url: str, changelog_url: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="📦 GitHub", url=github_url),
-                InlineKeyboardButton(text="📝 История изменений", url=changelog_url),
-            ],
+def about_bot_keyboard(*, github_url: str, changelog_url: str, web_url: str = "") -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(text="📦 GitHub", url=github_url),
+            InlineKeyboardButton(text="📝 История изменений", url=changelog_url),
+        ],
+    ]
+    if web_url:
+        rows.append([InlineKeyboardButton(text="🌐 Открыть сайт", url=web_url)])
+    rows.extend(
+        [
             [InlineKeyboardButton(text="⬅️ Настройки", callback_data="settings:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
     )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _enabled(settings: dict | None, field: str) -> bool:

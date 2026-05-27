@@ -45,6 +45,7 @@ Status probe -> SQLite read-only
 WEB_ENABLED=false
 WEB_HOST=127.0.0.1
 WEB_PORT=8080
+WEB_PUBLIC_URL=
 WEB_ADMIN_TOKEN=
 ```
 

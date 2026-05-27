@@ -23,6 +23,7 @@ class WebConfig:
     github_url: str
     changelog_url: str
     timezone_name: str = "Europe/Moscow"
+    public_url: str = ""
     link_token: str = ""
     release_notes: str = ""
     release_importance: str = "minor"
@@ -68,6 +69,7 @@ def load_web_config() -> WebConfig:
         changelog_url=os.getenv("CHANGELOG_URL", default_changelog_url).strip()
         or default_changelog_url,
         timezone_name=os.getenv("BOT_TIMEZONE", "Europe/Moscow").strip() or "Europe/Moscow",
+        public_url=os.getenv("WEB_PUBLIC_URL", "").strip(),
         link_token=os.getenv("WEB_LINK_TOKEN", "").strip(),
     )
 

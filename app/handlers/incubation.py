@@ -7,6 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
+from app.config import AppConfig
 from app.domain import PROFILES, get_profile
 from app.keyboards.incubation import (
     batch_actions_keyboard,
@@ -81,12 +82,20 @@ async def new_batch(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data == "menu:home")
-async def menu_home(callback: CallbackQuery, state: FSMContext, incubation_service: IncubationService) -> None:
+async def menu_home(
+    callback: CallbackQuery,
+    state: FSMContext,
+    incubation_service: IncubationService,
+    config: AppConfig,
+) -> None:
     await state.clear()
     await _answer_callback_message(
         callback,
         "Главное меню:",
-        reply_markup=main_menu_keyboard(incubation_service.get_user_settings(callback.from_user.id)),
+        reply_markup=main_menu_keyboard(
+            incubation_service.get_user_settings(callback.from_user.id),
+            web_url=config.web_open_url,
+        ),
     )
     await callback.answer()
 
@@ -1267,7 +1276,11 @@ async def _answer_callback_message(callback: CallbackQuery, text: str, **kwargs)
 
 
 @router.callback_query()
-async def unknown_callback(callback: CallbackQuery, incubation_service: IncubationService) -> None:
+async def unknown_callback(
+    callback: CallbackQuery,
+    incubation_service: IncubationService,
+    config: AppConfig,
+) -> None:
     incubation_service.track_scenario_error(
         user_id=callback.from_user.id if callback.from_user else None,
         scenario="unknown_callback",
@@ -1276,6 +1289,9 @@ async def unknown_callback(callback: CallbackQuery, incubation_service: Incubati
     await _answer_callback_message(
         callback,
         "Это действие уже недоступно. Откройте нужный раздел заново.",
-        reply_markup=main_menu_keyboard(incubation_service.get_user_settings(callback.from_user.id)),
+        reply_markup=main_menu_keyboard(
+            incubation_service.get_user_settings(callback.from_user.id),
+            web_url=config.web_open_url,
+        ),
     )
     await callback.answer()

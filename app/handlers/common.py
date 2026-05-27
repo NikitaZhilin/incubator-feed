@@ -275,13 +275,21 @@ def build_share_text(bot_username: str | None) -> str:
 
 
 @router.message(Command("start"))
-async def start(message: Message, state: FSMContext, incubation_service: IncubationService) -> None:
+async def start(
+    message: Message,
+    state: FSMContext,
+    incubation_service: IncubationService,
+    config: AppConfig,
+) -> None:
     await state.clear()
     incubation_service.track("bot_started", user_id=message.from_user.id if message.from_user else None)
     await message.answer(
         "Я помогу вести инкубацию, учет яиц и контролировать запас кормов.\n\n"
         "Выберите раздел в меню ниже.",
-        reply_markup=main_menu_keyboard(incubation_service.get_user_settings(message.from_user.id)),
+        reply_markup=main_menu_keyboard(
+            incubation_service.get_user_settings(message.from_user.id),
+            web_url=config.web_open_url,
+        ),
     )
 
 
@@ -363,11 +371,19 @@ async def version_command(message: Message, config: AppConfig) -> None:
 
 
 @router.message(Command("menu"))
-async def menu(message: Message, state: FSMContext, incubation_service: IncubationService) -> None:
+async def menu(
+    message: Message,
+    state: FSMContext,
+    incubation_service: IncubationService,
+    config: AppConfig,
+) -> None:
     await state.clear()
     await message.answer(
         "Главное меню:",
-        reply_markup=main_menu_keyboard(incubation_service.get_user_settings(message.from_user.id)),
+        reply_markup=main_menu_keyboard(
+            incubation_service.get_user_settings(message.from_user.id),
+            web_url=config.web_open_url,
+        ),
     )
 
 
@@ -375,11 +391,16 @@ async def menu(message: Message, state: FSMContext, incubation_service: Incubati
 async def cancel_any(
     message: Message,
     state: FSMContext,
+    config: AppConfig | None = None,
     incubation_service: IncubationService | None = None,
 ) -> None:
     await state.clear()
     settings = incubation_service.get_user_settings(message.from_user.id) if incubation_service else None
-    await message.answer("Действие отменено. Главное меню:", reply_markup=main_menu_keyboard(settings))
+    web_url = config.web_open_url if config else ""
+    await message.answer(
+        "Действие отменено. Главное меню:",
+        reply_markup=main_menu_keyboard(settings, web_url=web_url),
+    )
 
 
 async def _get_bot_username(message: Message) -> str | None:

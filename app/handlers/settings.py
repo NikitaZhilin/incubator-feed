@@ -29,10 +29,14 @@ class SettingsFlow(StatesGroup):
 
 
 @router.message(Command("settings"))
-async def settings_command(message: Message, incubation_service: IncubationService) -> None:
+async def settings_command(
+    message: Message,
+    incubation_service: IncubationService,
+    config: AppConfig,
+) -> None:
     await message.answer(
         _format_settings(incubation_service.get_user_settings(message.from_user.id)),
-        reply_markup=settings_keyboard(),
+        reply_markup=settings_keyboard(web_url=config.web_open_url),
     )
 
 
@@ -41,11 +45,12 @@ async def settings_menu(
     callback: CallbackQuery,
     state: FSMContext,
     incubation_service: IncubationService,
+    config: AppConfig,
 ) -> None:
     await state.clear()
     await callback.message.answer(
         _format_settings(incubation_service.get_user_settings(callback.from_user.id)),
-        reply_markup=settings_keyboard(),
+        reply_markup=settings_keyboard(web_url=config.web_open_url),
     )
     await callback.answer()
 
@@ -118,13 +123,19 @@ async def settings_about(callback: CallbackQuery, config: AppConfig) -> None:
         reply_markup=about_bot_keyboard(
             github_url=config.github_url,
             changelog_url=config.changelog_url,
+            web_url=config.web_open_url,
         ),
     )
     await callback.answer()
 
 
 @router.message(SettingsFlow.farm_name)
-async def settings_farm_name(message: Message, state: FSMContext, incubation_service: IncubationService) -> None:
+async def settings_farm_name(
+    message: Message,
+    state: FSMContext,
+    incubation_service: IncubationService,
+    config: AppConfig,
+) -> None:
     value = (message.text or "").strip()
     if not value:
         await message.answer("Введите название хозяйства текстом или отправьте - для очистки.")
@@ -132,11 +143,16 @@ async def settings_farm_name(message: Message, state: FSMContext, incubation_ser
     farm_name = "" if value == "-" else value[:255]
     updated = incubation_service.update_user_settings(message.from_user.id, farm_name=farm_name)
     await state.clear()
-    await message.answer(_format_settings(updated), reply_markup=settings_keyboard())
+    await message.answer(_format_settings(updated), reply_markup=settings_keyboard(web_url=config.web_open_url))
 
 
 @router.message(SettingsFlow.timezone)
-async def settings_timezone(message: Message, state: FSMContext, incubation_service: IncubationService) -> None:
+async def settings_timezone(
+    message: Message,
+    state: FSMContext,
+    incubation_service: IncubationService,
+    config: AppConfig,
+) -> None:
     timezone = (message.text or "").strip()
     try:
         ZoneInfo(timezone)
@@ -145,7 +161,7 @@ async def settings_timezone(message: Message, state: FSMContext, incubation_serv
         return
     updated = incubation_service.update_user_settings(message.from_user.id, timezone=timezone)
     await state.clear()
-    await message.answer(_format_settings(updated), reply_markup=settings_keyboard())
+    await message.answer(_format_settings(updated), reply_markup=settings_keyboard(web_url=config.web_open_url))
 
 
 @router.message(SettingsFlow.notification_time)
@@ -153,6 +169,7 @@ async def settings_notification_time(
     message: Message,
     state: FSMContext,
     incubation_service: IncubationService,
+    config: AppConfig,
 ) -> None:
     try:
         notification_time = _parse_notification_time(message.text or "")
@@ -164,7 +181,7 @@ async def settings_notification_time(
         notification_time=notification_time,
     )
     await state.clear()
-    await message.answer(_format_settings(updated), reply_markup=settings_keyboard())
+    await message.answer(_format_settings(updated), reply_markup=settings_keyboard(web_url=config.web_open_url))
 
 
 @router.message(Command("timezone"))
@@ -270,6 +287,15 @@ def format_about_bot(config: AppConfig) -> str:
         lines.append(f"Последний деплой: {_format_runtime_time(config.release_deployed_at, config.timezone)}")
     if config.release_commit:
         lines.append(f"Коммит: {config.release_commit[:12]}")
+    lines.extend(
+        [
+            "",
+            "Web-версия:",
+            "сайт настроен" if config.web_public_url else "сайт пока не подключен",
+        ]
+    )
+    if config.web_public_url:
+        lines.append(config.web_public_url.rstrip("/"))
     lines.extend(
         [
             "",
