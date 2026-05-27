@@ -124,6 +124,8 @@ python -B scripts/web_app.py
 - `GET /feeds/data` - JSON для страницы кормов и склада;
 - `GET /eggs` - HTML-страница учета яиц, прогноза, исключений несушек и погоды;
 - `GET /eggs/data` - JSON для страницы яиц;
+- `GET /incubation` - HTML-страница активных и завершенных партий инкубации;
+- `GET /incubation/data` - JSON для страницы инкубации;
 - `GET /status` - JSON-статус на базе read-only status probe;
 - `GET /summary` - JSON-сводка хозяйства: яйца, корма, стада, инкубация;
 - `GET /version` - версия, окружение, commit и ссылки.
@@ -134,7 +136,7 @@ python -B scripts/web_app.py
 web-страницы возвращают `503`. Admin endpoints всегда требуют `WEB_ADMIN_TOKEN`.
 Для обычных web-страниц заготовлена авторизация по ссылке: если задан
 `WEB_LINK_TOKEN`, страницы `/`, `/feeds`, `/summary`, `/feeds/data`, `/status`,
-`/eggs`, `/eggs/data` и `/version` можно открыть с `?auth=<WEB_LINK_TOKEN>`. Admin endpoints
+`/eggs`, `/eggs/data`, `/incubation`, `/incubation/data` и `/version` можно открыть с `?auth=<WEB_LINK_TOKEN>`. Admin endpoints
 `/admin/*` по link-token не открываются и требуют именно admin-token.
 Для `/admin/restart` нужно передать `confirm: "restart:incubator"` и target
 `bot`, `worker` или `all`; сам web-сервис только пишет заявку, фактический

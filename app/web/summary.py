@@ -207,6 +207,57 @@ def build_web_eggs(
     }
 
 
+def build_web_incubation(
+    db_path: Path,
+    *,
+    user_id: int | None = None,
+    now: datetime | None = None,
+    timezone_name: str = "Europe/Moscow",
+) -> dict:
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    summary = build_web_summary(
+        db_path,
+        user_id=user_id,
+        now=current,
+        timezone_name=timezone_name,
+    )
+    selected_user_id = summary.get("selected_user_id")
+    if selected_user_id is None or summary.get("db", {}).get("status") != "ok":
+        return {
+            "generated_at": summary.get("generated_at"),
+            "selected_user_id": selected_user_id,
+            "db": summary.get("db"),
+            "incubation": summary.get("incubation"),
+            "active_batches": [],
+            "completed_batches": [],
+        }
+
+    settings = summary.get("settings") or {}
+    today = _local_date(current, str(settings.get("timezone") or timezone_name))
+    database = ReadOnlyDatabase(db_path)
+    incubation_service = IncubationService(BatchRepository(database))
+    active_batches = [
+        _incubation_status_payload(incubation_service.get_status(batch, today=today))
+        for batch in incubation_service.list_active(int(selected_user_id))
+    ]
+    completed_batches = [
+        _completed_batch_payload(
+            incubation_service.get_status(batch, today=batch.completed_at or today)
+        )
+        for batch in incubation_service.list_completed(int(selected_user_id), limit=20)
+    ]
+    return {
+        "generated_at": summary.get("generated_at"),
+        "selected_user_id": selected_user_id,
+        "db": summary.get("db"),
+        "incubation": summary.get("incubation"),
+        "active_batches": active_batches,
+        "completed_batches": completed_batches,
+    }
+
+
 class ManagedReadOnlyConnection(sqlite3.Connection):
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         try:
@@ -437,6 +488,53 @@ def _incubation_summary(
             for status in statuses
         ],
     }
+
+
+def _incubation_status_payload(status) -> dict:
+    batch = status.batch
+    return {
+        "id": batch.id,
+        "title": batch.title,
+        "species": batch.species,
+        "species_label": status.profile.title,
+        "eggs_count": batch.eggs_count,
+        "start_date": batch.start_date.isoformat(),
+        "day": status.day,
+        "stage": status.stage,
+        "hatch_date": status.hatch_date.isoformat(),
+        "days_left": status.days_left,
+        "temperature": (
+            status.profile.temperature_lockdown
+            if status.day >= status.profile.lockdown_from_day
+            else status.profile.temperature_main
+        ),
+        "humidity": (
+            status.profile.humidity_lockdown
+            if status.day >= status.profile.lockdown_from_day
+            else status.profile.humidity_main
+        ),
+        "turn_until_day": status.profile.turn_until_day,
+        "lockdown_from_day": status.profile.lockdown_from_day,
+        "candle_days": list(status.profile.candle_days),
+        "recommendations": list(status.recommendations),
+        "note": batch.note,
+    }
+
+
+def _completed_batch_payload(status) -> dict:
+    batch = status.batch
+    hatch_rate = None
+    if batch.hatched_count is not None and batch.eggs_count:
+        hatch_rate = round(batch.hatched_count / batch.eggs_count * 100, 1)
+    payload = _incubation_status_payload(status)
+    payload.update(
+        {
+            "hatched_count": batch.hatched_count,
+            "completed_at": batch.completed_at.isoformat() if batch.completed_at else None,
+            "hatch_rate": hatch_rate,
+        }
+    )
+    return payload
 
 
 def _weather_payload(weather) -> dict | None:

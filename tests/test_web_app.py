@@ -61,6 +61,8 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(self.client.get("/feeds").status_code, 401)
         self.assertEqual(self.client.get("/eggs/data").status_code, 401)
         self.assertEqual(self.client.get("/eggs").status_code, 401)
+        self.assertEqual(self.client.get("/incubation/data").status_code, 401)
+        self.assertEqual(self.client.get("/incubation").status_code, 401)
         self.assertEqual(self.client.get("/").status_code, 401)
 
     def test_protected_pages_accept_bearer_token(self) -> None:
@@ -95,14 +97,18 @@ class WebAppTest(unittest.TestCase):
         index_response = self.client.get("/?auth=link-token")
         feeds_response = self.client.get("/feeds?auth=link-token")
         eggs_response = self.client.get("/eggs?auth=link-token")
+        incubation_response = self.client.get("/incubation?auth=link-token")
 
         self.assertEqual(index_response.status_code, 200)
         self.assertIn("/feeds?auth=link-token", index_response.text)
         self.assertIn("/eggs?auth=link-token", index_response.text)
+        self.assertIn("/incubation?auth=link-token", index_response.text)
         self.assertEqual(feeds_response.status_code, 200)
         self.assertIn("/?auth=link-token", feeds_response.text)
         self.assertEqual(eggs_response.status_code, 200)
         self.assertIn("/?auth=link-token", eggs_response.text)
+        self.assertEqual(incubation_response.status_code, 200)
+        self.assertIn("/?auth=link-token", incubation_response.text)
 
     def test_service_status_accepts_x_admin_token(self) -> None:
         self._write_ok_heartbeats()
@@ -206,6 +212,24 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(page_response.status_code, 200)
         self.assertIn("Яйца", page_response.text)
         self.assertIn("наседка сидит на яйцах", page_response.text)
+
+    def test_incubation_data_and_page_return_batch_snapshot(self) -> None:
+        self._create_household_data()
+
+        data_response = self.client.get("/incubation/data", headers=self._auth())
+        page_response = self.client.get("/incubation", headers=self._auth())
+
+        self.assertEqual(data_response.status_code, 200)
+        payload = data_response.json()
+        self.assertEqual(payload["selected_user_id"], 1)
+        self.assertEqual(payload["incubation"]["active_batches"], 1)
+        self.assertEqual(payload["incubation"]["completed_batches"], 1)
+        self.assertTrue(payload["active_batches"])
+        self.assertTrue(payload["completed_batches"])
+        self.assertTrue(payload["active_batches"][0]["recommendations"])
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("Инкубация", page_response.text)
+        self.assertIn("Куриные яйца", page_response.text)
 
     def test_summary_does_not_create_default_weather_settings(self) -> None:
         UserRepository(self.database).upsert(user_id=1, first_name="Admin")
@@ -369,12 +393,26 @@ class WebAppTest(unittest.TestCase):
             tomorrow_temperature_max_c=18,
             tomorrow_condition="облачно",
         )
-        BatchRepository(self.database).create(
+        batches = BatchRepository(self.database)
+        batches.create(
             user_id=1,
             species="chicken",
             eggs_count=10,
             start_date=today,
             title="Куриные яйца",
+        )
+        completed = batches.create(
+            user_id=1,
+            species="chicken",
+            eggs_count=9,
+            start_date=today - timedelta(days=24),
+            title="Прошлый вывод",
+        )
+        batches.complete(
+            batch_id=completed.id,
+            user_id=1,
+            hatched_count=7,
+            completed_at=today - timedelta(days=3),
         )
 
 

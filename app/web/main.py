@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from app.services.status_probe import build_status_report
 from app.web.config import WebConfig, load_web_config
-from app.web.summary import build_web_eggs, build_web_feeds, build_web_summary
+from app.web.summary import build_web_eggs, build_web_feeds, build_web_incubation, build_web_summary
 
 
 class RestartRequest(BaseModel):
@@ -206,6 +206,29 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             timezone_name=current.timezone_name,
         )
         return _render_eggs_page(current, payload, auth_token=auth or "")
+
+    @app.get("/incubation/data", dependencies=[Depends(require_web_access)])
+    def incubation_data(user_id: int | None = Query(default=None)) -> dict:
+        current = app.state.web_config
+        return build_web_incubation(
+            current.db_path,
+            user_id=user_id,
+            timezone_name=current.timezone_name,
+        )
+
+    @app.get("/incubation", response_class=HTMLResponse, dependencies=[Depends(require_web_access)])
+    def incubation_page(
+        request: Request,
+        user_id: int | None = Query(default=None),
+        auth: str | None = Query(default=None),
+    ) -> str:
+        current = request.app.state.web_config
+        payload = build_web_incubation(
+            current.db_path,
+            user_id=user_id,
+            timezone_name=current.timezone_name,
+        )
+        return _render_incubation_page(current, payload, auth_token=auth or "")
 
     @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_web_access)])
     def index(
@@ -486,6 +509,7 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
   <p>
     <a href="{escape(_link('/feeds', auth_token))}">Корма и склад</a> ·
     <a href="{escape(_link('/eggs', auth_token))}">Яйца</a> ·
+    <a href="{escape(_link('/incubation', auth_token))}">Инкубация</a> ·
     <a href="{escape(config.github_url)}">GitHub</a> ·
     <a href="{escape(config.changelog_url)}">История изменений</a>
   </p>
@@ -687,6 +711,98 @@ def _render_eggs_page(config: WebConfig, payload: dict, *, auth_token: str = "")
 </html>"""
 
 
+def _render_incubation_page(config: WebConfig, payload: dict, *, auth_token: str = "") -> str:
+    incubation = payload.get("incubation") or {}
+    active_rows = "\n".join(_render_active_incubation_row(item) for item in payload.get("active_batches", []))
+    if not active_rows:
+        active_rows = "<tr><td colspan=\"7\">Активных партий пока нет.</td></tr>"
+    completed_rows = "\n".join(_render_completed_incubation_row(item) for item in payload.get("completed_batches", []))
+    if not completed_rows:
+        completed_rows = "<tr><td colspan=\"6\">Завершенных партий пока нет.</td></tr>"
+    recommendation_blocks = "\n".join(
+        _render_recommendation_block(item) for item in payload.get("active_batches", [])
+    )
+    if not recommendation_blocks:
+        recommendation_blocks = "<p>Нет активных партий, для которых нужны рекомендации.</p>"
+    selected_user = payload.get("selected_user_id")
+    selected_user_label = "не выбран" if selected_user is None else str(selected_user)
+    hatch_rate = incubation.get("hatch_rate")
+    hatch_rate_label = "не рассчитано" if hatch_rate is None else f"{hatch_rate}%"
+    return f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Инкубация</title>
+  <style>
+    :root {{ color-scheme: light dark; font-family: Arial, sans-serif; }}
+    body {{ margin: 0; background: #f4f1ea; color: #222; }}
+    main {{ max-width: 1120px; margin: 0 auto; padding: 28px 18px 48px; }}
+    h1 {{ margin: 0 0 8px; font-size: 28px; }}
+    h2 {{ margin: 28px 0 12px; font-size: 18px; }}
+    .summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 20px 0; }}
+    .metric, .note {{ border: 1px solid #d5cec1; border-radius: 8px; padding: 14px; background: #fffaf2; }}
+    .label {{ display: block; color: #665f54; font-size: 13px; margin-bottom: 6px; }}
+    .value {{ font-size: 22px; font-weight: 700; }}
+    .small {{ color: #665f54; font-size: 13px; line-height: 1.45; }}
+    table {{ width: 100%; border-collapse: collapse; background: #fffaf2; border: 1px solid #d5cec1; }}
+    th, td {{ text-align: left; padding: 10px 12px; border-bottom: 1px solid #ddd4c5; vertical-align: top; }}
+    th {{ color: #4d463d; font-size: 13px; }}
+    ul {{ margin: 8px 0 0 18px; padding: 0; }}
+    li {{ margin: 4px 0; }}
+    a {{ color: #245b78; }}
+    @media (prefers-color-scheme: dark) {{
+      body {{ background: #111820; color: #f1f4f7; }}
+      .metric, .note, table {{ background: #1b2835; border-color: #2d3f50; }}
+      th, td {{ border-color: #2d3f50; }}
+      th, .label, .small {{ color: #b8c2ca; }}
+      a {{ color: #88c7ef; }}
+    }}
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Инкубация</h1>
+    <div>Read-only просмотр активных партий, этапов, ближайшего вывода и истории.</div>
+    <p>
+      <a href="{escape(_link('/', auth_token))}">Сводка</a> ·
+      <a href="{escape(_link('/feeds', auth_token))}">Корма и склад</a> ·
+      <a href="{escape(_link('/eggs', auth_token))}">Яйца</a>
+    </p>
+  </header>
+
+  <section class="summary">
+    <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
+    <div class="metric"><span class="label">Активных партий</span><span class="value">{escape(str(incubation.get("active_batches", 0)))}</span></div>
+    <div class="metric"><span class="label">Завершенных</span><span class="value">{escape(str(incubation.get("completed_batches", 0)))}</span></div>
+    <div class="metric"><span class="label">Всего партий</span><span class="value">{escape(str(incubation.get("total_batches", 0)))}</span></div>
+    <div class="metric"><span class="label">Выводимость</span><span class="value">{escape(hatch_rate_label)}</span></div>
+  </section>
+
+  <h2>Активные партии</h2>
+  <table>
+    <thead>
+      <tr><th>Партия</th><th>Птица</th><th>Яиц</th><th>День</th><th>Этап</th><th>Вывод</th><th>Режим</th></tr>
+    </thead>
+    <tbody>{active_rows}</tbody>
+  </table>
+
+  <h2>Рекомендации</h2>
+  {recommendation_blocks}
+
+  <h2>История выводов</h2>
+  <table>
+    <thead>
+      <tr><th>Партия</th><th>Птица</th><th>Яиц</th><th>Вывелось</th><th>Дата завершения</th><th>Процент</th></tr>
+    </thead>
+    <tbody>{completed_rows}</tbody>
+  </table>
+</main>
+</body>
+</html>"""
+
+
 def _link(path: str, auth_token: str = "") -> str:
     if not auth_token:
         return path
@@ -779,6 +895,57 @@ def _render_exclusion_row(item: dict) -> str:
         f"<td>{escape(str(item.get('started_at') or ''))}</td>"
         f"<td>{escape(str(item.get('expected_until') or 'не указано'))}</td>"
         "</tr>"
+    )
+
+
+def _render_active_incubation_row(item: dict) -> str:
+    mode = f"{item.get('temperature') or ''}; {item.get('humidity') or ''}"
+    days_left = item.get("days_left")
+    hatch = str(item.get("hatch_date") or "")
+    if days_left is not None:
+        hatch = f"{hatch} ({_days(days_left)})"
+    return (
+        "<tr>"
+        f"<td>{escape(str(item.get('title', '')))}</td>"
+        f"<td>{escape(str(item.get('species_label', item.get('species', ''))))}</td>"
+        f"<td>{escape(str(item.get('eggs_count', 0)))}</td>"
+        f"<td>{escape(str(item.get('day', '')))}</td>"
+        f"<td>{escape(str(item.get('stage', '')))}</td>"
+        f"<td>{escape(hatch)}</td>"
+        f"<td>{escape(mode)}</td>"
+        "</tr>"
+    )
+
+
+def _render_completed_incubation_row(item: dict) -> str:
+    hatch_rate = item.get("hatch_rate")
+    hatch_rate_label = "не рассчитано" if hatch_rate is None else f"{hatch_rate}%"
+    return (
+        "<tr>"
+        f"<td>{escape(str(item.get('title', '')))}</td>"
+        f"<td>{escape(str(item.get('species_label', item.get('species', ''))))}</td>"
+        f"<td>{escape(str(item.get('eggs_count', 0)))}</td>"
+        f"<td>{escape(str(item.get('hatched_count') or 0))}</td>"
+        f"<td>{escape(str(item.get('completed_at') or ''))}</td>"
+        f"<td>{escape(hatch_rate_label)}</td>"
+        "</tr>"
+    )
+
+
+def _render_recommendation_block(item: dict) -> str:
+    recommendations = item.get("recommendations") or []
+    if recommendations:
+        body = "<ul>" + "".join(f"<li>{escape(str(text))}</li>" for text in recommendations) + "</ul>"
+    else:
+        body = "<p class=\"small\">Рекомендаций на сегодня нет.</p>"
+    note = item.get("note")
+    note_text = f"<p class=\"small\">Заметка: {escape(str(note))}</p>" if note else ""
+    return (
+        "<section class=\"note\">"
+        f"<strong>{escape(str(item.get('title', '')))}</strong>"
+        f"<div class=\"small\">День {escape(str(item.get('day', '')))}, {escape(str(item.get('stage', '')))}</div>"
+        f"{body}{note_text}"
+        "</section>"
     )
 
 
