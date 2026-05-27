@@ -19,8 +19,7 @@ def main_menu_keyboard(settings: dict | None = None, *, web_url: str = "") -> In
             [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings:menu")],
         ]
     )
-    if web_url:
-        rows.append([InlineKeyboardButton(text="🌐 Открыть сайт", url=web_url)])
+    rows.append([_web_button(web_url)])
     rows.append([InlineKeyboardButton(text="🔗 Поделиться ботом", callback_data="menu:share")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -79,8 +78,7 @@ def settings_keyboard(*, web_url: str = "") -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="ℹ️ О боте", callback_data="settings:about")],
         [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:settings")],
     ]
-    if web_url:
-        rows.append([InlineKeyboardButton(text="🌐 Открыть сайт", url=web_url)])
+    rows.append([_web_button(web_url)])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -141,8 +139,7 @@ def about_bot_keyboard(*, github_url: str, changelog_url: str, web_url: str = ""
             InlineKeyboardButton(text="📝 История изменений", url=changelog_url),
         ],
     ]
-    if web_url:
-        rows.append([InlineKeyboardButton(text="🌐 Открыть сайт", url=web_url)])
+    rows.append([_web_button(web_url)])
     rows.extend(
         [
             [InlineKeyboardButton(text="⬅️ Настройки", callback_data="settings:menu")],
@@ -156,6 +153,12 @@ def _enabled(settings: dict | None, field: str) -> bool:
     if settings is None:
         return True
     return bool(settings.get(field, True))
+
+
+def _web_button(web_url: str) -> InlineKeyboardButton:
+    if web_url:
+        return InlineKeyboardButton(text="🌐 Открыть сайт", url=web_url)
+    return InlineKeyboardButton(text="🌐 Открыть сайт", callback_data="menu:web")
 
 
 def _status_label(settings: dict, field: str) -> str:

@@ -108,10 +108,11 @@ WEB_LINK_TOKEN=
 ```
 
 `WEB_PUBLIC_URL` - внешний адрес web-сервиса, например
-`https://incubator.example.ru`. Если он задан, Telegram-бот показывает кнопку
-`🌐 Открыть сайт` в главном меню, настройках и разделе `О боте`. Если вместе с
-ним задан `WEB_LINK_TOKEN`, кнопка открывает ссылку с `?auth=<WEB_LINK_TOKEN>`.
-`WEB_ADMIN_TOKEN` в Telegram-ссылки не подставляется.
+`https://incubator.example.ru`. Telegram-бот показывает кнопку `🌐 Открыть сайт`
+в главном меню, настройках и разделе `О боте` всегда. Если `WEB_PUBLIC_URL`
+задан, кнопка открывает сайт. Если вместе с ним задан `WEB_LINK_TOKEN`, кнопка
+открывает ссылку с `?auth=<WEB_LINK_TOKEN>`. `WEB_ADMIN_TOKEN` в Telegram-ссылки
+не подставляется.
 
 Запуск:
 

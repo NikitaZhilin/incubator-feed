@@ -318,6 +318,24 @@ async def share_callback(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+@router.callback_query(F.data == "menu:web")
+async def web_unconfigured_callback(callback: CallbackQuery, config: AppConfig) -> None:
+    if config.web_open_url:
+        await callback.message.answer(
+            "🌐 Web-версия доступна по ссылке:\n"
+            f"{config.web_open_url}"
+        )
+    else:
+        await callback.message.answer(
+            "🌐 Web-версия\n\n"
+            "Кнопка уже добавлена, но публичный адрес сайта пока не настроен.\n\n"
+            "Чтобы кнопка открывала сайт, нужно указать на сервере:\n"
+            "WEB_PUBLIC_URL=https://ваш-домен-или-ngrok-url\n\n"
+            "После изменения .env перезапустите Telegram-бота."
+        )
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("faq:"))
 async def faq_callback(callback: CallbackQuery) -> None:
     section = str(callback.data).split(":", 1)[1]

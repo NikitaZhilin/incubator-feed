@@ -240,16 +240,18 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("🥚 Инкубация", texts)
         self.assertIn("⚙️ Настройки", texts)
         self.assertIn("❓ FAQ", texts)
-        self.assertNotIn("🌐 Открыть сайт", texts)
+        self.assertIn("🌐 Открыть сайт", texts)
+        self.assertIn("menu:web", _keyboard_callbacks(keyboard))
 
-    def test_main_menu_and_settings_show_web_button_only_when_url_is_configured(self) -> None:
+    def test_main_menu_and_settings_show_web_button_and_use_url_when_configured(self) -> None:
         main_keyboard = main_menu_keyboard(web_url="https://incubator.example.test/?auth=secret")
         settings_markup = settings_keyboard(web_url="https://incubator.example.test/?auth=secret")
 
         self.assertIn("🌐 Открыть сайт", _keyboard_texts(main_keyboard))
         self.assertIn("🌐 Открыть сайт", _keyboard_texts(settings_markup))
         self.assertIn("https://incubator.example.test/?auth=secret", _keyboard_urls(main_keyboard))
-        self.assertNotIn("🌐 Открыть сайт", _keyboard_texts(settings_keyboard()))
+        self.assertIn("🌐 Открыть сайт", _keyboard_texts(settings_keyboard()))
+        self.assertIn("menu:web", _keyboard_callbacks(settings_keyboard()))
 
     def test_eggs_keyboards_have_section_navigation(self) -> None:
         self.assertIn("➕ Добавить яйца", _keyboard_texts(eggs_menu_keyboard()))
