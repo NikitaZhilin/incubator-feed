@@ -291,6 +291,18 @@ async def share_command(message: Message) -> None:
     await message.answer(build_share_text(username))
 
 
+@router.message(Command("my_id"))
+async def my_id_command(message: Message) -> None:
+    if message.from_user is None:
+        await message.answer("Не удалось определить Telegram ID.")
+        return
+    await message.answer(
+        "Ваш Telegram ID:\n"
+        f"{message.from_user.id}\n\n"
+        "Для служебных admin-уведомлений этот ID должен быть указан в ADMIN_IDS."
+    )
+
+
 @router.callback_query(F.data == "menu:share")
 async def share_callback(callback: CallbackQuery) -> None:
     username = await _get_bot_username(callback.message)
@@ -330,7 +342,8 @@ async def help_command(message: Message) -> None:
         "/settings - уведомления, хозяйство, единицы\n"
         "/timezone Europe/Moscow - часовой пояс\n"
         "/farm Мое хозяйство - название хозяйства\n"
-        "/disclaimer - справочный дисклеймер\n\n"
+        "/disclaimer - справочный дисклеймер\n"
+        "/my_id - показать ваш Telegram ID для ADMIN_IDS\n\n"
         "Закрытие партии:\n"
         "Нажмите кнопку Завершить вывод под партией и укажите количество выведенных птенцов.\n\n"
         "Напоминания:\n"

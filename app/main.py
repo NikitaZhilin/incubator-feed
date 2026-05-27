@@ -158,32 +158,33 @@ async def main() -> None:
             logging.info("Admin startup notice skipped: ADMIN_STARTUP_NOTICE_MODE=off")
         elif not config.admin_ids:
             logging.warning("Admin startup notice skipped: ADMIN_IDS is empty")
-        elif should_send_admin_startup_notice(config):
-            try:
-                result = await AdminStartupNotificationService(
-                    bot=bot,
-                    admin_ids=config.admin_ids,
-                    notifications=notifications,
-                ).send_startup_notice(
-                    version=config.release_version,
-                    started_at=config.runtime_started_at,
-                    timezone_name=config.timezone,
-                    mode=config.admin_startup_notice_mode,
-                    deployment_id=(
-                        config.release_commit
-                        or config.release_deployed_at
-                        or config.release_version
-                    ),
-                    commit=config.release_commit,
-                )
-                logging.info(
-                    "Admin startup notice completed: sent=%s skipped=%s failed=%s",
-                    result.sent,
-                    result.skipped,
-                    result.failed,
-                )
-            except Exception:
-                logging.exception("Admin startup notice failed")
+        else:
+            if should_send_admin_startup_notice(config):
+                try:
+                    result = await AdminStartupNotificationService(
+                        bot=bot,
+                        admin_ids=config.admin_ids,
+                        notifications=notifications,
+                    ).send_startup_notice(
+                        version=config.release_version,
+                        started_at=config.runtime_started_at,
+                        timezone_name=config.timezone,
+                        mode=config.admin_startup_notice_mode,
+                        deployment_id=(
+                            config.release_commit
+                            or config.release_deployed_at
+                            or config.release_version
+                        ),
+                        commit=config.release_commit,
+                    )
+                    logging.info(
+                        "Admin startup notice completed: sent=%s skipped=%s failed=%s",
+                        result.sent,
+                        result.skipped,
+                        result.failed,
+                    )
+                except Exception:
+                    logging.exception("Admin startup notice failed")
         try:
             try:
                 await dispatcher.start_polling(bot)

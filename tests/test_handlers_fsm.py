@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from app.handlers.common import cancel_any
+from app.handlers.common import cancel_any, my_id_command
 from app.handlers.eggs import EggEntryFlow, eggs_add, eggs_add_date, eggs_count as egg_entry_count
 from app.handlers.feeds import (
     ChangeFeed,
@@ -148,6 +148,15 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(state.cleared)
         self.assertIn("Главное меню", message.answers[-1][0])
+
+    async def test_my_id_command_returns_user_id_for_admin_ids(self) -> None:
+        message = FakeMessage("/my_id")
+
+        await my_id_command(message)
+
+        self.assertIn("Ваш Telegram ID", message.answers[-1][0])
+        self.assertIn("1", message.answers[-1][0])
+        self.assertIn("ADMIN_IDS", message.answers[-1][0])
 
     async def test_egg_entry_can_be_recorded_for_yesterday(self) -> None:
         state = FakeState()
