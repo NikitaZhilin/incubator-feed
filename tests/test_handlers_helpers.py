@@ -19,16 +19,24 @@ from app.keyboards.feeds import (
     feed_actions_keyboard,
     feed_stats_keyboard,
     feeds_menu_keyboard,
+    feed_history_keyboard,
     flock_actions_keyboard,
     flocks_keyboard,
     livestock_menu_keyboard,
     stock_assign_groups_keyboard,
     stock_cancel_keyboard,
+    stock_history_keyboard,
     stock_mix_checklist_keyboard,
     stock_items_keyboard,
     stock_mix_quick_keyboard,
 )
-from app.keyboards.eggs import egg_entry_date_keyboard, eggs_menu_keyboard, exclusions_keyboard, weather_keyboard
+from app.keyboards.eggs import (
+    egg_entry_date_keyboard,
+    eggs_history_keyboard,
+    eggs_menu_keyboard,
+    exclusions_keyboard,
+    weather_keyboard,
+)
 from app.keyboards.incubation import (
     batch_actions_keyboard,
     edit_batch_back_keyboard,
@@ -62,13 +70,35 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("Яйца - раздел для ежедневного учета", main_text)
         self.assertEqual(main_callbacks.count("menu:home"), 1)
 
+        feeds_text = format_faq("feeds")
+        self.assertIn("что сейчас лежит на складе", feeds_text)
+        self.assertIn("Добавить корм", feeds_text)
+        self.assertIn("добавляет покупку в складские остатки", feeds_text)
+        self.assertIn("сначала добавляются группы птиц", feeds_text)
+        self.assertNotIn("Раздел объединяет склад", feeds_text)
+
         text = format_faq("mix")
         callbacks = _keyboard_callbacks(faq_keyboard("mix"))
 
         self.assertIn("FAQ: смесь", text)
+        self.assertIn("это не покупка", text)
+        self.assertIn("рецепт домашнего корма", text)
+        self.assertIn("Если пшеницы нет", text)
         self.assertIn("1 часть = 1 литровая кружка", text)
         self.assertIn("stock:mix", callbacks)
         self.assertIn("menu:home", callbacks)
+
+        stock_history_text = format_faq("stock_history")
+        self.assertIn("почему изменился остаток", stock_history_text)
+        self.assertIn("журнал операций", stock_history_text)
+
+        feed_history_text = format_faq("feed_history")
+        self.assertIn("старой ручной карточке", feed_history_text)
+        self.assertIn("Склад -> История", feed_history_text)
+
+        egg_history_text = format_faq("egg_history")
+        self.assertIn("ежедневные итоги сбора", egg_history_text)
+        self.assertIn("общий итог за этот день", egg_history_text)
 
         livestock_text = format_faq("livestock")
         self.assertIn("Поголовье - это отдельные группы птиц", livestock_text)
@@ -184,6 +214,7 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("➕ Добавить яйца", _keyboard_texts(eggs_menu_keyboard()))
         self.assertIn("📊 Расчеты", _keyboard_texts(eggs_menu_keyboard()))
         self.assertIn("❓ FAQ", _keyboard_texts(eggs_menu_keyboard()))
+        self.assertIn("❓ FAQ", _keyboard_texts(eggs_history_keyboard()))
         self.assertIn("Сегодня", _keyboard_texts(egg_entry_date_keyboard()))
         self.assertIn("Вчера", _keyboard_texts(egg_entry_date_keyboard()))
         self.assertIn("⬅️ К яйцам", _keyboard_texts(exclusions_keyboard([])))
@@ -227,6 +258,8 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("⬅️ К кормам", _keyboard_texts(feed_actions_keyboard(3)))
         self.assertIn("⬅️ К складу", _keyboard_texts(stock_mix_quick_keyboard("wheat", 3)))
         self.assertIn("❓ FAQ", _keyboard_texts(feeds_menu_keyboard()))
+        self.assertIn("❓ FAQ", _keyboard_texts(feed_history_keyboard(3)))
+        self.assertIn("❓ FAQ", _keyboard_texts(stock_history_keyboard()))
         self.assertIn("❓ FAQ", _keyboard_texts(stock_mix_quick_keyboard("wheat", 3)))
         self.assertIn("Отмена", _keyboard_texts(stock_cancel_keyboard()))
 

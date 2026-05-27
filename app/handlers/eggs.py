@@ -12,6 +12,7 @@ from app.keyboards.eggs import (
     eggs_back_keyboard,
     eggs_cancel_keyboard,
     egg_entry_date_keyboard,
+    eggs_history_keyboard,
     eggs_menu_keyboard,
     exclusion_reason_keyboard,
     exclusions_keyboard,
@@ -110,7 +111,7 @@ async def eggs_history(callback: CallbackQuery, egg_service: EggService) -> None
     else:
         for day, total in rows:
             lines.append(f"- {day.isoformat()}: {total} шт.")
-    await callback.message.answer("\n".join(lines), reply_markup=eggs_back_keyboard())
+    await callback.message.answer("\n".join(lines), reply_markup=eggs_history_keyboard())
     await callback.answer()
 
 

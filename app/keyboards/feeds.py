@@ -99,6 +99,16 @@ def feed_actions_keyboard(feed_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def feed_history_keyboard(feed_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:feed_history")],
+            [InlineKeyboardButton(text="⬅️ Назад к корму", callback_data=f"feeds:view:{feed_id}")],
+            [InlineKeyboardButton(text="🌾 К кормам", callback_data="feeds:menu")],
+        ]
+    )
+
+
 def feed_delete_confirm_keyboard(feed_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -233,6 +243,16 @@ def stock_menu_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🔄 Задать фактический остаток", callback_data="stock:adjust")],
             [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:stock")],
             [InlineKeyboardButton(text="⬅️ К кормам", callback_data="feeds:menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
+        ]
+    )
+
+
+def stock_history_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:stock_history")],
+            [InlineKeyboardButton(text="⬅️ К складу", callback_data="stock:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
     )

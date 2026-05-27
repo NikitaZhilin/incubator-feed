@@ -31,6 +31,16 @@ def eggs_back_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def eggs_history_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:egg_history")],
+            [InlineKeyboardButton(text="⬅️ К яйцам", callback_data="eggs:menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
+        ]
+    )
+
+
 def eggs_cancel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[

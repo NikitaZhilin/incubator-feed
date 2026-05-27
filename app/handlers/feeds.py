@@ -18,6 +18,7 @@ from app.keyboards.feeds import (
     feed_cancel_keyboard,
     feed_delete_confirm_keyboard,
     feed_edit_keyboard,
+    feed_history_keyboard,
     feed_rate_keyboard,
     feed_stats_keyboard,
     feeds_menu_keyboard,
@@ -30,6 +31,7 @@ from app.keyboards.feeds import (
     stock_mix_checklist_keyboard,
     stock_items_keyboard,
     stock_kind_keyboard,
+    stock_history_keyboard,
     stock_mix_quick_keyboard,
     stock_menu_keyboard,
 )
@@ -978,7 +980,7 @@ async def stock_history(callback: CallbackQuery, stock_service: StockService) ->
     transactions = stock_service.list_history(callback.from_user.id)
     items = {item.id: item for item in stock_service.stock.list_items(callback.from_user.id)}
     if not transactions:
-        await callback.message.answer("История склада пока пустая.", reply_markup=stock_menu_keyboard())
+        await callback.message.answer("История склада пока пустая.", reply_markup=stock_history_keyboard())
         await callback.answer()
         return
     lines = ["📋 История склада:"]
@@ -998,7 +1000,7 @@ async def stock_history(callback: CallbackQuery, stock_service: StockService) ->
             f"{labels.get(transaction.type, transaction.type)} {sign}{transaction.amount_kg:g} кг, "
             f"остаток {transaction.balance_after_kg:g} кг"
         )
-    await callback.message.answer("\n".join(lines), reply_markup=stock_menu_keyboard())
+    await callback.message.answer("\n".join(lines), reply_markup=stock_history_keyboard())
     await callback.answer()
 
 
@@ -1743,7 +1745,7 @@ async def feed_history(callback: CallbackQuery, feed_service: FeedService) -> No
     feed_id = int(str(callback.data).split(":", 2)[2])
     transactions = feed_service.list_transactions(feed_id, callback.from_user.id)
     if not transactions:
-        await callback.message.answer("История операций пока пустая.", reply_markup=feed_actions_keyboard(feed_id))
+        await callback.message.answer("История операций пока пустая.", reply_markup=feed_history_keyboard(feed_id))
         await callback.answer()
         return
     lines = ["История корма:"]
@@ -1759,7 +1761,7 @@ async def feed_history(callback: CallbackQuery, feed_service: FeedService) -> No
             f"- {item.created_at.date().isoformat()} {labels.get(item.type, item.type)}: "
             f"{sign}{item.amount_kg:g} кг, остаток {item.balance_after_kg:g} кг"
         )
-    await callback.message.answer("\n".join(lines), reply_markup=feed_actions_keyboard(feed_id))
+    await callback.message.answer("\n".join(lines), reply_markup=feed_history_keyboard(feed_id))
     await callback.answer()
 
 
