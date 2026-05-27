@@ -40,6 +40,7 @@ class WebAppTest(unittest.TestCase):
             github_url="https://github.com/example/project",
             changelog_url="https://github.com/example/project/blob/main/docs/CHANGELOG.md",
             restart_request_dir=Path(self.temp_dir.name) / "restart-requests",
+            link_token="link-token",
         )
         self.client = TestClient(create_app(self.config))
 
@@ -67,6 +68,33 @@ class WebAppTest(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["db"]["status"], "ok")
+
+    def test_regular_pages_accept_link_token_query(self) -> None:
+        config = WebConfig(
+            **{
+                **self.config.__dict__,
+                "admin_token": "",
+                "link_token": "link-only-token",
+            }
+        )
+        client = TestClient(create_app(config))
+
+        response = client.get("/summary?auth=link-only-token")
+        admin_response = client.get("/admin/service-status?auth=link-only-token")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(admin_response.status_code, 503)
+
+    def test_link_token_navigation_keeps_auth_query(self) -> None:
+        self._create_household_data()
+
+        index_response = self.client.get("/?auth=link-token")
+        feeds_response = self.client.get("/feeds?auth=link-token")
+
+        self.assertEqual(index_response.status_code, 200)
+        self.assertIn("/feeds?auth=link-token", index_response.text)
+        self.assertEqual(feeds_response.status_code, 200)
+        self.assertIn("/?auth=link-token", feeds_response.text)
 
     def test_service_status_accepts_x_admin_token(self) -> None:
         self._write_ok_heartbeats()
@@ -139,6 +167,21 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(payload["feeds"]["bird_groups"]["hens"], 12)
         self.assertEqual(payload["incubation"]["active_batches"], 1)
 
+    def test_feeds_data_and_page_return_stock_snapshot(self) -> None:
+        self._create_household_data()
+
+        data_response = self.client.get("/feeds/data", headers=self._auth())
+        page_response = self.client.get("/feeds", headers=self._auth())
+
+        self.assertEqual(data_response.status_code, 200)
+        payload = data_response.json()
+        self.assertEqual(payload["selected_user_id"], 1)
+        self.assertTrue(payload["feeds"]["stock_items"])
+        self.assertTrue(payload["history"])
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("Корма и склад", page_response.text)
+        self.assertIn("Смесь для кур", page_response.text)
+
     def test_summary_does_not_create_default_weather_settings(self) -> None:
         UserRepository(self.database).upsert(user_id=1, first_name="Admin")
         before = self._row_counts()
@@ -180,6 +223,7 @@ class WebAppTest(unittest.TestCase):
             **{
                 **self.config.__dict__,
                 "admin_token": "",
+                "link_token": "",
             }
         )
         client = TestClient(create_app(config))

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from html import escape
 import json
 import secrets
+from urllib.parse import urlencode
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
@@ -12,7 +13,7 @@ from pydantic import BaseModel
 
 from app.services.status_probe import build_status_report
 from app.web.config import WebConfig, load_web_config
-from app.web.summary import build_web_summary
+from app.web.summary import build_web_feeds, build_web_summary
 
 
 class RestartRequest(BaseModel):
@@ -46,11 +47,32 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
+    def require_web_access(
+        authorization: str | None = Header(default=None),
+        x_web_token: str | None = Header(default=None),
+        x_admin_token: str | None = Header(default=None),
+        auth: str | None = Query(default=None),
+    ) -> None:
+        current = app.state.web_config
+        provided = _extract_access_token(authorization, x_web_token, x_admin_token, auth)
+        configured_tokens = [token for token in (current.admin_token, current.link_token) if token]
+        if not configured_tokens:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="WEB_ADMIN_TOKEN or WEB_LINK_TOKEN is not configured.",
+            )
+        if not any(secrets.compare_digest(provided, token) for token in configured_tokens):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
     @app.get("/health")
     def health() -> dict:
         return {"status": "ok"}
 
-    @app.get("/status", dependencies=[Depends(require_admin)])
+    @app.get("/status", dependencies=[Depends(require_web_access)])
     def status_report() -> dict:
         return build_status_report(app.state.web_config.db_path)
 
@@ -79,7 +101,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             "services": services,
         }
 
-    @app.get("/version", dependencies=[Depends(require_admin)])
+    @app.get("/version", dependencies=[Depends(require_web_access)])
     def version() -> dict:
         current = app.state.web_config
         return {
@@ -130,7 +152,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             "message": "restart scheduled",
         }
 
-    @app.get("/summary", dependencies=[Depends(require_admin)])
+    @app.get("/summary", dependencies=[Depends(require_web_access)])
     def summary(user_id: int | None = Query(default=None)) -> dict:
         current = app.state.web_config
         return build_web_summary(
@@ -139,8 +161,35 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             timezone_name=current.timezone_name,
         )
 
-    @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_admin)])
-    def index(request: Request, user_id: int | None = Query(default=None)) -> str:
+    @app.get("/feeds/data", dependencies=[Depends(require_web_access)])
+    def feeds_data(user_id: int | None = Query(default=None)) -> dict:
+        current = app.state.web_config
+        return build_web_feeds(
+            current.db_path,
+            user_id=user_id,
+            timezone_name=current.timezone_name,
+        )
+
+    @app.get("/feeds", response_class=HTMLResponse, dependencies=[Depends(require_web_access)])
+    def feeds_page(
+        request: Request,
+        user_id: int | None = Query(default=None),
+        auth: str | None = Query(default=None),
+    ) -> str:
+        current = request.app.state.web_config
+        payload = build_web_feeds(
+            current.db_path,
+            user_id=user_id,
+            timezone_name=current.timezone_name,
+        )
+        return _render_feeds_page(current, payload, auth_token=auth or "")
+
+    @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_web_access)])
+    def index(
+        request: Request,
+        user_id: int | None = Query(default=None),
+        auth: str | None = Query(default=None),
+    ) -> str:
         current = request.app.state.web_config
         report = build_status_report(current.db_path)
         summary_payload = build_web_summary(
@@ -148,7 +197,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             user_id=user_id,
             timezone_name=current.timezone_name,
         )
-        return _render_index(current, report, summary_payload)
+        return _render_index(current, report, summary_payload, auth_token=auth or "")
 
     return app
 
@@ -170,6 +219,17 @@ def _extract_token(
     return token.strip()
 
 
+def _extract_access_token(
+    authorization: str | None,
+    x_web_token: str | None,
+    x_admin_token: str | None,
+    auth: str | None,
+) -> str:
+    if auth:
+        return auth.strip()
+    return _extract_token(authorization, x_web_token, x_admin_token)
+
+
 def _status_bot_service_name(item: dict) -> str:
     service_name = str(item.get("service_name", ""))
     return {
@@ -178,7 +238,7 @@ def _status_bot_service_name(item: dict) -> str:
     }.get(service_name, service_name)
 
 
-def _render_index(config: WebConfig, report: dict, summary: dict) -> str:
+def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token: str = "") -> str:
     status_value = escape(str(report.get("status", "unknown")))
     db_status = escape(str(report.get("db", {}).get("status", "unknown")))
     users_total = escape(str(report.get("users", {}).get("total", 0)))
@@ -401,6 +461,7 @@ def _render_index(config: WebConfig, report: dict, summary: dict) -> str:
     Последний деплой: {escape(config.release_deployed_at or "не указан")}
   </p>
   <p>
+    <a href="{escape(_link('/feeds', auth_token))}">Корма и склад</a> ·
     <a href="{escape(config.github_url)}">GitHub</a> ·
     <a href="{escape(config.changelog_url)}">История изменений</a>
   </p>
@@ -423,6 +484,101 @@ def _render_index(config: WebConfig, report: dict, summary: dict) -> str:
 </main>
 </body>
 </html>"""
+
+
+def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = "") -> str:
+    feeds = payload.get("feeds") or {}
+    ready_mix = feeds.get("ready_mix") or {}
+    possible_mix = feeds.get("possible_mix") or {}
+    stock_rows = "\n".join(_render_stock_row(item) for item in feeds.get("stock_items", []))
+    if not stock_rows:
+        stock_rows = "<tr><td colspan=\"5\">Склад пока пуст.</td></tr>"
+    flock_rows = "\n".join(_render_flock_row(item) for item in feeds.get("flocks", []))
+    if not flock_rows:
+        flock_rows = "<tr><td colspan=\"5\">Стада пока не созданы.</td></tr>"
+    history_rows = "\n".join(_render_history_row(item) for item in payload.get("history", []))
+    if not history_rows:
+        history_rows = "<tr><td colspan=\"5\">Истории операций пока нет.</td></tr>"
+    selected_user = payload.get("selected_user_id")
+    selected_user_label = "не выбран" if selected_user is None else str(selected_user)
+    return f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Корма и склад</title>
+  <style>
+    :root {{ color-scheme: light dark; font-family: Arial, sans-serif; }}
+    body {{ margin: 0; background: #f4f1ea; color: #222; }}
+    main {{ max-width: 1120px; margin: 0 auto; padding: 28px 18px 48px; }}
+    h1 {{ margin: 0 0 8px; font-size: 28px; }}
+    h2 {{ margin: 28px 0 12px; font-size: 18px; }}
+    .summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 20px 0; }}
+    .metric {{ border: 1px solid #d5cec1; border-radius: 8px; padding: 14px; background: #fffaf2; }}
+    .label {{ display: block; color: #665f54; font-size: 13px; margin-bottom: 6px; }}
+    .value {{ font-size: 22px; font-weight: 700; }}
+    table {{ width: 100%; border-collapse: collapse; background: #fffaf2; border: 1px solid #d5cec1; }}
+    th, td {{ text-align: left; padding: 10px 12px; border-bottom: 1px solid #ddd4c5; vertical-align: top; }}
+    th {{ color: #4d463d; font-size: 13px; }}
+    a {{ color: #245b78; }}
+    @media (prefers-color-scheme: dark) {{
+      body {{ background: #111820; color: #f1f4f7; }}
+      .metric, table {{ background: #1b2835; border-color: #2d3f50; }}
+      th, td {{ border-color: #2d3f50; }}
+      th, .label {{ color: #b8c2ca; }}
+      a {{ color: #88c7ef; }}
+    }}
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Корма и склад</h1>
+    <div>Read-only просмотр запасов, смеси, стад и последних операций.</div>
+    <p><a href="{escape(_link('/', auth_token))}">Сводка</a></p>
+  </header>
+
+  <section class="summary">
+    <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
+    <div class="metric"><span class="label">Готовая смесь</span><span class="value">{escape(_kg(ready_mix.get("remaining_kg")))}</span></div>
+    <div class="metric"><span class="label">Хватит готовой смеси</span><span class="value">{escape(_days(ready_mix.get("days_left")))}</span></div>
+    <div class="metric"><span class="label">Возможные замесы</span><span class="value">{escape(str(possible_mix.get("mix_count", 0)))}</span></div>
+    <div class="metric"><span class="label">Будет получено</span><span class="value">{escape(_kg(possible_mix.get("output_kg")))}</span></div>
+    <div class="metric"><span class="label">Ограничивает</span><span class="value">{escape(str(possible_mix.get("limiting_ingredient") or "не уточнено"))}</span></div>
+  </section>
+
+  <h2>Склад</h2>
+  <table>
+    <thead>
+      <tr><th>Позиция</th><th>Тип</th><th>Остаток</th><th>Расход в день</th><th>Дней</th></tr>
+    </thead>
+    <tbody>{stock_rows}</tbody>
+  </table>
+
+  <h2>Стада и расход</h2>
+  <table>
+    <thead>
+      <tr><th>Стадо</th><th>Птиц</th><th>Расход</th><th>Запас</th><th>Замесы</th></tr>
+    </thead>
+    <tbody>{flock_rows}</tbody>
+  </table>
+
+  <h2>История операций</h2>
+  <table>
+    <thead>
+      <tr><th>Дата</th><th>Позиция</th><th>Операция</th><th>Количество</th><th>Остаток</th></tr>
+    </thead>
+    <tbody>{history_rows}</tbody>
+  </table>
+</main>
+</body>
+</html>"""
+
+
+def _link(path: str, auth_token: str = "") -> str:
+    if not auth_token:
+        return path
+    return f"{path}?{urlencode({'auth': auth_token})}"
 
 
 def _render_heartbeat_row(item: dict) -> str:
@@ -466,6 +622,30 @@ def _render_batch_row(item: dict) -> str:
     )
 
 
+def _render_stock_row(item: dict) -> str:
+    return (
+        "<tr>"
+        f"<td>{escape(str(item.get('name', '')))}</td>"
+        f"<td>{escape(str(item.get('kind_label', item.get('kind', ''))))}</td>"
+        f"<td>{escape(_kg(item.get('remaining_kg')))}</td>"
+        f"<td>{escape(_kg(item.get('daily_usage_kg')))}</td>"
+        f"<td>{escape(_days(item.get('days_left')))}</td>"
+        "</tr>"
+    )
+
+
+def _render_history_row(item: dict) -> str:
+    return (
+        "<tr>"
+        f"<td>{escape(_short_datetime(item.get('created_at')))}</td>"
+        f"<td>{escape(str(item.get('item_name', '')))}</td>"
+        f"<td>{escape(str(item.get('type_label', item.get('type', ''))))}</td>"
+        f"<td>{escape(_kg(item.get('amount_kg')))}</td>"
+        f"<td>{escape(_kg(item.get('balance_after_kg')))}</td>"
+        "</tr>"
+    )
+
+
 def _kg(value) -> str:
     try:
         return f"{float(value):.1f} кг"
@@ -477,6 +657,13 @@ def _days(value) -> str:
     if value is None:
         return "не рассчитано"
     return f"{int(value)} дн."
+
+
+def _short_datetime(value) -> str:
+    if not value:
+        return ""
+    text = str(value)
+    return text[:16].replace("T", " ")
 
 
 def _weather_text(weather: dict) -> str:

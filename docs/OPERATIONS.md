@@ -103,6 +103,7 @@ WEB_ENABLED=true
 WEB_HOST=127.0.0.1
 WEB_PORT=8080
 WEB_ADMIN_TOKEN=replace_with_strong_token
+WEB_LINK_TOKEN=
 ```
 
 Запуск:
@@ -119,13 +120,20 @@ python -B scripts/web_app.py
 `X-Web-Token: <WEB_ADMIN_TOKEN>`:
 
 - `GET /` - HTML-сводка;
+- `GET /feeds` - HTML-страница кормов и склада;
+- `GET /feeds/data` - JSON для страницы кормов и склада;
 - `GET /status` - JSON-статус на базе read-only status probe;
 - `GET /summary` - JSON-сводка хозяйства: яйца, корма, стада, инкубация;
 - `GET /version` - версия, окружение, commit и ссылки.
 - `GET /admin/service-status` - compact JSON для внешнего мониторинга;
 - `POST /admin/restart` - создает файл-заявку на перезапуск в `RESTART_REQUEST_DIR`.
 
-Если `WEB_ADMIN_TOKEN` не задан, закрытые endpoints возвращают `503`.
+Если не задан ни `WEB_ADMIN_TOKEN`, ни `WEB_LINK_TOKEN`, обычные закрытые
+web-страницы возвращают `503`. Admin endpoints всегда требуют `WEB_ADMIN_TOKEN`.
+Для обычных web-страниц заготовлена авторизация по ссылке: если задан
+`WEB_LINK_TOKEN`, страницы `/`, `/feeds`, `/summary`, `/feeds/data`, `/status`
+и `/version` можно открыть с `?auth=<WEB_LINK_TOKEN>`. Admin endpoints
+`/admin/*` по link-token не открываются и требуют именно admin-token.
 Для `/admin/restart` нужно передать `confirm: "restart:incubator"` и target
 `bot`, `worker` или `all`; сам web-сервис только пишет заявку, фактический
 перезапуск должен выполнять внешний runner/monitor.

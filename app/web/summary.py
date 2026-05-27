@@ -94,6 +94,58 @@ def build_web_summary(
     )
 
 
+def build_web_feeds(
+    db_path: Path,
+    *,
+    user_id: int | None = None,
+    now: datetime | None = None,
+    timezone_name: str = "Europe/Moscow",
+) -> dict:
+    summary = build_web_summary(
+        db_path,
+        user_id=user_id,
+        now=now,
+        timezone_name=timezone_name,
+    )
+    selected_user_id = summary.get("selected_user_id")
+    if selected_user_id is None or summary.get("db", {}).get("status") != "ok":
+        return {
+            "generated_at": summary.get("generated_at"),
+            "selected_user_id": selected_user_id,
+            "db": summary.get("db"),
+            "feeds": summary.get("feeds"),
+            "history": [],
+        }
+
+    database = ReadOnlyDatabase(db_path)
+    feeds_repository = FeedRepository(database)
+    stock_repository = StockRepository(database)
+    stock_service = StockService(stock_repository, feeds_repository)
+    history = []
+    for transaction in stock_service.list_history(int(selected_user_id), limit=30):
+        item = stock_repository.get_item(transaction.stock_item_id, int(selected_user_id))
+        history.append(
+            {
+                "id": transaction.id,
+                "item_name": item.name if item else "",
+                "type": transaction.type,
+                "type_label": _stock_transaction_label(transaction.type),
+                "amount_kg": round(transaction.amount_kg, 3),
+                "balance_after_kg": round(transaction.balance_after_kg, 3),
+                "note": transaction.note,
+                "created_at": transaction.created_at.isoformat(),
+            }
+        )
+
+    return {
+        "generated_at": summary.get("generated_at"),
+        "selected_user_id": selected_user_id,
+        "db": summary.get("db"),
+        "feeds": summary.get("feeds"),
+        "history": history,
+    }
+
+
 class ManagedReadOnlyConnection(sqlite3.Connection):
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         try:
@@ -357,6 +409,16 @@ def _mix_limit_ingredient(plan):
     if not candidates:
         return None
     return min(candidates, key=lambda item: item.available_kg / item.required_kg)
+
+
+def _stock_transaction_label(value: str) -> str:
+    return {
+        "purchase": "покупка",
+        "manual_adjustment": "фактический остаток",
+        "mix_input": "ингредиент в замес",
+        "mix_output": "готовая смесь",
+        "write_off": "списание",
+    }.get(value, value)
 
 
 def _local_date(current: datetime, timezone_name: str):
