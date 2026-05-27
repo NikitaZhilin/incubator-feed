@@ -322,8 +322,13 @@ async def share_callback(callback: CallbackQuery) -> None:
 async def web_unconfigured_callback(callback: CallbackQuery, config: AppConfig) -> None:
     if config.web_open_url:
         await callback.message.answer(
-            "🌐 Web-версия доступна по ссылке:\n"
-            f"{config.web_open_url}"
+            "🌐 Web-версия доступна.",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="🌐 Открыть сайт", url=config.web_open_url)],
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
+                ]
+            ),
         )
     else:
         user_id = callback.from_user.id if callback.from_user else 0

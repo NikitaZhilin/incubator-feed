@@ -272,20 +272,20 @@ jobs:
               value=\"\$2\"
               if grep -q \"^\$key=\" .env.prod; then
                 python3 - \"\$key\" \"\$value\" <<'PY'
-import sys
-from pathlib import Path
+          import sys
+          from pathlib import Path
 
-path = Path('.env.prod')
-key, value = sys.argv[1], sys.argv[2]
-lines = path.read_text(encoding='utf-8').splitlines()
-path.write_text(
-    '\n'.join(
-        f'{key}={value}' if line.startswith(f'{key}=') else line
-        for line in lines
-    ) + '\n',
-    encoding='utf-8',
-)
-PY
+          path = Path('.env.prod')
+          key, value = sys.argv[1], sys.argv[2]
+          lines = path.read_text(encoding='utf-8').splitlines()
+          path.write_text(
+              '\n'.join(
+                  f'{key}={value}' if line.startswith(f'{key}=') else line
+                  for line in lines
+              ) + '\n',
+              encoding='utf-8',
+          )
+          PY
               else
                 printf '%s=%s\n' \"\$key\" \"\$value\" >> .env.prod
               fi
@@ -320,17 +320,17 @@ PY
                 ngrok/ngrok:latest http http://host.docker.internal:8080 --log=stdout
               sleep 12
               NGROK_PUBLIC_URL=\"\$(python3 - <<'PY'
-import json
-import urllib.request
+          import json
+          import urllib.request
 
-with urllib.request.urlopen('http://127.0.0.1:4041/api/tunnels', timeout=5) as response:
-    payload = json.loads(response.read().decode('utf-8'))
-for item in payload.get('tunnels', []):
-    if item.get('proto') == 'https' and item.get('public_url'):
-        print(item['public_url'])
-        break
-PY
-)\"
+          with urllib.request.urlopen('http://127.0.0.1:4041/api/tunnels', timeout=5) as response:
+              payload = json.loads(response.read().decode('utf-8'))
+          for item in payload.get('tunnels', []):
+              if item.get('proto') == 'https' and item.get('public_url'):
+                  print(item['public_url'])
+                  break
+          PY
+          )\"
               if [ -z \"\$NGROK_PUBLIC_URL\" ]; then
                 echo 'ngrok did not return a public https URL.' >&2
                 docker logs --tail=80 '$NGROK_CONTAINER_NAME' >&2 || true
