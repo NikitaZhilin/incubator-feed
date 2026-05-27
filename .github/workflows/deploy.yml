@@ -54,6 +54,7 @@ jobs:
       IMAGE_NAME: incubator-feed:latest
       CONTAINER_NAME: incubator-feed-bot
       WEB_CONTAINER_NAME: incubator-feed-web
+      NGROK_CONTAINER_NAME: incubator-feed-ngrok
 
     steps:
       - name: Check out repository
@@ -255,13 +256,40 @@ jobs:
 
       - name: Start bot
         if: steps.deploy-secrets.outputs.ready == 'true'
+        env:
+          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
         run: |
+          NGROK_AUTHTOKEN_B64="$(printf '%s' "$NGROK_AUTHTOKEN" | base64 -w0)"
           ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "
             set -e
             cd '$DEPLOY_PATH'
             mkdir -p data logs backups
             RELEASE_COMMIT=\"\$(git rev-parse --short=12 HEAD 2>/dev/null || true)\"
             RELEASE_DEPLOYED_AT=\"\$(date -u +'%Y-%m-%dT%H:%M:%SZ')\"
+            NGROK_AUTHTOKEN=\"\$(printf '%s' '$NGROK_AUTHTOKEN_B64' | base64 -d)\"
+            update_env_var() {
+              key=\"\$1\"
+              value=\"\$2\"
+              if grep -q \"^\$key=\" .env.prod; then
+                python3 - \"\$key\" \"\$value\" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path('.env.prod')
+key, value = sys.argv[1], sys.argv[2]
+lines = path.read_text(encoding='utf-8').splitlines()
+path.write_text(
+    '\n'.join(
+        f'{key}={value}' if line.startswith(f'{key}=') else line
+        for line in lines
+    ) + '\n',
+    encoding='utf-8',
+)
+PY
+              else
+                printf '%s=%s\n' \"\$key\" \"\$value\" >> .env.prod
+              fi
+            }
             docker build -t '$IMAGE_NAME' .
             docker run --rm --env-file .env.prod \
               -v '$DEPLOY_PATH/data:/app/data' \
@@ -270,6 +298,47 @@ jobs:
               '$IMAGE_NAME' python -B scripts/migrate.py
             docker rm -f '$CONTAINER_NAME' >/dev/null 2>&1 || true
             docker rm -f '$WEB_CONTAINER_NAME' >/dev/null 2>&1 || true
+            docker rm -f '$NGROK_CONTAINER_NAME' >/dev/null 2>&1 || true
+            update_env_var WEB_ENABLED true
+            update_env_var WEB_HOST 0.0.0.0
+            update_env_var WEB_PORT 8080
+            docker run -d --name '$WEB_CONTAINER_NAME' --restart unless-stopped \
+              --env-file '$DEPLOY_PATH/.env.prod' \
+              -e WEB_ENABLED=true \
+              -e WEB_HOST=0.0.0.0 \
+              -e WEB_PORT=8080 \
+              -p 127.0.0.1:8080:8080 \
+              -v '$DEPLOY_PATH/data:/app/data:ro' \
+              '$IMAGE_NAME' python -B scripts/web_app.py
+            sleep 3
+            curl -fsS http://127.0.0.1:8080/health
+            if [ -n \"\$NGROK_AUTHTOKEN\" ]; then
+              docker run -d --name '$NGROK_CONTAINER_NAME' --restart unless-stopped \
+                --add-host=host.docker.internal:host-gateway \
+                -p 127.0.0.1:4041:4040 \
+                -e NGROK_AUTHTOKEN=\"\$NGROK_AUTHTOKEN\" \
+                ngrok/ngrok:latest http http://host.docker.internal:8080 --log=stdout
+              sleep 12
+              NGROK_PUBLIC_URL=\"\$(python3 - <<'PY'
+import json
+import urllib.request
+
+with urllib.request.urlopen('http://127.0.0.1:4041/api/tunnels', timeout=5) as response:
+    payload = json.loads(response.read().decode('utf-8'))
+for item in payload.get('tunnels', []):
+    if item.get('proto') == 'https' and item.get('public_url'):
+        print(item['public_url'])
+        break
+PY
+)\"
+              if [ -z \"\$NGROK_PUBLIC_URL\" ]; then
+                echo 'ngrok did not return a public https URL.' >&2
+                docker logs --tail=80 '$NGROK_CONTAINER_NAME' >&2 || true
+                exit 1
+              fi
+              update_env_var WEB_PUBLIC_URL \"\$NGROK_PUBLIC_URL\"
+              echo \"WEB_PUBLIC_URL=\$NGROK_PUBLIC_URL\"
+            fi
             docker run -d --name '$CONTAINER_NAME' --restart unless-stopped \
               --env-file '$DEPLOY_PATH/.env.prod' \
               -e ADMIN_STARTUP_NOTICE_MODE='once_per_deploy' \
@@ -279,14 +348,6 @@ jobs:
               -v '$DEPLOY_PATH/logs:/app/logs' \
               -v '$DEPLOY_PATH/backups:/app/backups' \
               '$IMAGE_NAME' python main.py
-            docker run -d --name '$WEB_CONTAINER_NAME' --restart unless-stopped \
-              --env-file '$DEPLOY_PATH/.env.prod' \
-              -e WEB_ENABLED=true \
-              -e WEB_HOST=0.0.0.0 \
-              -e WEB_PORT=8080 \
-              -p 127.0.0.1:8080:8080 \
-              -v '$DEPLOY_PATH/data:/app/data:ro' \
-              '$IMAGE_NAME' python -B scripts/web_app.py
             docker ps --filter name='$CONTAINER_NAME'
             docker ps --filter name='$WEB_CONTAINER_NAME'
             docker exec '$CONTAINER_NAME' python -B -c 'from app.version import APP_VERSION; print(\"container app version\", APP_VERSION)'

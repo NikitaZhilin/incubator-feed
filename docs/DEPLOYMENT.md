@@ -31,6 +31,7 @@ VPS_PORT=22
 VPS_SSH_KEY=private SSH key allowed to connect to the VPS
 WEB_PUBLIC_URL=public web URL, for example https://your-domain.ngrok-free.app
 WEB_LINK_TOKEN=long random token for link-based web access
+NGROK_AUTHTOKEN=ngrok account token, used to create/update WEB_PUBLIC_URL automatically
 ```
 
 Optional repository variable:
@@ -172,6 +173,9 @@ The deploy starts two Docker containers: `incubator-feed-bot` for Telegram
 polling and `incubator-feed-web` for the web interface. The web container is
 bound to `127.0.0.1:8080`; expose it through ngrok, Caddy, Nginx, or another
 reverse proxy, then put that public address into `WEB_PUBLIC_URL`.
+If `NGROK_AUTHTOKEN` is configured in GitHub Actions secrets, the deploy also
+starts `incubator-feed-ngrok`, reads its generated HTTPS URL and writes it to
+`WEB_PUBLIC_URL` in `.env.prod` before starting the Telegram bot.
 
 ## VPS auto deploy fallback
 
