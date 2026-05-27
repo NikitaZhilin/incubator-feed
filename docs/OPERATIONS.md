@@ -91,6 +91,39 @@ python -B scripts/status_probe.py
 `degraded` выставляется при свежем heartbeat со статусом `degraded`, `last_error`
 или накопленных `critical_errors`.
 
+## Web service
+
+Web-интерфейс запускается отдельным процессом и не встроен в Telegram polling.
+По умолчанию он должен слушать только `127.0.0.1`.
+
+Минимальная конфигурация:
+
+```env
+WEB_ENABLED=true
+WEB_HOST=127.0.0.1
+WEB_PORT=8080
+WEB_ADMIN_TOKEN=replace_with_strong_token
+```
+
+Запуск:
+
+```bash
+python -B scripts/web_app.py
+```
+
+Публичный endpoint:
+
+- `GET /health`
+
+Закрытые endpoints требуют `Authorization: Bearer <WEB_ADMIN_TOKEN>` или
+`X-Web-Token: <WEB_ADMIN_TOKEN>`:
+
+- `GET /` - HTML-сводка;
+- `GET /status` - JSON-статус на базе read-only status probe;
+- `GET /version` - версия, окружение, commit и ссылки.
+
+Если `WEB_ADMIN_TOKEN` не задан, закрытые endpoints возвращают `503`.
+
 ## Rollback
 
 1. Остановить сервис.

@@ -2,6 +2,7 @@
 
 ## 2026-05-27
 
+- Добавлен первый этап web-версии: отдельный FastAPI-сервис с `/health`, защищенными `/status`, `/version` и HTML-сводкой.
 - Добавлен read-only heartbeat для внешнего статус-бота: `polling_bot`, `reminder_runner`, таблица `service_heartbeats` и `scripts/status_probe.py`.
 - Служебное сообщение о старте снова строго admin-only: оно отправляется только ID из `ADMIN_IDS`; добавлена команда `/my_id`, чтобы быстро узнать Telegram ID для настройки.
 - GitHub Actions больше не затирает `ADMIN_IDS` пустым значением при деплое, чтобы admin-уведомления о старте реально доходили.
