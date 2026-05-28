@@ -74,7 +74,6 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(self.client.get("/incubation").status_code, 401)
         self.assertEqual(self.client.get("/about/data").status_code, 401)
         self.assertEqual(self.client.get("/about").status_code, 401)
-        self.assertEqual(self.client.get("/").status_code, 401)
         self.assertEqual(
             self.client.post("/eggs/entries", data={"eggs_count": "1"}).status_code,
             401,
@@ -115,6 +114,18 @@ class WebAppTest(unittest.TestCase):
             self.client.patch("/settings/sections", data={"sections": "feeds"}).status_code,
             401,
         )
+
+    def test_root_redirects_to_link_token_when_opened_without_auth(self) -> None:
+        response = self.client.get("/", follow_redirects=False)
+        user_response = self.client.get("/?user_id=42", follow_redirects=False)
+        opened_response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(response.headers["location"], "/?auth=link-token")
+        self.assertEqual(user_response.status_code, 307)
+        self.assertEqual(user_response.headers["location"], "/?user_id=42&auth=link-token")
+        self.assertEqual(opened_response.status_code, 200)
+        self.assertIn("/feeds?auth=link-token", opened_response.text)
 
     def test_protected_pages_accept_bearer_token(self) -> None:
         self._write_ok_heartbeats()
@@ -646,6 +657,7 @@ class WebAppTest(unittest.TestCase):
         response = client.get("/status")
 
         self.assertEqual(response.status_code, 503)
+        self.assertEqual(client.get("/").status_code, 503)
 
     def _write_ok_heartbeats(self) -> None:
         now = datetime.now(timezone.utc)

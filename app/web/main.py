@@ -739,13 +739,22 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
         payload["error"] = error or ""
         return _render_about_page(current, payload, auth_token=auth or "")
 
-    @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_web_access)])
+    @app.get("/", response_class=HTMLResponse)
     def index(
         request: Request,
         user_id: int | None = Query(default=None),
         auth: str | None = Query(default=None),
-    ) -> str:
+        authorization: str | None = Header(default=None),
+        x_web_token: str | None = Header(default=None),
+    ):
         current = request.app.state.web_config
+        if not auth and not authorization and not x_web_token and current.link_token:
+            params: list[tuple[str, str]] = [("auth", current.link_token)]
+            if user_id is not None:
+                params.insert(0, ("user_id", str(user_id)))
+            return RedirectResponse(url=f"/?{urlencode(params)}")
+
+        require_web_access(authorization=authorization, x_web_token=x_web_token, auth=auth)
         report = build_status_report(current.db_path)
         summary_payload = build_web_summary(
             current.db_path,
