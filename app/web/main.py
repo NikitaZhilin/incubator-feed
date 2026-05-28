@@ -955,20 +955,43 @@ def _page_style() -> str:
       margin: 28px 0 12px;
       font-size: 18px;
     }
+    .nav-shell {
+      position: relative;
+      margin-top: 16px;
+    }
+    .nav-shell::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 34px;
+      pointer-events: none;
+      background: linear-gradient(90deg, rgba(244, 241, 234, 0), #f4f1ea 80%);
+    }
     .nav {
       display: flex;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       gap: 8px;
-      margin-top: 16px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 0 34px 6px 0;
+      scrollbar-width: thin;
+      scroll-snap-type: x proximity;
+      -webkit-overflow-scrolling: touch;
     }
     .nav a {
       border: 1px solid #cfc5b4;
       border-radius: 6px;
+      flex: 0 0 auto;
       padding: 7px 10px;
       background: #fffaf2;
       text-decoration: none;
       color: #245b78;
       font-size: 14px;
+      line-height: 1.25;
+      scroll-snap-align: start;
+      white-space: nowrap;
     }
     .nav a.active {
       background: #e6f1f5;
@@ -1109,6 +1132,9 @@ def _page_style() -> str:
         background: #1b2835;
         border-color: #2d3f50;
       }
+      .nav-shell::after {
+        background: linear-gradient(90deg, rgba(17, 24, 32, 0), #111820 80%);
+      }
       .nav a.active {
         background: #254050;
         border-color: #44718a;
@@ -1143,6 +1169,39 @@ def _page_style() -> str:
         color: #88c7ef;
       }
     }
+    @media (max-width: 900px) {
+      main {
+        padding: 22px 12px 42px;
+      }
+      header {
+        margin-bottom: 18px;
+      }
+      h1 {
+        font-size: 24px;
+      }
+      .nav-shell {
+        margin-left: -12px;
+        margin-right: -12px;
+        padding-left: 12px;
+      }
+      .nav a {
+        min-height: 38px;
+        display: inline-flex;
+        align-items: center;
+      }
+    }
+    @media (max-width: 520px) {
+      h1 {
+        font-size: 22px;
+      }
+      .summary, .wide-summary {
+        grid-template-columns: 1fr;
+      }
+      .nav a {
+        font-size: 13px;
+        padding: 8px 10px;
+      }
+    }
   </style>"""
 
 
@@ -1173,7 +1232,8 @@ def _nav_links(auth_token: str, *, active_path: str) -> str:
         rendered.append(
             f'<a href="{escape(_link(path, auth_token))}"{class_attr}{current_attr}>{escape(label)}</a>'
         )
-    return '<nav class="nav" aria-label="Основные разделы">' + "\n      ".join(rendered) + "</nav>"
+    nav = '<nav class="nav" aria-label="Основные разделы">' + "\n      ".join(rendered) + "</nav>"
+    return f'<div class="nav-shell">{nav}</div>'
 
 
 def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token: str = "") -> str:

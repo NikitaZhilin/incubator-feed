@@ -164,6 +164,8 @@ class WebAppTest(unittest.TestCase):
 
         self.assertEqual(index_response.status_code, 200)
         self.assertIn('aria-label="Основные разделы"', index_response.text)
+        self.assertIn('class="nav-shell"', index_response.text)
+        self.assertIn("scroll-snap-type: x proximity", index_response.text)
         self.assertIn("/feeds?auth=link-token", index_response.text)
         self.assertIn("/mix?auth=link-token", index_response.text)
         self.assertIn("/livestock?auth=link-token", index_response.text)
