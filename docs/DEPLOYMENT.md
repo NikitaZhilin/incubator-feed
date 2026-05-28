@@ -176,6 +176,10 @@ reverse proxy, then put that public address into `WEB_PUBLIC_URL`.
 If `NGROK_AUTHTOKEN` is configured in GitHub Actions secrets, the deploy also
 starts `incubator-feed-ngrok`, reads its generated HTTPS URL and writes it to
 `WEB_PUBLIC_URL` in `.env.prod` before starting the Telegram bot.
+With HTTPS `WEB_PUBLIC_URL`, the bot shows separate `Открыть сайт` and
+`Открыть Mini App` buttons and configures the Telegram menu button to open the
+Mini App on startup. After changing `WEB_PUBLIC_URL`, restart the bot container
+so Telegram receives the new menu button URL.
 
 ## VPS auto deploy fallback
 

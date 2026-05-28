@@ -206,6 +206,50 @@ class FeedServiceTest(unittest.TestCase):
         self.assertEqual(updated.hen_count, 30)
         self.assertEqual(updated.rooster_count, 0)
 
+    def test_active_flock_names_are_unique_per_user(self) -> None:
+        group = self.service.create_bird_group(
+            user_id=1,
+            name="Несушки",
+            bird_count=12,
+            species="chicken",
+        )
+        other_group = self.service.create_bird_group(
+            user_id=1,
+            name="Молодки",
+            bird_count=8,
+            species="chicken",
+        )
+        another_user_group = self.service.create_bird_group(
+            user_id=2,
+            name="Несушки",
+            bird_count=12,
+            species="chicken",
+        )
+        flock = self.service.create_flock(
+            user_id=1,
+            name="Основное стадо",
+            member_group_ids=[group.id],
+        )
+
+        with self.assertRaises(ValueError):
+            self.service.create_flock(
+                user_id=1,
+                name=" основное стадо ",
+                member_group_ids=[other_group.id],
+            )
+
+        self.service.update_flock(
+            flock_id=flock.id,
+            user_id=1,
+            name="Основное стадо",
+            member_group_ids=[group.id],
+        )
+        self.service.create_flock(
+            user_id=2,
+            name="Основное стадо",
+            member_group_ids=[another_user_group.id],
+        )
+
     def test_chick_group_uses_age_based_feed_rate_with_reserve(self) -> None:
         group = self.service.create_bird_group(
             user_id=1,

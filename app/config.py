@@ -44,6 +44,14 @@ class AppConfig:
             return base_url
         return f"{base_url}/?{urlencode({'auth': self.web_link_token})}"
 
+    @property
+    def miniapp_open_url(self) -> str:
+        """Return a Telegram WebApp URL only when Telegram can open it in-app."""
+        base_url = self.web_public_url.strip().rstrip("/")
+        if not base_url.lower().startswith("https://"):
+            return ""
+        return self.web_open_url
+
 
 def get_project_root() -> Path:
     """Return the project root directory."""

@@ -44,7 +44,13 @@ from app.keyboards.incubation import (
     guide_species_keyboard,
     number_adjust_keyboard,
 )
-from app.keyboards.menu import incubation_menu_keyboard, main_menu_keyboard, settings_keyboard, settings_sections_keyboard
+from app.keyboards.menu import (
+    incubation_menu_keyboard,
+    main_menu_keyboard,
+    settings_keyboard,
+    settings_sections_keyboard,
+    web_choice_keyboard,
+)
 
 
 def _keyboard_texts(keyboard) -> list[str]:
@@ -57,6 +63,15 @@ def _keyboard_callbacks(keyboard) -> list[str | None]:
 
 def _keyboard_urls(keyboard) -> list[str | None]:
     return [button.url for row in keyboard.inline_keyboard for button in row]
+
+
+def _keyboard_web_app_urls(keyboard) -> list[str | None]:
+    return [
+        button.web_app.url
+        for row in keyboard.inline_keyboard
+        for button in row
+        if button.web_app is not None
+    ]
 
 
 class HandlerHelpersTest(unittest.TestCase):
@@ -257,14 +272,34 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("menu:web", _keyboard_callbacks(keyboard))
 
     def test_main_menu_and_settings_show_web_button_and_use_url_when_configured(self) -> None:
-        main_keyboard = main_menu_keyboard(web_url="https://incubator.example.test/?auth=secret")
-        settings_markup = settings_keyboard(web_url="https://incubator.example.test/?auth=secret")
+        main_keyboard = main_menu_keyboard(
+            web_url="https://incubator.example.test/?auth=secret",
+            miniapp_url="https://incubator.example.test/?auth=secret",
+        )
+        settings_markup = settings_keyboard(
+            web_url="https://incubator.example.test/?auth=secret",
+            miniapp_url="https://incubator.example.test/?auth=secret",
+        )
 
         self.assertIn("🌐 Открыть сайт", _keyboard_texts(main_keyboard))
+        self.assertIn("📱 Открыть Mini App", _keyboard_texts(main_keyboard))
         self.assertIn("🌐 Открыть сайт", _keyboard_texts(settings_markup))
+        self.assertIn("📱 Открыть Mini App", _keyboard_texts(settings_markup))
         self.assertIn("https://incubator.example.test/?auth=secret", _keyboard_urls(main_keyboard))
+        self.assertIn("https://incubator.example.test/?auth=secret", _keyboard_web_app_urls(main_keyboard))
         self.assertIn("🌐 Открыть сайт", _keyboard_texts(settings_keyboard()))
         self.assertIn("menu:web", _keyboard_callbacks(settings_keyboard()))
+
+    def test_web_choice_keyboard_shows_site_and_miniapp(self) -> None:
+        markup = web_choice_keyboard(
+            web_url="https://incubator.example.test/?auth=secret",
+            miniapp_url="https://incubator.example.test/?auth=secret",
+        )
+
+        self.assertIn("🌐 Открыть сайт", _keyboard_texts(markup))
+        self.assertIn("📱 Открыть Mini App", _keyboard_texts(markup))
+        self.assertIn("https://incubator.example.test/?auth=secret", _keyboard_urls(markup))
+        self.assertIn("https://incubator.example.test/?auth=secret", _keyboard_web_app_urls(markup))
 
     def test_eggs_keyboards_have_section_navigation(self) -> None:
         self.assertIn("➕ Добавить яйца", _keyboard_texts(eggs_menu_keyboard()))

@@ -36,7 +36,10 @@ async def settings_command(
 ) -> None:
     await message.answer(
         _format_settings(incubation_service.get_user_settings(message.from_user.id)),
-        reply_markup=settings_keyboard(web_url=config.web_open_url),
+        reply_markup=settings_keyboard(
+            web_url=config.web_open_url,
+            miniapp_url=config.miniapp_open_url,
+        ),
     )
 
 
@@ -50,7 +53,10 @@ async def settings_menu(
     await state.clear()
     await callback.message.answer(
         _format_settings(incubation_service.get_user_settings(callback.from_user.id)),
-        reply_markup=settings_keyboard(web_url=config.web_open_url),
+        reply_markup=settings_keyboard(
+            web_url=config.web_open_url,
+            miniapp_url=config.miniapp_open_url,
+        ),
     )
     await callback.answer()
 
@@ -124,6 +130,7 @@ async def settings_about(callback: CallbackQuery, config: AppConfig) -> None:
             github_url=config.github_url,
             changelog_url=config.changelog_url,
             web_url=config.web_open_url,
+            miniapp_url=config.miniapp_open_url,
         ),
     )
     await callback.answer()
@@ -143,7 +150,10 @@ async def settings_farm_name(
     farm_name = "" if value == "-" else value[:255]
     updated = incubation_service.update_user_settings(message.from_user.id, farm_name=farm_name)
     await state.clear()
-    await message.answer(_format_settings(updated), reply_markup=settings_keyboard(web_url=config.web_open_url))
+    await message.answer(
+        _format_settings(updated),
+        reply_markup=settings_keyboard(web_url=config.web_open_url, miniapp_url=config.miniapp_open_url),
+    )
 
 
 @router.message(SettingsFlow.timezone)
@@ -161,7 +171,10 @@ async def settings_timezone(
         return
     updated = incubation_service.update_user_settings(message.from_user.id, timezone=timezone)
     await state.clear()
-    await message.answer(_format_settings(updated), reply_markup=settings_keyboard(web_url=config.web_open_url))
+    await message.answer(
+        _format_settings(updated),
+        reply_markup=settings_keyboard(web_url=config.web_open_url, miniapp_url=config.miniapp_open_url),
+    )
 
 
 @router.message(SettingsFlow.notification_time)
@@ -181,7 +194,10 @@ async def settings_notification_time(
         notification_time=notification_time,
     )
     await state.clear()
-    await message.answer(_format_settings(updated), reply_markup=settings_keyboard(web_url=config.web_open_url))
+    await message.answer(
+        _format_settings(updated),
+        reply_markup=settings_keyboard(web_url=config.web_open_url, miniapp_url=config.miniapp_open_url),
+    )
 
 
 @router.message(Command("timezone"))

@@ -26,7 +26,7 @@ services:
       WEB_HOST: "0.0.0.0"
       WEB_PORT: "8080"
     volumes:
-      - ./data:/app/data:ro
+      - ./data:/app/data
     command: ["python", "-B", "scripts/web_app.py"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]

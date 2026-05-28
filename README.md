@@ -166,9 +166,11 @@ python -B scripts\web_app.py
 
 Доступны защищенные страницы `/`, `/feeds`, `/mix`, `/livestock`, `/eggs`, `/incubation`, `/about`, `/status` и `/version`.
 Если web опубликован через домен или HTTPS reverse proxy, укажите
-`WEB_PUBLIC_URL`. Кнопка `🌐 Открыть сайт` есть в Telegram всегда; без
-`WEB_PUBLIC_URL` она показывает подсказку, а с URL открывает web-версию. Для
-автовхода по ссылке дополнительно задайте `WEB_LINK_TOKEN`.
+`WEB_PUBLIC_URL`. В Telegram появляются отдельные кнопки `🌐 Открыть сайт` и,
+если URL начинается с `https://`, `📱 Открыть Mini App`. При HTTPS бот также
+настраивает Telegram menu button на Mini App при старте. Без `WEB_PUBLIC_URL`
+кнопка показывает подсказку. Для автовхода по ссылке дополнительно задайте
+`WEB_LINK_TOKEN`.
 Для быстрого теста через ngrok можно запустить `.\scripts\start-ngrok-web.ps1`
 и временно использовать выданный `https://...ngrok-free.app` как `WEB_PUBLIC_URL`.
 Подробно: [docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/WEB_VERSION_TZ.md](docs/WEB_VERSION_TZ.md).

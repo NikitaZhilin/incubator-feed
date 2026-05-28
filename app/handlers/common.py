@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.config import AppConfig
-from app.keyboards.menu import main_menu_keyboard
+from app.keyboards.menu import main_menu_keyboard, web_choice_keyboard
 from app.services.incubation import IncubationService
 from app.version import APP_VERSION
 
@@ -289,6 +289,7 @@ async def start(
         reply_markup=main_menu_keyboard(
             incubation_service.get_user_settings(message.from_user.id),
             web_url=config.web_open_url,
+            miniapp_url=config.miniapp_open_url,
         ),
     )
 
@@ -320,14 +321,12 @@ async def share_callback(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "menu:web")
 async def web_unconfigured_callback(callback: CallbackQuery, config: AppConfig) -> None:
-    if config.web_open_url:
+    if config.web_open_url or config.miniapp_open_url:
         await callback.message.answer(
-            "🌐 Web-версия доступна.",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="🌐 Открыть сайт", url=config.web_open_url)],
-                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
-                ]
+            "🌐 Выберите, где открыть web-интерфейс.",
+            reply_markup=web_choice_keyboard(
+                web_url=config.web_open_url,
+                miniapp_url=config.miniapp_open_url,
             ),
         )
     else:
@@ -401,6 +400,7 @@ async def menu(
         reply_markup=main_menu_keyboard(
             incubation_service.get_user_settings(message.from_user.id),
             web_url=config.web_open_url,
+            miniapp_url=config.miniapp_open_url,
         ),
     )
 
@@ -415,9 +415,10 @@ async def cancel_any(
     await state.clear()
     settings = incubation_service.get_user_settings(message.from_user.id) if incubation_service else None
     web_url = config.web_open_url if config else ""
+    miniapp_url = config.miniapp_open_url if config else ""
     await message.answer(
         "Действие отменено. Главное меню:",
-        reply_markup=main_menu_keyboard(settings, web_url=web_url),
+        reply_markup=main_menu_keyboard(settings, web_url=web_url, miniapp_url=miniapp_url),
     )
 
 

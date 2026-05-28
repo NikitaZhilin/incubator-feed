@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from html import escape
 from math import isfinite
 import secrets
@@ -12,9 +12,11 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from app.services.eggs import EggService
 from app.services.feed_recipes import parse_feed_amount
 from app.services.feeds import FeedService
+from app.services.incubation import IncubationService
 from app.services.status_probe import build_status_report
 from app.services.stock import STOCK_KIND_LABELS, StockService
 from app.storage.database import Database
+from app.storage.repositories.batches import BatchRepository
 from app.storage.repositories.eggs import EggRepository
 from app.storage.repositories.feeds import FeedRepository
 from app.storage.repositories.stock import StockRepository
@@ -168,6 +170,45 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             notice=f"Покупка добавлена: {estimate.item.name}, {_kg(amount_kg)}.",
         )
 
+    @app.post("/stock/items/{stock_item_id}/adjust", dependencies=[Depends(require_web_access)])
+    async def adjust_stock_item(
+        stock_item_id: int,
+        request: Request,
+        auth: str | None = Query(default=None),
+    ) -> RedirectResponse:
+        current = app.state.web_config
+        redirect_base = _link("/feeds", auth or "")
+        form = _parse_urlencoded_form((await request.body()).decode("utf-8", errors="replace"))
+        raw_user_id = form.get("user_id", "")
+        user_id = int(raw_user_id) if raw_user_id.strip().isdigit() else None
+        if not current.db_path.exists():
+            return _redirect_with_message(
+                redirect_base,
+                error="База данных не найдена. Остаток не обновлен.",
+            )
+        selected_user_id = _selected_user_for_write(current, user_id=user_id)
+        if selected_user_id is None:
+            return _redirect_with_message(
+                redirect_base,
+                error="Пользователь не выбран. Остаток не обновлен.",
+            )
+        try:
+            amount_kg = _parse_stock_amount(form.get("amount", ""), allow_zero=True)
+            estimate = _stock_service(current).adjust_stock(
+                user_id=selected_user_id,
+                stock_item_id=stock_item_id,
+                amount_kg=amount_kg,
+                note=str(form.get("note", "")).strip(),
+            )
+        except ValueError as exc:
+            return _redirect_with_message(redirect_base, error=str(exc))
+        if estimate is None:
+            return _redirect_with_message(redirect_base, error="Позиция склада не найдена.")
+        return _redirect_with_message(
+            redirect_base,
+            notice=f"Фактический остаток обновлен: {estimate.item.name}, {_kg(estimate.remaining_kg)}.",
+        )
+
     @app.get("/mix/data", dependencies=[Depends(require_web_access)])
     def mix_data(user_id: int | None = Query(default=None)) -> dict:
         current = app.state.web_config
@@ -309,6 +350,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
         raw_user_id = form.get("user_id", "")
         user_id = int(raw_user_id) if raw_user_id.strip().isdigit() else None
         entry_day = form.get("entry_day", "today")
+        raw_entry_date = form.get("entry_date", "")
         eggs_count = form.get("eggs_count", "")
         note = form.get("note", "")
         if not current.db_path.exists():
@@ -330,15 +372,15 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
                 FeedRepository(database),
                 timezone_name=current.timezone_name,
             )
-            entry_date = service.current_date()
-            if entry_day == "yesterday":
-                entry_date -= timedelta(days=1)
-            elif entry_day != "today":
-                raise ValueError("Выберите сегодня или вчера.")
-            entry = service.record_today(
+            entry_date = _parse_egg_entry_date(
+                raw_entry_date,
+                entry_day=entry_day,
+                service=service,
+            )
+            entry = service.record_entry(
                 selected_user_id,
                 count,
-                today=entry_date,
+                entry_date=entry_date,
                 note=note.strip(),
             )
         except ValueError as exc:
@@ -347,6 +389,89 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             redirect_base,
             notice=f"Запись добавлена: {entry.entry_date.isoformat()}, {entry.eggs_count} шт.",
         )
+
+    @app.post("/eggs/entries/{entry_id}", dependencies=[Depends(require_web_access)])
+    @app.patch("/eggs/entries/{entry_id}", dependencies=[Depends(require_web_access)])
+    async def update_egg_entry(
+        entry_id: int,
+        request: Request,
+        auth: str | None = Query(default=None),
+    ) -> RedirectResponse:
+        current = app.state.web_config
+        redirect_base = _link("/eggs", auth or "")
+        form = _parse_urlencoded_form((await request.body()).decode("utf-8", errors="replace"))
+        raw_user_id = form.get("user_id", "")
+        user_id = int(raw_user_id) if raw_user_id.strip().isdigit() else None
+        if not current.db_path.exists():
+            return _redirect_with_message(
+                redirect_base,
+                error="База данных не найдена. Запись не обновлена.",
+            )
+        selected_user_id = _selected_user_for_write(current, user_id=user_id)
+        if selected_user_id is None:
+            return _redirect_with_message(
+                redirect_base,
+                error="Пользователь не выбран. Запись не обновлена.",
+            )
+        try:
+            count = int(str(form.get("eggs_count", "")).strip())
+            database = Database(current.db_path)
+            service = EggService(
+                EggRepository(database),
+                FeedRepository(database),
+                timezone_name=current.timezone_name,
+            )
+            entry_date = _parse_required_date(form.get("entry_date", ""), "Дата сбора")
+            entry = service.update_entry(
+                user_id=selected_user_id,
+                entry_id=entry_id,
+                entry_date=entry_date,
+                eggs_count=count,
+                note=form.get("note", ""),
+            )
+        except ValueError as exc:
+            return _redirect_with_message(redirect_base, error=str(exc))
+        return _redirect_with_message(
+            redirect_base,
+            notice=f"Запись обновлена: {entry.entry_date.isoformat()}, {entry.eggs_count} шт.",
+        )
+
+    @app.post("/eggs/entries/{entry_id}/delete", dependencies=[Depends(require_web_access)])
+    async def delete_egg_entry(
+        entry_id: int,
+        request: Request,
+        auth: str | None = Query(default=None),
+    ) -> RedirectResponse:
+        current = app.state.web_config
+        redirect_base = _link("/eggs", auth or "")
+        form = _parse_urlencoded_form((await request.body()).decode("utf-8", errors="replace"))
+        raw_user_id = form.get("user_id", "")
+        user_id = int(raw_user_id) if raw_user_id.strip().isdigit() else None
+        if form.get("confirm_delete", "") != "yes":
+            return _redirect_with_message(
+                redirect_base,
+                error="Для удаления записи нужен второй подтверждающий клик.",
+            )
+        if not current.db_path.exists():
+            return _redirect_with_message(
+                redirect_base,
+                error="База данных не найдена. Запись не удалена.",
+            )
+        selected_user_id = _selected_user_for_write(current, user_id=user_id)
+        if selected_user_id is None:
+            return _redirect_with_message(
+                redirect_base,
+                error="Пользователь не выбран. Запись не удалена.",
+            )
+        database = Database(current.db_path)
+        deleted = EggService(
+            EggRepository(database),
+            FeedRepository(database),
+            timezone_name=current.timezone_name,
+        ).delete_entry(user_id=selected_user_id, entry_id=entry_id)
+        if not deleted:
+            return _redirect_with_message(redirect_base, error="Запись не найдена.")
+        return _redirect_with_message(redirect_base, notice="Запись удалена.")
 
     @app.get("/incubation/data", dependencies=[Depends(require_web_access)])
     def incubation_data(user_id: int | None = Query(default=None)) -> dict:
@@ -362,6 +487,8 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
         request: Request,
         user_id: int | None = Query(default=None),
         auth: str | None = Query(default=None),
+        notice: str | None = Query(default=None),
+        error: str | None = Query(default=None),
     ) -> str:
         current = request.app.state.web_config
         payload = build_web_incubation(
@@ -369,7 +496,112 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             user_id=user_id,
             timezone_name=current.timezone_name,
         )
+        payload["notice"] = notice or ""
+        payload["error"] = error or ""
         return _render_incubation_page(current, payload, auth_token=auth or "")
+
+    @app.post("/incubation/batches", dependencies=[Depends(require_web_access)])
+    async def create_incubation_batch(
+        request: Request,
+        auth: str | None = Query(default=None),
+    ) -> RedirectResponse:
+        current = app.state.web_config
+        redirect_base = _link("/incubation", auth or "")
+        form = _parse_urlencoded_form((await request.body()).decode("utf-8", errors="replace"))
+        raw_user_id = form.get("user_id", "")
+        user_id = int(raw_user_id) if raw_user_id.strip().isdigit() else None
+        if not current.db_path.exists():
+            return _redirect_with_message(
+                redirect_base,
+                error="База данных не найдена. Партия не создана.",
+            )
+        selected_user_id = _selected_user_for_write(current, user_id=user_id)
+        if selected_user_id is None:
+            return _redirect_with_message(
+                redirect_base,
+                error="Пользователь не выбран. Партия не создана.",
+            )
+        try:
+            batch = _incubation_service(current).create_batch(
+                user_id=selected_user_id,
+                species=str(form.get("species", "")).strip(),
+                eggs_count=_parse_positive_int(
+                    form.get("eggs_count", ""),
+                    empty_message="Укажите количество яиц.",
+                    positive_message="Количество яиц должно быть больше нуля.",
+                ),
+                start_date=_parse_required_date(form.get("start_date", ""), "Дата закладки"),
+                title=str(form.get("title", "")).strip() or None,
+                note=str(form.get("note", "")).strip(),
+            )
+        except ValueError as exc:
+            return _redirect_with_message(redirect_base, error=str(exc))
+        return _redirect_with_message(
+            redirect_base,
+            notice=f"Партия создана: {batch.title}, {batch.eggs_count} шт.",
+        )
+
+    @app.post("/incubation/batches/{batch_id}/complete", dependencies=[Depends(require_web_access)])
+    async def complete_incubation_batch(
+        batch_id: int,
+        request: Request,
+        auth: str | None = Query(default=None),
+    ) -> RedirectResponse:
+        current = app.state.web_config
+        redirect_base = _link("/incubation", auth or "")
+        form = _parse_urlencoded_form((await request.body()).decode("utf-8", errors="replace"))
+        raw_user_id = form.get("user_id", "")
+        user_id = int(raw_user_id) if raw_user_id.strip().isdigit() else None
+        selected_user_id = _selected_user_for_write(current, user_id=user_id)
+        if selected_user_id is None:
+            return _redirect_with_message(
+                redirect_base,
+                error="Пользователь не выбран. Партия не завершена.",
+            )
+        try:
+            batch = _incubation_service(current).complete_batch(
+                batch_id=batch_id,
+                user_id=selected_user_id,
+                hatched_count=_parse_non_negative_int(
+                    form.get("hatched_count", ""),
+                    empty_message="Укажите, сколько вывелось.",
+                    negative_message="Количество выведенных не может быть отрицательным.",
+                ),
+                completed_at=_parse_required_date(form.get("completed_at", ""), "Дата завершения"),
+            )
+        except ValueError as exc:
+            return _redirect_with_message(redirect_base, error=str(exc))
+        if batch is None:
+            return _redirect_with_message(redirect_base, error="Партия не найдена.")
+        return _redirect_with_message(
+            redirect_base,
+            notice=f"Партия завершена: {batch.title}, вывелось {batch.hatched_count or 0} шт.",
+        )
+
+    @app.post("/incubation/batches/{batch_id}/reopen", dependencies=[Depends(require_web_access)])
+    async def reopen_incubation_batch(
+        batch_id: int,
+        request: Request,
+        auth: str | None = Query(default=None),
+    ) -> RedirectResponse:
+        current = app.state.web_config
+        redirect_base = _link("/incubation", auth or "")
+        form = _parse_urlencoded_form((await request.body()).decode("utf-8", errors="replace"))
+        raw_user_id = form.get("user_id", "")
+        user_id = int(raw_user_id) if raw_user_id.strip().isdigit() else None
+        selected_user_id = _selected_user_for_write(current, user_id=user_id)
+        if selected_user_id is None:
+            return _redirect_with_message(
+                redirect_base,
+                error="Пользователь не выбран. Партия не возвращена.",
+            )
+        batch = _incubation_service(current).reopen_batch(batch_id, selected_user_id)
+        if batch is None:
+            return _redirect_with_message(redirect_base, error="Партия не найдена.")
+        return _redirect_with_message(
+            redirect_base,
+            notice=f"Партия снова активна: {batch.title}.",
+        )
 
     @app.get("/livestock/data", dependencies=[Depends(require_web_access)])
     def livestock_data(user_id: int | None = Query(default=None)) -> dict:
@@ -818,6 +1050,10 @@ def _stock_service(config: WebConfig) -> StockService:
     return StockService(StockRepository(database), feeds)
 
 
+def _incubation_service(config: WebConfig) -> IncubationService:
+    return IncubationService(BatchRepository(Database(config.db_path)))
+
+
 def _redirect_with_message(path: str, *, notice: str = "", error: str = "") -> RedirectResponse:
     separator = "&" if "?" in path else "?"
     params = {}
@@ -848,6 +1084,13 @@ def _parse_positive_float(value: str) -> float:
     return number
 
 
+def _parse_stock_amount(value: str, *, allow_zero: bool = False) -> float:
+    text = str(value).strip()
+    if allow_zero and text.replace(",", ".") in {"0", "0.0", "0.00"}:
+        return 0.0
+    return parse_feed_amount(text)
+
+
 def _parse_positive_int(
     value: str,
     *,
@@ -863,6 +1106,24 @@ def _parse_positive_int(
         raise ValueError(empty_message) from exc
     if number <= 0:
         raise ValueError(positive_message)
+    return number
+
+
+def _parse_non_negative_int(
+    value: str,
+    *,
+    empty_message: str,
+    negative_message: str,
+) -> int:
+    text = str(value).strip()
+    if not text:
+        raise ValueError(empty_message)
+    try:
+        number = int(text)
+    except ValueError as exc:
+        raise ValueError(empty_message) from exc
+    if number < 0:
+        raise ValueError(negative_message)
     return number
 
 
@@ -905,6 +1166,24 @@ def _parse_optional_date(value: str, label: str) -> date | None:
         return date.fromisoformat(text)
     except ValueError as exc:
         raise ValueError(f"{label}: укажите дату в формате ГГГГ-ММ-ДД.") from exc
+
+
+def _parse_required_date(value: str, label: str) -> date:
+    parsed = _parse_optional_date(value, label)
+    if parsed is None:
+        raise ValueError(f"{label}: укажите дату.")
+    return parsed
+
+
+def _parse_egg_entry_date(value: str, *, entry_day: str, service: EggService) -> date:
+    if str(value).strip():
+        return _parse_required_date(value, "Дата сбора")
+    current = service.current_date()
+    if entry_day == "today":
+        return current
+    if entry_day == "yesterday":
+        return date.fromordinal(current.toordinal() - 1)
+    raise ValueError("Выберите дату сбора.")
 
 
 def _extract_token(authorization: str | None, x_web_token: str | None) -> str:
@@ -1056,6 +1335,21 @@ def _page_style() -> str:
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 12px;
       align-items: end;
+    }
+    .inline-form {
+      display: grid;
+      grid-template-columns: minmax(120px, 1fr);
+      gap: 8px;
+      margin-top: 10px;
+      min-width: 220px;
+    }
+    .danger-zone {
+      border-top: 1px solid #ddd4c5;
+      padding-top: 10px;
+    }
+    .danger-zone button {
+      background: #8a2f24;
+      border-color: #8a2f24;
     }
     input, select, button {
       box-sizing: border-box;
@@ -1238,6 +1532,7 @@ def _nav_links(auth_token: str, *, active_path: str) -> str:
 
 def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token: str = "") -> str:
     status_value = escape(str(report.get("status", "unknown")))
+    status_reason = _status_reason(report)
     db_status = escape(str(report.get("db", {}).get("status", "unknown")))
     users_total = escape(str(report.get("users", {}).get("total", 0)))
     critical_total = escape(str(report.get("errors", {}).get("critical_total", 0)))
@@ -1274,7 +1569,11 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
 {_page_header("tg_bot_inkubator", "Web-сводка хозяйства и технического состояния.", auth_token, active_path="/")}
 
   <section class="summary" aria-label="Сводка">
-    <div class="metric"><span class="label">Статус</span><span class="value">{status_value}</span></div>
+    <div class="metric">
+      <span class="label">Техническое состояние</span>
+      <span class="value">{status_value}</span>
+      <div class="small">{escape(status_reason)}</div>
+    </div>
     <div class="metric"><span class="label">База данных</span><span class="value">{db_status}</span></div>
     <div class="metric"><span class="label">Пользователей</span><span class="value">{users_total}</span></div>
     <div class="metric"><span class="label">Критичных ошибок</span><span class="value">{critical_total}</span></div>
@@ -1382,6 +1681,25 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
 </html>"""
 
 
+def _status_reason(report: dict) -> str:
+    db = report.get("db") or {}
+    if db.get("status") != "ok":
+        return f"База данных: {db.get('last_error') or 'ошибка проверки'}"
+    critical_total = int((report.get("errors") or {}).get("critical_total") or 0)
+    if critical_total:
+        return f"Есть критичные ошибки: {critical_total}"
+    for item in report.get("heartbeats", []):
+        service = str(item.get("service_name") or "service")
+        if item.get("stale"):
+            return f"{service}: heartbeat просрочен"
+        if item.get("status") in {"down", "degraded"}:
+            detail = item.get("last_error") or item.get("status")
+            return f"{service}: {detail}"
+        if item.get("last_error"):
+            return f"{service}: {item.get('last_error')}"
+    return "База, бот и worker отвечают штатно"
+
+
 def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = "") -> str:
     feeds = payload.get("feeds") or {}
     ready_mix = feeds.get("ready_mix") or {}
@@ -1390,16 +1708,19 @@ def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = ""
     filter_kind = str(payload.get("filter_kind") or "")
     sort_key = str(payload.get("sort") or "name")
     stock_items = _filter_stock_items(feeds.get("stock_items", []), kind=filter_kind, sort=sort_key)
-    stock_rows = "\n".join(_render_stock_row(item) for item in stock_items)
+    selected_user = payload.get("selected_user_id")
+    stock_rows = "\n".join(
+        _render_stock_row(item, selected_user=selected_user, auth_token=auth_token)
+        for item in stock_items
+    )
     if not stock_rows:
-        stock_rows = "<tr><td colspan=\"5\">Склад пока пуст.</td></tr>"
+        stock_rows = "<tr><td colspan=\"6\">Склад пока пуст.</td></tr>"
     flock_rows = "\n".join(_render_flock_row(item) for item in feeds.get("flocks", []))
     if not flock_rows:
         flock_rows = "<tr><td colspan=\"5\">Стада пока не созданы.</td></tr>"
     history_rows = "\n".join(_render_history_row(item) for item in payload.get("history", []))
     if not history_rows:
         history_rows = "<tr><td colspan=\"5\">Истории операций пока нет.</td></tr>"
-    selected_user = payload.get("selected_user_id")
     selected_user_label = "не выбран" if selected_user is None else str(selected_user)
     kind_options = "".join(
         _option(value, label, selected=filter_kind == value)
@@ -1429,7 +1750,7 @@ def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = ""
 </head>
 <body>
 <main>
-{_page_header("Корма и склад", "Read-only просмотр запасов, смеси, стад и последних операций.", auth_token, active_path="/feeds")}
+{_page_header("Корма и склад", "Запасы, смесь, стада и последние операции.", auth_token, active_path="/feeds")}
 
   <section class="summary">
     <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
@@ -1484,7 +1805,7 @@ def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = ""
   </form>
   <table>
     <thead>
-      <tr><th>Позиция</th><th>Тип</th><th>Остаток</th><th>Расход в день</th><th>Дней</th></tr>
+      <tr><th>Позиция</th><th>Тип</th><th>Остаток</th><th>Расход в день</th><th>Дней</th><th>Действия</th></tr>
     </thead>
     <tbody>{stock_rows}</tbody>
   </table>
@@ -1719,10 +2040,17 @@ def _render_livestock_page(config: WebConfig, payload: dict, *, auth_token: str 
         )
     )
     member_options = "\n".join(_render_flock_member_option(item) for item in groups)
-    flock_form_button = '<button type="submit">Создать стадо</button>'
+    has_flocks = bool(flocks)
+    flock_form_title = "Создать еще одно стадо" if has_flocks else "Создать стадо"
+    flock_form_intro = (
+        '<p class="small">Если стадо уже есть, меняйте состав в блоке "Редактировать стада" ниже.</p>'
+        if has_flocks
+        else ""
+    )
+    flock_form_button = f'<button type="submit">{escape(flock_form_title)}</button>'
     if not member_options:
         member_options = '<p class="small">Сначала добавьте хотя бы одну группу поголовья.</p>'
-        flock_form_button = '<button type="submit" disabled>Создать стадо</button>'
+        flock_form_button = f'<button type="submit" disabled>{escape(flock_form_title)}</button>'
     group_edit_forms = "\n".join(
         _render_bird_group_edit_form(item, selected_user=selected_user, auth_token=auth_token)
         for item in groups
@@ -1842,7 +2170,8 @@ def _render_livestock_page(config: WebConfig, payload: dict, *, auth_token: str 
     <button type="submit">Добавить поголовье</button>
   </form>
 
-  <h2>Создать стадо</h2>
+  <h2>{escape(flock_form_title)}</h2>
+  {flock_form_intro}
   <form class="note" method="post" action="{escape(_link('/flocks', auth_token))}">
     <input type="hidden" name="user_id" value="{escape(str(selected_user or ''))}">
     <label>
@@ -1918,14 +2247,18 @@ def _render_eggs_page(config: WebConfig, payload: dict, *, auth_token: str = "")
     eggs = payload.get("eggs") or {}
     weather_text = _weather_text((eggs.get("weather") or {}))
     notice_html = _status_message_html(payload.get("notice"), payload.get("error"))
-    history_rows = "\n".join(_render_egg_history_row(item) for item in payload.get("history", []))
+    selected_user = payload.get("selected_user_id")
+    history_rows = "\n".join(
+        _render_egg_history_row(item, selected_user=selected_user, auth_token=auth_token)
+        for item in payload.get("history", [])
+    )
     if not history_rows:
-        history_rows = "<tr><td colspan=\"5\">Записей по яйцам пока нет.</td></tr>"
+        history_rows = "<tr><td colspan=\"6\">Записей по яйцам пока нет.</td></tr>"
     exclusion_rows = "\n".join(_render_exclusion_row(item) for item in payload.get("open_exclusions", []))
     if not exclusion_rows:
         exclusion_rows = "<tr><td colspan=\"4\">Активных исключений нет.</td></tr>"
-    selected_user = payload.get("selected_user_id")
     selected_user_label = "не выбран" if selected_user is None else str(selected_user)
+    today_value = str(eggs.get("today") or "")
     return f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -1936,7 +2269,7 @@ def _render_eggs_page(config: WebConfig, payload: dict, *, auth_token: str = "")
 </head>
 <body>
 <main>
-{_page_header("Яйца", "Read-only просмотр сбора, прогноза, исключений несушек и сохраненной погоды.", auth_token, active_path="/eggs")}
+{_page_header("Яйца", "Сбор, прогноз, исключения несушек и сохраненная погода.", auth_token, active_path="/eggs")}
 
   <section class="summary">
     <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
@@ -1957,11 +2290,8 @@ def _render_eggs_page(config: WebConfig, payload: dict, *, auth_token: str = "")
   <form class="note" method="post" action="{escape(_link('/eggs/entries', auth_token))}">
     <input type="hidden" name="user_id" value="{escape(str(selected_user or ''))}">
     <label>
-      <span class="label">День</span>
-      <select name="entry_day">
-        <option value="today">Сегодня</option>
-        <option value="yesterday">Вчера</option>
-      </select>
+      <span class="label">Дата сбора</span>
+      <input name="entry_date" type="date" required value="{escape(today_value)}">
     </label>
     <label>
       <span class="label">Яиц</span>
@@ -1988,7 +2318,7 @@ def _render_eggs_page(config: WebConfig, payload: dict, *, auth_token: str = "")
   <h2>История сбора</h2>
   <table>
     <thead>
-      <tr><th>Дата</th><th>Яиц</th><th>Несушек</th><th>Исключено</th><th>Комментарий</th></tr>
+      <tr><th>Дата</th><th>Яиц</th><th>Несушек</th><th>Исключено</th><th>Комментарий</th><th>Действия</th></tr>
     </thead>
     <tbody>{history_rows}</tbody>
   </table>
@@ -2007,21 +2337,33 @@ def _render_eggs_page(config: WebConfig, payload: dict, *, auth_token: str = "")
 
 def _render_incubation_page(config: WebConfig, payload: dict, *, auth_token: str = "") -> str:
     incubation = payload.get("incubation") or {}
-    active_rows = "\n".join(_render_active_incubation_row(item) for item in payload.get("active_batches", []))
+    selected_user = payload.get("selected_user_id")
+    active_rows = "\n".join(
+        _render_active_incubation_row(item, selected_user=selected_user, auth_token=auth_token)
+        for item in payload.get("active_batches", [])
+    )
     if not active_rows:
-        active_rows = "<tr><td colspan=\"7\">Активных партий пока нет.</td></tr>"
-    completed_rows = "\n".join(_render_completed_incubation_row(item) for item in payload.get("completed_batches", []))
+        active_rows = "<tr><td colspan=\"8\">Активных партий пока нет.</td></tr>"
+    completed_rows = "\n".join(
+        _render_completed_incubation_row(item, selected_user=selected_user, auth_token=auth_token)
+        for item in payload.get("completed_batches", [])
+    )
     if not completed_rows:
-        completed_rows = "<tr><td colspan=\"6\">Завершенных партий пока нет.</td></tr>"
+        completed_rows = "<tr><td colspan=\"7\">Завершенных партий пока нет.</td></tr>"
     recommendation_blocks = "\n".join(
         _render_recommendation_block(item) for item in payload.get("active_batches", [])
     )
     if not recommendation_blocks:
         recommendation_blocks = "<p>Нет активных партий, для которых нужны рекомендации.</p>"
-    selected_user = payload.get("selected_user_id")
+    notice_html = _status_message_html(payload.get("notice"), payload.get("error"))
     selected_user_label = "не выбран" if selected_user is None else str(selected_user)
     hatch_rate = incubation.get("hatch_rate")
     hatch_rate_label = "не рассчитано" if hatch_rate is None else f"{hatch_rate}%"
+    species_options = "".join(
+        _option(code, label, selected=code == "chicken")
+        for code, label in _incubation_service(config).available_species()
+    )
+    today_value = date.today().isoformat()
     return f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -2032,7 +2374,9 @@ def _render_incubation_page(config: WebConfig, payload: dict, *, auth_token: str
 </head>
 <body>
 <main>
-{_page_header("Инкубация", "Read-only просмотр активных партий, этапов, ближайшего вывода и истории.", auth_token, active_path="/incubation")}
+{_page_header("Инкубация", "Активные партии, этапы, ближайший вывод и история.", auth_token, active_path="/incubation")}
+
+  {notice_html}
 
   <section class="summary">
     <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
@@ -2042,10 +2386,36 @@ def _render_incubation_page(config: WebConfig, payload: dict, *, auth_token: str
     <div class="metric"><span class="label">Выводимость</span><span class="value">{escape(hatch_rate_label)}</span></div>
   </section>
 
+  <h2>Создать партию</h2>
+  <form class="note" method="post" action="{escape(_link('/incubation/batches', auth_token))}">
+    <input type="hidden" name="user_id" value="{escape(str(selected_user or ''))}">
+    <label>
+      <span class="label">Птица</span>
+      <select name="species" required>{species_options}</select>
+    </label>
+    <label>
+      <span class="label">Яиц</span>
+      <input name="eggs_count" type="number" min="1" step="1" required>
+    </label>
+    <label>
+      <span class="label">Дата закладки</span>
+      <input name="start_date" type="date" required value="{escape(today_value)}">
+    </label>
+    <label>
+      <span class="label">Название</span>
+      <input name="title" type="text" maxlength="120" placeholder="Например: Инкубатор 1">
+    </label>
+    <label class="form-wide">
+      <span class="label">Заметка</span>
+      <input name="note" type="text" maxlength="240">
+    </label>
+    <button type="submit">Создать партию</button>
+  </form>
+
   <h2>Активные партии</h2>
   <table>
     <thead>
-      <tr><th>Партия</th><th>Птица</th><th>Яиц</th><th>День</th><th>Этап</th><th>Вывод</th><th>Режим</th></tr>
+      <tr><th>Партия</th><th>Птица</th><th>Яиц</th><th>День</th><th>Этап</th><th>Вывод</th><th>Режим</th><th>Действия</th></tr>
     </thead>
     <tbody>{active_rows}</tbody>
   </table>
@@ -2056,7 +2426,7 @@ def _render_incubation_page(config: WebConfig, payload: dict, *, auth_token: str
   <h2>История выводов</h2>
   <table>
     <thead>
-      <tr><th>Партия</th><th>Птица</th><th>Яиц</th><th>Вывелось</th><th>Дата завершения</th><th>Процент</th></tr>
+      <tr><th>Партия</th><th>Птица</th><th>Яиц</th><th>Вывелось</th><th>Дата завершения</th><th>Процент</th><th>Действия</th></tr>
     </thead>
     <tbody>{completed_rows}</tbody>
   </table>
@@ -2250,7 +2620,25 @@ def _render_batch_row(item: dict) -> str:
     )
 
 
-def _render_stock_row(item: dict) -> str:
+def _render_stock_row(item: dict, *, selected_user, auth_token: str) -> str:
+    item_id = item.get("id")
+    adjust_action = _link(f"/stock/items/{item_id}/adjust", auth_token)
+    actions = f"""
+      <details>
+        <summary>Факт</summary>
+        <form class="inline-form" method="post" action="{escape(adjust_action)}">
+          <input type="hidden" name="user_id" value="{escape(str(selected_user or ''))}">
+          <label>
+            <span class="label">Фактический остаток</span>
+            <input name="amount" type="text" maxlength="80" required value="{escape(_kg(item.get('remaining_kg')))}">
+          </label>
+          <label>
+            <span class="label">Комментарий</span>
+            <input name="note" type="text" maxlength="120" placeholder="например, пересчет склада">
+          </label>
+          <button type="submit">Записать факт</button>
+        </form>
+      </details>"""
     return (
         "<tr>"
         f"<td>{escape(str(item.get('name', '')))}</td>"
@@ -2258,6 +2646,7 @@ def _render_stock_row(item: dict) -> str:
         f"<td>{escape(_kg(item.get('remaining_kg')))}</td>"
         f"<td>{escape(_kg(item.get('daily_usage_kg')))}</td>"
         f"<td>{escape(_days(item.get('days_left')))}</td>"
+        f"<td>{actions}</td>"
         "</tr>"
     )
 
@@ -2508,8 +2897,39 @@ def _render_flock_assignment_row(flock: dict, assignment: dict) -> str:
     )
 
 
-def _render_egg_history_row(item: dict) -> str:
+def _render_egg_history_row(item: dict, *, selected_user, auth_token: str) -> str:
     hens = f"{item.get('active_hens_count', 0)} из {item.get('total_hens_count', 0)}"
+    entry_id = item.get("id")
+    edit_action = _link(f"/eggs/entries/{entry_id}", auth_token)
+    delete_action = _link(f"/eggs/entries/{entry_id}/delete", auth_token)
+    actions = f"""
+      <details>
+        <summary>Изменить</summary>
+        <form class="inline-form" method="post" action="{escape(edit_action)}">
+          <input type="hidden" name="user_id" value="{escape(str(selected_user or ''))}">
+          <label>
+            <span class="label">Дата</span>
+            <input name="entry_date" type="date" required value="{escape(str(item.get('entry_date') or ''))}">
+          </label>
+          <label>
+            <span class="label">Яиц</span>
+            <input name="eggs_count" type="number" min="0" step="1" required value="{escape(str(item.get('eggs_count', 0)))}">
+          </label>
+          <label>
+            <span class="label">Комментарий</span>
+            <input name="note" type="text" maxlength="120" value="{escape(str(item.get('note') or ''))}">
+          </label>
+          <button type="submit">Сохранить</button>
+        </form>
+        <form class="inline-form danger-zone" method="post" action="{escape(delete_action)}">
+          <input type="hidden" name="user_id" value="{escape(str(selected_user or ''))}">
+          <label>
+            <input type="checkbox" name="confirm_delete" value="yes" required>
+            <span>Подтвердить удаление</span>
+          </label>
+          <button type="submit">Удалить</button>
+        </form>
+      </details>"""
     return (
         "<tr>"
         f"<td>{escape(str(item.get('entry_date', '')))}</td>"
@@ -2517,6 +2937,7 @@ def _render_egg_history_row(item: dict) -> str:
         f"<td>{escape(hens)}</td>"
         f"<td>{escape(str(item.get('excluded_hens_count', 0)))}</td>"
         f"<td>{escape(str(item.get('note') or ''))}</td>"
+        f"<td>{actions}</td>"
         "</tr>"
     )
 
@@ -2532,12 +2953,30 @@ def _render_exclusion_row(item: dict) -> str:
     )
 
 
-def _render_active_incubation_row(item: dict) -> str:
+def _render_active_incubation_row(item: dict, *, selected_user, auth_token: str) -> str:
     mode = f"{item.get('temperature') or ''}; {item.get('humidity') or ''}"
     days_left = item.get("days_left")
     hatch = str(item.get("hatch_date") or "")
     if days_left is not None:
         hatch = f"{hatch} ({_days(days_left)})"
+    batch_id = item.get("id")
+    complete_action = _link(f"/incubation/batches/{batch_id}/complete", auth_token)
+    actions = f"""
+      <details>
+        <summary>Завершить</summary>
+        <form class="inline-form" method="post" action="{escape(complete_action)}">
+          <input type="hidden" name="user_id" value="{escape(str(selected_user or ''))}">
+          <label>
+            <span class="label">Вывелось</span>
+            <input name="hatched_count" type="number" min="0" max="{escape(str(item.get('eggs_count', 0)))}" step="1" required>
+          </label>
+          <label>
+            <span class="label">Дата завершения</span>
+            <input name="completed_at" type="date" required value="{escape(date.today().isoformat())}">
+          </label>
+          <button type="submit">Завершить вывод</button>
+        </form>
+      </details>"""
     return (
         "<tr>"
         f"<td>{escape(str(item.get('title', '')))}</td>"
@@ -2547,13 +2986,21 @@ def _render_active_incubation_row(item: dict) -> str:
         f"<td>{escape(str(item.get('stage', '')))}</td>"
         f"<td>{escape(hatch)}</td>"
         f"<td>{escape(mode)}</td>"
+        f"<td>{actions}</td>"
         "</tr>"
     )
 
 
-def _render_completed_incubation_row(item: dict) -> str:
+def _render_completed_incubation_row(item: dict, *, selected_user, auth_token: str) -> str:
     hatch_rate = item.get("hatch_rate")
     hatch_rate_label = "не рассчитано" if hatch_rate is None else f"{hatch_rate}%"
+    batch_id = item.get("id")
+    reopen_action = _link(f"/incubation/batches/{batch_id}/reopen", auth_token)
+    actions = f"""
+      <form class="inline-form" method="post" action="{escape(reopen_action)}">
+        <input type="hidden" name="user_id" value="{escape(str(selected_user or ''))}">
+        <button type="submit">Вернуть в активные</button>
+      </form>"""
     return (
         "<tr>"
         f"<td>{escape(str(item.get('title', '')))}</td>"
@@ -2562,6 +3009,7 @@ def _render_completed_incubation_row(item: dict) -> str:
         f"<td>{escape(str(item.get('hatched_count') or 0))}</td>"
         f"<td>{escape(str(item.get('completed_at') or ''))}</td>"
         f"<td>{escape(hatch_rate_label)}</td>"
+        f"<td>{actions}</td>"
         "</tr>"
     )
 

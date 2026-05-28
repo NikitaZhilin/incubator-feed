@@ -361,6 +361,8 @@ class FeedService:
         clean_name = name.strip()[:255]
         if not clean_name:
             raise ValueError("Название стада не может быть пустым.")
+        if self._active_flock_name_exists(user_id=user_id, name=clean_name):
+            raise ValueError("Стадо с таким названием уже существует. Измените существующее стадо.")
         if not member_group_ids:
             raise ValueError("В стаде должна быть хотя бы одна группа поголовья.")
         for group_id in member_group_ids:
@@ -396,6 +398,8 @@ class FeedService:
             name = name.strip()[:255]
             if not name:
                 raise ValueError("Название стада не может быть пустым.")
+            if self._active_flock_name_exists(user_id=user_id, name=name, exclude_flock_id=flock_id):
+                raise ValueError("Стадо с таким названием уже существует. Измените существующее стадо.")
         if member_group_ids is not None:
             if not member_group_ids:
                 raise ValueError("В стаде должна быть хотя бы одна группа поголовья.")
@@ -445,6 +449,20 @@ class FeedService:
 
     def list_flock_members(self, flock_id: int, user_id: int) -> list[FlockMember]:
         return self.feeds.list_flock_members(flock_id, user_id)
+
+    def _active_flock_name_exists(
+        self,
+        *,
+        user_id: int,
+        name: str,
+        exclude_flock_id: int | None = None,
+    ) -> bool:
+        normalized = name.strip().casefold()
+        return any(
+            flock.name.strip().casefold() == normalized
+            and (exclude_flock_id is None or flock.id != exclude_flock_id)
+            for flock in self.feeds.list_flocks(user_id)
+        )
 
     def _track(self, event_name: str, *, user_id: int, feed_id: int) -> None:
         if self.analytics is not None:

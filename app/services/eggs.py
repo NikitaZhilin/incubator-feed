@@ -46,6 +46,16 @@ class EggService:
             note=note,
         )
 
+    def record_entry(
+        self,
+        user_id: int,
+        eggs_count: int,
+        *,
+        entry_date: date,
+        note: str = "",
+    ) -> EggEntry:
+        return self.record_today(user_id, eggs_count, today=entry_date, note=note)
+
     def get_entry(self, user_id: int, entry_id: int) -> EggEntry | None:
         return self.eggs.get_entry(entry_id, user_id)
 
@@ -59,6 +69,7 @@ class EggService:
         entry_id: int,
         entry_date: date | None = None,
         eggs_count: int | None = None,
+        note: str | None = None,
     ) -> EggEntry:
         current = self.eggs.get_entry(entry_id, user_id)
         if current is None:
@@ -77,10 +88,14 @@ class EggService:
             active_hens_count=max(total_hens - excluded, 0),
             total_hens_count=total_hens,
             excluded_hens_count=excluded,
+            note=note.strip() if note is not None else None,
         )
         if updated is None:
             raise ValueError("Запись по яйцам не найдена.")
         return updated
+
+    def delete_entry(self, *, user_id: int, entry_id: int) -> bool:
+        return self.eggs.delete_entry(entry_id=entry_id, user_id=user_id)
 
     def stats(
         self,

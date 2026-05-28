@@ -68,6 +68,7 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(config.web_public_url, "https://incubator.example.test")
         self.assertEqual(config.web_link_token, "link-secret")
         self.assertEqual(config.web_open_url, "https://incubator.example.test/?auth=link-secret")
+        self.assertEqual(config.miniapp_open_url, "https://incubator.example.test/?auth=link-secret")
         self.assertFalse(config.release_notice_enabled)
 
     def test_prod_uses_app_version_as_release_fallback_without_startup_notice(self) -> None:
@@ -89,6 +90,27 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(config.release_version, APP_VERSION)
         self.assertFalse(config.release_notice_enabled)
         self.assertFalse(should_send_release_notice(config))
+
+    def test_miniapp_url_requires_https_public_url(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "test.db"
+            root = Path(temp_dir)
+            with patch.dict(
+                os.environ,
+                {
+                    "ENVIRONMENT": "dev",
+                    "BOT_TOKEN": "123456:test",
+                    "DATABASE_PATH": str(db_path),
+                    "WEB_PUBLIC_URL": "http://localhost:8000",
+                    "WEB_LINK_TOKEN": "link-secret",
+                },
+                clear=True,
+            ):
+                with patch("app.config.get_project_root", return_value=root):
+                    config = load_config()
+
+        self.assertEqual(config.web_open_url, "http://localhost:8000/?auth=link-secret")
+        self.assertEqual(config.miniapp_open_url, "")
 
     def test_admin_startup_notice_policy_requires_admin_ids_and_enabled_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

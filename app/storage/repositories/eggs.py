@@ -67,31 +67,47 @@ class EggRepository:
         active_hens_count: int,
         total_hens_count: int,
         excluded_hens_count: int,
+        note: str | None = None,
     ) -> EggEntry | None:
+        note_sql = ", note = ?" if note is not None else ""
+        params = [
+            entry_date.isoformat(),
+            eggs_count,
+            active_hens_count,
+            total_hens_count,
+            excluded_hens_count,
+        ]
+        if note is not None:
+            params.append(note[:255])
+        params.extend([entry_id, user_id])
         with self.database.connect() as connection:
             cursor = connection.execute(
-                """
+                f"""
                 UPDATE egg_entries
                 SET entry_date = ?,
                     eggs_count = ?,
                     active_hens_count = ?,
                     total_hens_count = ?,
                     excluded_hens_count = ?
+                    {note_sql}
                 WHERE id = ? AND user_id = ?
                 """,
-                (
-                    entry_date.isoformat(),
-                    eggs_count,
-                    active_hens_count,
-                    total_hens_count,
-                    excluded_hens_count,
-                    entry_id,
-                    user_id,
-                ),
+                tuple(params),
             )
         if cursor.rowcount == 0:
             return None
         return self.get_entry(entry_id, user_id)
+
+    def delete_entry(self, *, entry_id: int, user_id: int) -> bool:
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                DELETE FROM egg_entries
+                WHERE id = ? AND user_id = ?
+                """,
+                (entry_id, user_id),
+            )
+        return cursor.rowcount > 0
 
     def list_entries(self, user_id: int, *, limit: int = 20) -> list[EggEntry]:
         with self.database.connect() as connection:

@@ -7,6 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import MenuButtonCommands, MenuButtonWebApp, WebAppInfo
 
 from app.config import load_config, should_send_admin_startup_notice, should_send_release_notice
 from app.handlers import register_handlers
@@ -118,6 +119,7 @@ async def main() -> None:
             token=config.bot_token,
             default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         )
+        await configure_telegram_menu_button(bot, config)
         dispatcher = Dispatcher(storage=MemoryStorage())
         dispatcher["incubation_service"] = incubation_service
         dispatcher["feed_service"] = feed_service
@@ -233,6 +235,23 @@ async def notify_admins_about_failure(bot: Bot, admin_ids: frozenset[int], exc: 
             await bot.send_message(admin_id, message)
         except Exception:
             logging.exception("Failed to notify admin %s about failure", admin_id)
+
+
+async def configure_telegram_menu_button(bot: Bot, config) -> None:
+    try:
+        if config.miniapp_open_url:
+            await bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(
+                    text="Открыть Mini App",
+                    web_app=WebAppInfo(url=config.miniapp_open_url),
+                )
+            )
+            logging.info("Telegram menu button set to Mini App")
+            return
+        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+        logging.info("Telegram menu button set to commands")
+    except Exception:
+        logging.exception("Failed to configure Telegram menu button")
 
 
 if __name__ == "__main__":

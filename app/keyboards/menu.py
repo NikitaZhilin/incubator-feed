@@ -1,7 +1,12 @@
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 
-def main_menu_keyboard(settings: dict | None = None, *, web_url: str = "") -> InlineKeyboardMarkup:
+def main_menu_keyboard(
+    settings: dict | None = None,
+    *,
+    web_url: str = "",
+    miniapp_url: str = "",
+) -> InlineKeyboardMarkup:
     feature_row: list[InlineKeyboardButton] = []
     if _enabled(settings, "notify_feed"):
         feature_row.append(InlineKeyboardButton(text="🌾 Корма", callback_data="feeds:menu"))
@@ -19,7 +24,7 @@ def main_menu_keyboard(settings: dict | None = None, *, web_url: str = "") -> In
             [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings:menu")],
         ]
     )
-    rows.append([_web_button(web_url)])
+    rows.extend(_web_choice_rows(web_url=web_url, miniapp_url=miniapp_url) or [[_web_button(web_url)]])
     rows.append([InlineKeyboardButton(text="🔗 Поделиться ботом", callback_data="menu:share")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -67,7 +72,7 @@ def back_to_incubation_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def settings_keyboard(*, web_url: str = "") -> InlineKeyboardMarkup:
+def settings_keyboard(*, web_url: str = "", miniapp_url: str = "") -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="🏷 Название хозяйства", callback_data="settings:edit:farm_name")],
         [
@@ -78,7 +83,7 @@ def settings_keyboard(*, web_url: str = "") -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="ℹ️ О боте", callback_data="settings:about")],
         [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:settings")],
     ]
-    rows.append([_web_button(web_url)])
+    rows.extend(_web_choice_rows(web_url=web_url, miniapp_url=miniapp_url) or [[_web_button(web_url)]])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -132,14 +137,20 @@ def settings_back_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def about_bot_keyboard(*, github_url: str, changelog_url: str, web_url: str = "") -> InlineKeyboardMarkup:
+def about_bot_keyboard(
+    *,
+    github_url: str,
+    changelog_url: str,
+    web_url: str = "",
+    miniapp_url: str = "",
+) -> InlineKeyboardMarkup:
     rows = [
         [
             InlineKeyboardButton(text="📦 GitHub", url=github_url),
             InlineKeyboardButton(text="📝 История изменений", url=changelog_url),
         ],
     ]
-    rows.append([_web_button(web_url)])
+    rows.extend(_web_choice_rows(web_url=web_url, miniapp_url=miniapp_url) or [[_web_button(web_url)]])
     rows.extend(
         [
             [InlineKeyboardButton(text="⬅️ Настройки", callback_data="settings:menu")],
@@ -155,10 +166,24 @@ def _enabled(settings: dict | None, field: str) -> bool:
     return bool(settings.get(field, True))
 
 
-def _web_button(web_url: str) -> InlineKeyboardButton:
+def web_choice_keyboard(*, web_url: str = "", miniapp_url: str = "") -> InlineKeyboardMarkup:
+    rows = _web_choice_rows(web_url=web_url, miniapp_url=miniapp_url)
+    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _web_choice_rows(*, web_url: str = "", miniapp_url: str = "") -> list[list[InlineKeyboardButton]]:
+    rows: list[list[InlineKeyboardButton]] = []
     if web_url:
-        return InlineKeyboardButton(text="🌐 Открыть сайт", url=web_url)
-    return InlineKeyboardButton(text="🌐 Открыть сайт", callback_data="menu:web")
+        rows.append([InlineKeyboardButton(text="🌐 Открыть сайт", url=web_url)])
+    if miniapp_url:
+        rows.append([InlineKeyboardButton(text="📱 Открыть Mini App", web_app=WebAppInfo(url=miniapp_url))])
+    return rows
+
+
+def _web_button(web_url: str, *, miniapp_url: str = "") -> InlineKeyboardButton:
+    label = "🌐 Сайт / Mini App" if web_url or miniapp_url else "🌐 Открыть сайт"
+    return InlineKeyboardButton(text=label, callback_data="menu:web")
 
 
 def _status_label(settings: dict, field: str) -> str:
