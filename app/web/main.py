@@ -1544,6 +1544,7 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
     settings = summary.get("settings") or {}
     ready_mix = feeds.get("ready_mix") or {}
     possible_mix = feeds.get("possible_mix") or {}
+    norms_html = _render_feeding_norms(feeds.get("feeding_norms") or {})
     bird_groups = feeds.get("bird_groups") or {}
     heartbeat_rows = "\n".join(_render_heartbeat_row(item) for item in report.get("heartbeats", []))
     if not heartbeat_rows:
@@ -1594,7 +1595,7 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
     <div class="metric">
       <span class="label">Готовая смесь</span>
       <span class="value">{escape(_kg(ready_mix.get("remaining_kg")))}</span>
-      <div class="small">Расход: {escape(_kg(ready_mix.get("daily_usage_kg")))} в день. Дней: {escape(_days(ready_mix.get("days_left")))}</div>
+      <div class="small">Расход: {escape(_kg(ready_mix.get("daily_usage_kg")))} в день. Дней: {escape(_days(ready_mix.get("days_left")))}. До: {escape(_date_text(ready_mix.get("ends_at")))}. Докупить до: {escape(_date_text(ready_mix.get("purchase_by")))}</div>
     </div>
     <div class="metric">
       <span class="label">Возможные замесы</span>
@@ -1612,6 +1613,8 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
       <div class="small">Активных партий. Завершено: {escape(str(incubation.get("completed_batches", 0)))}</div>
     </div>
   </section>
+
+  {norms_html}
 
   <h2>Погода</h2>
   <p>{escape(weather_text)}</p>
@@ -1704,6 +1707,7 @@ def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = ""
     feeds = payload.get("feeds") or {}
     ready_mix = feeds.get("ready_mix") or {}
     possible_mix = feeds.get("possible_mix") or {}
+    norms_html = _render_feeding_norms(feeds.get("feeding_norms") or {})
     notice_html = _status_message_html(payload.get("notice"), payload.get("error"))
     filter_kind = str(payload.get("filter_kind") or "")
     sort_key = str(payload.get("sort") or "name")
@@ -1714,7 +1718,7 @@ def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = ""
         for item in stock_items
     )
     if not stock_rows:
-        stock_rows = "<tr><td colspan=\"6\">Склад пока пуст.</td></tr>"
+        stock_rows = "<tr><td colspan=\"9\">Склад пока пуст.</td></tr>"
     flock_rows = "\n".join(_render_flock_row(item) for item in feeds.get("flocks", []))
     if not flock_rows:
         flock_rows = "<tr><td colspan=\"5\">Стада пока не созданы.</td></tr>"
@@ -1755,13 +1759,15 @@ def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = ""
   <section class="summary">
     <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
     <div class="metric"><span class="label">Готовая смесь</span><span class="value">{escape(_kg(ready_mix.get("remaining_kg")))}</span></div>
-    <div class="metric"><span class="label">Хватит готовой смеси</span><span class="value">{escape(_days(ready_mix.get("days_left")))}</span></div>
+    <div class="metric"><span class="label">Хватит готовой смеси</span><span class="value">{escape(_days(ready_mix.get("days_left")))}</span><div class="small">До: {escape(_date_text(ready_mix.get("ends_at")))}. Докупить до: {escape(_date_text(ready_mix.get("purchase_by")))}</div></div>
     <div class="metric"><span class="label">Возможные замесы</span><span class="value">{escape(str(possible_mix.get("mix_count", 0)))}</span></div>
     <div class="metric"><span class="label">Будет получено</span><span class="value">{escape(_kg(possible_mix.get("output_kg")))}</span></div>
     <div class="metric"><span class="label">Ограничивает</span><span class="value">{escape(str(possible_mix.get("limiting_ingredient") or "не уточнено"))}</span></div>
   </section>
 
   {notice_html}
+
+  {norms_html}
 
   <h2>Добавить покупку</h2>
   <form class="note" method="post" action="{escape(_link('/stock/purchases', auth_token))}">
@@ -1805,7 +1811,7 @@ def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = ""
   </form>
   <table>
     <thead>
-      <tr><th>Позиция</th><th>Тип</th><th>Остаток</th><th>Расход в день</th><th>Дней</th><th>Действия</th></tr>
+      <tr><th>Позиция</th><th>Тип</th><th>Остаток</th><th>Расход в день</th><th>Дней</th><th>Хватит до</th><th>Докупить до</th><th>Последняя операция</th><th>Действия</th></tr>
     </thead>
     <tbody>{stock_rows}</tbody>
   </table>
@@ -1834,6 +1840,7 @@ def _render_mix_page(config: WebConfig, payload: dict, *, auth_token: str = "") 
     mix = payload.get("mix") or {}
     feeds = payload.get("feeds") or {}
     ready_mix = feeds.get("ready_mix") or {}
+    norms_html = _render_feeding_norms(feeds.get("feeding_norms") or {})
     notice_html = _status_message_html(payload.get("notice"), payload.get("error"))
     ingredient_rows = "\n".join(
         _render_mix_ingredient_row(item) for item in mix.get("ingredients", [])
@@ -1878,10 +1885,12 @@ def _render_mix_page(config: WebConfig, payload: dict, *, auth_token: str = "") 
     <div class="metric"><span class="label">Один замес</span><span class="value">{escape(_kg(mix.get("one_cycle_kg")))}</span><div class="small">{escape(str(mix.get("one_cycle_parts", 0)))} частей</div></div>
     <div class="metric"><span class="label">Можно сделать</span><span class="value">{escape(str(mix.get("possible_mix_count", 0)))}</span><div class="small">полных замесов</div></div>
     <div class="metric"><span class="label">Будет смеси</span><span class="value">{escape(_kg(mix.get("possible_output_kg")))}</span></div>
-    <div class="metric"><span class="label">Готовой смеси сейчас</span><span class="value">{escape(_kg(ready_mix.get("remaining_kg")))}</span><div class="small">Хватит: {escape(_days(ready_mix.get("days_left")))}</div></div>
+    <div class="metric"><span class="label">Готовой смеси сейчас</span><span class="value">{escape(_kg(ready_mix.get("remaining_kg")))}</span><div class="small">Хватит: {escape(_days(ready_mix.get("days_left")))}. До: {escape(_date_text(ready_mix.get("ends_at")))}. Докупить до: {escape(_date_text(ready_mix.get("purchase_by")))}</div></div>
   </section>
 
   {notice_html}
+
+  {norms_html}
 
   <section class="note">
     <strong>Как читать расчет</strong>
@@ -2019,6 +2028,7 @@ def _render_livestock_page(config: WebConfig, payload: dict, *, auth_token: str 
     selected_user = payload.get("selected_user_id")
     selected_user_label = "не выбран" if selected_user is None else str(selected_user)
     notice_html = _status_message_html(payload.get("notice"), payload.get("error"))
+    norms_html = _render_feeding_norms(feeds.get("feeding_norms") or {})
     group_rows = "\n".join(_render_bird_group_row(item) for item in visible_groups)
     if not group_rows:
         group_rows = "<tr><td colspan=\"7\">Поголовье пока не добавлено.</td></tr>"
@@ -2117,6 +2127,8 @@ def _render_livestock_page(config: WebConfig, payload: dict, *, auth_token: str 
   </section>
 
   {notice_html}
+
+  {norms_html}
 
   <h2>Добавить поголовье</h2>
   <form class="note" method="post" action="{escape(_link('/bird-groups', auth_token))}">
@@ -2597,12 +2609,18 @@ def _render_sections_form(sections: dict, *, selected_user, auth_token: str) -> 
 def _render_flock_row(item: dict) -> str:
     assignments = item.get("assignments") or []
     first = assignments[0] if assignments else {}
+    stock_text = _days(first.get("total_days_left") if first else None)
+    if first:
+        stock_text = (
+            f"{stock_text}; до {_date_text(first.get('total_ends_at'))}; "
+            f"докупить до {_date_text(first.get('total_purchase_by'))}"
+        )
     return (
         "<tr>"
         f"<td>{escape(str(item.get('name', '')))}</td>"
         f"<td>{escape(str(item.get('birds_total', 0)))}</td>"
         f"<td>{escape(_kg(item.get('daily_usage_kg')))} / день</td>"
-        f"<td>{escape(_days(first.get('total_days_left') if first else None))}</td>"
+        f"<td>{escape(stock_text)}</td>"
         f"<td>{escape(str(first.get('producible_mix_count', 0) if first else 0))}</td>"
         "</tr>"
     )
@@ -2623,6 +2641,16 @@ def _render_batch_row(item: dict) -> str:
 def _render_stock_row(item: dict, *, selected_user, auth_token: str) -> str:
     item_id = item.get("id")
     adjust_action = _link(f"/stock/items/{item_id}/adjust", auth_token)
+    last = item.get("last_transaction") or {}
+    last_text = "нет операций"
+    if last:
+        last_text = (
+            f"{_short_datetime(last.get('created_at'))}: "
+            f"{last.get('type_label') or last.get('type')} "
+            f"{_kg(last.get('amount_kg'))}"
+        )
+        if last.get("note"):
+            last_text = f"{last_text}, {last.get('note')}"
     actions = f"""
       <details>
         <summary>Факт</summary>
@@ -2646,6 +2674,9 @@ def _render_stock_row(item: dict, *, selected_user, auth_token: str) -> str:
         f"<td>{escape(_kg(item.get('remaining_kg')))}</td>"
         f"<td>{escape(_kg(item.get('daily_usage_kg')))}</td>"
         f"<td>{escape(_days(item.get('days_left')))}</td>"
+        f"<td>{escape(_date_text(item.get('ends_at')))}</td>"
+        f"<td>{escape(_date_text(item.get('purchase_by')))}</td>"
+        f"<td>{escape(last_text)}</td>"
         f"<td>{actions}</td>"
         "</tr>"
     )
@@ -2677,6 +2708,61 @@ def _render_history_row(item: dict) -> str:
         f"<td>{escape(_kg(item.get('balance_after_kg')))}</td>"
         "</tr>"
     )
+
+
+def _render_feeding_norms(norms: dict) -> str:
+    if not norms:
+        return ""
+    adult_rows = "".join(
+        (
+            "<tr>"
+            f"<td>{escape(str(item.get('label') or ''))}</td>"
+            f"<td>{escape(str(item.get('daily_g') or 0))} г/день</td>"
+            "</tr>"
+        )
+        for item in norms.get("adults", [])
+    )
+    chick_rows = "".join(
+        (
+            "<tr>"
+            f"<td>{escape(_chick_range_label(item))}</td>"
+            f"<td>{escape(str(item.get('daily_g') or 0))} г/день</td>"
+            "</tr>"
+        )
+        for item in norms.get("chicks", [])
+    )
+    notes = norms.get("notes") or []
+    notes_html = "<ul>" + "".join(f"<li>{escape(str(note))}</li>" for note in notes) + "</ul>"
+    return f"""
+  <details class="note" open>
+    <summary>Нормы расхода и формула</summary>
+    <p class="small">{escape(str(norms.get('formula') or ''))}</p>
+    <section class="wide-summary">
+      <div>
+        <strong>Взрослая птица</strong>
+        <table>
+          <thead><tr><th>Птица</th><th>Норма</th></tr></thead>
+          <tbody>{adult_rows}</tbody>
+        </table>
+      </div>
+      <div>
+        <strong>Цыплята по возрасту</strong>
+        <table>
+          <thead><tr><th>Возраст</th><th>Норма</th></tr></thead>
+          <tbody>{chick_rows}</tbody>
+        </table>
+      </div>
+    </section>
+    <div class="small">{notes_html}</div>
+  </details>"""
+
+
+def _chick_range_label(item: dict) -> str:
+    start = item.get("from_day")
+    end = item.get("to_day")
+    if end is None:
+        return f"с {start} дня"
+    return f"{start}-{end} день"
 
 
 def _render_mix_ingredient_row(item: dict) -> str:
@@ -2883,6 +2969,14 @@ def _render_flock_edit_form(
 
 
 def _render_flock_assignment_row(flock: dict, assignment: dict) -> str:
+    days_text = (
+        f"{_days(assignment.get('days_left'))}; до {_date_text(assignment.get('ends_at'))}; "
+        f"докупить до {_date_text(assignment.get('purchase_by'))}"
+    )
+    total_days_text = (
+        f"{_days(assignment.get('total_days_left'))}; до {_date_text(assignment.get('total_ends_at'))}; "
+        f"докупить до {_date_text(assignment.get('total_purchase_by'))}"
+    )
     return (
         "<tr>"
         f"<td>{escape(str(flock.get('name', '')))}</td>"
@@ -2890,9 +2984,9 @@ def _render_flock_assignment_row(flock: dict, assignment: dict) -> str:
         f"<td>{escape(str(assignment.get('share_percent', 100)))}%</td>"
         f"<td>{escape(_kg(assignment.get('daily_usage_kg')))} / день</td>"
         f"<td>{escape(_kg(assignment.get('remaining_kg')))}</td>"
-        f"<td>{escape(_days(assignment.get('days_left')))}</td>"
+        f"<td>{escape(days_text)}</td>"
         f"<td>{escape(str(assignment.get('producible_mix_count', 0)))}</td>"
-        f"<td>{escape(_days(assignment.get('total_days_left')))}</td>"
+        f"<td>{escape(total_days_text)}</td>"
         "</tr>"
     )
 
@@ -3075,6 +3169,10 @@ def _days(value) -> str:
     if value is None:
         return "не рассчитано"
     return f"{int(value)} дн."
+
+
+def _date_text(value) -> str:
+    return str(value) if value else "не рассчитано"
 
 
 def _short_datetime(value) -> str:

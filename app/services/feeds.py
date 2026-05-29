@@ -6,6 +6,16 @@ from app.storage.repositories.feeds import FeedRepository
 from app.storage.repositories.analytics import AnalyticsRepository
 
 
+CHICK_DAILY_G_RANGES = (
+    (0, 7, 15),
+    (8, 14, 25),
+    (15, 28, 45),
+    (29, 56, 70),
+    (57, 84, 90),
+    (85, None, 110),
+)
+
+
 class FeedService:
     def __init__(self, feeds: FeedRepository, analytics: AnalyticsRepository | None = None) -> None:
         self.feeds = feeds
@@ -575,14 +585,11 @@ class FeedService:
 
     @staticmethod
     def chick_daily_g(age_days: int) -> float:
-        if age_days <= 7:
-            return 15
-        if age_days <= 14:
-            return 25
-        if age_days <= 28:
-            return 45
-        if age_days <= 56:
-            return 70
-        if age_days <= 84:
-            return 90
-        return 110
+        for start_day, end_day, daily_g in CHICK_DAILY_G_RANGES:
+            if age_days >= start_day and (end_day is None or age_days <= end_day):
+                return daily_g
+        return CHICK_DAILY_G_RANGES[-1][2]
+
+    @staticmethod
+    def chick_daily_schedule() -> tuple[tuple[int, int | None, float], ...]:
+        return CHICK_DAILY_G_RANGES

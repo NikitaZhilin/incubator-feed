@@ -14,7 +14,13 @@ from app.services.feed_recipes import (
 )
 from app.services.feeds import FeedService
 from app.services.incubation import IncubationService
-from app.services.stock import STOCK_KIND_LABELS, StockService
+from app.services.stock import (
+    DEFAULT_ADULT_DAILY_G,
+    DEFAULT_HEN_DAILY_G,
+    DEFAULT_ROOSTER_DAILY_G,
+    STOCK_KIND_LABELS,
+    StockService,
+)
 from app.storage.repositories.batches import BatchRepository
 from app.storage.repositories.eggs import EggRepository
 from app.storage.repositories.feeds import FeedRepository
@@ -77,6 +83,7 @@ class WebSummaryBuilder:
             stock_service,
             user_id=selected_user_id,
             now=current,
+            today=today,
         )
         payload["incubation"] = _incubation_summary(
             incubation_service,
@@ -596,6 +603,7 @@ def _feeds_summary(
     *,
     user_id: int,
     now: datetime,
+    today,
 ) -> dict:
     estimates = stock_service.list_estimates(user_id, now=now)
     ready_mix = [
@@ -629,21 +637,15 @@ def _feeds_summary(
     flock_reports = stock_service.list_flock_reports(user_id, now=now)
     return {
         "stock_items": [
-            {
-                "id": estimate.item.id,
-                "name": estimate.item.name,
-                "kind": estimate.item.kind,
-                "kind_label": STOCK_KIND_LABELS.get(estimate.item.kind, estimate.item.kind),
-                "remaining_kg": round(estimate.remaining_kg, 3),
-                "daily_usage_kg": round(estimate.daily_usage_kg, 3),
-                "days_left": estimate.days_left,
-            }
+            _stock_item_payload(stock_service, estimate, today=today)
             for estimate in estimates
         ],
         "ready_mix": {
             "remaining_kg": round(ready_mix_kg, 3),
             "daily_usage_kg": round(daily_mix_usage_kg, 3),
             "days_left": ready_mix_days_left,
+            "ends_at": _date_after_days(today, ready_mix_days_left),
+            "purchase_by": _purchase_by_date(today, ready_mix_days_left),
         },
         "possible_mix": {
             "grain_base": mix_plan.grain_base_label if mix_plan else DEFAULT_GRAIN_BASE,
@@ -659,6 +661,7 @@ def _feeds_summary(
             "roosters": sum(item.bird_count for item in groups if item.role == "roosters"),
             "chicks": sum(item.bird_count for item in groups if item.group_kind == "chicks"),
         },
+        "feeding_norms": _feeding_norms_payload(),
         "flocks": [
             {
                 "id": report.flock.id,
@@ -671,7 +674,11 @@ def _feeds_summary(
                         "feed_name": usage.assignment.stock_item_name,
                         "remaining_kg": round(usage.remaining_kg, 3),
                         "days_left": usage.days_left,
+                        "ends_at": _date_after_days(today, usage.days_left),
+                        "purchase_by": _purchase_by_date(today, usage.days_left),
                         "total_days_left": usage.total_days_left,
+                        "total_ends_at": _date_after_days(today, usage.total_days_left),
+                        "total_purchase_by": _purchase_by_date(today, usage.total_days_left),
                         "producible_mix_count": usage.producible_mix_count,
                         "producible_mix_kg": round(usage.producible_mix_kg, 3),
                         "limiting_ingredient": usage.limiting_ingredient_name,
@@ -683,6 +690,85 @@ def _feeds_summary(
         ],
         "flocks_total": len(flocks),
     }
+
+
+def _stock_item_payload(stock_service: StockService, estimate, *, today) -> dict:
+    last = stock_service.stock.last_transaction(estimate.item.id, estimate.item.user_id)
+    return {
+        "id": estimate.item.id,
+        "name": estimate.item.name,
+        "kind": estimate.item.kind,
+        "kind_label": STOCK_KIND_LABELS.get(estimate.item.kind, estimate.item.kind),
+        "remaining_kg": round(estimate.remaining_kg, 3),
+        "daily_usage_kg": round(estimate.daily_usage_kg, 3),
+        "days_left": estimate.days_left,
+        "ends_at": _date_after_days(today, estimate.days_left),
+        "purchase_by": _purchase_by_date(today, estimate.days_left),
+        "last_transaction": (
+            {
+                "id": last.id,
+                "type": last.type,
+                "type_label": _stock_transaction_label(last.type),
+                "amount_kg": round(last.amount_kg, 3),
+                "balance_after_kg": round(last.balance_after_kg, 3),
+                "note": last.note,
+                "created_at": last.created_at.isoformat(),
+            }
+            if last is not None
+            else None
+        ),
+    }
+
+
+def _feeding_norms_payload() -> dict:
+    return {
+        "formula": (
+            "Расход = количество птиц * норма грамм/день * доля рациона * "
+            "(1 + запас_процентов / 100) / 1000."
+        ),
+        "adults": [
+            {
+                "role": "hens",
+                "label": "Курица/несушка",
+                "daily_g": DEFAULT_HEN_DAILY_G,
+            },
+            {
+                "role": "roosters",
+                "label": "Петух",
+                "daily_g": DEFAULT_ROOSTER_DAILY_G,
+            },
+            {
+                "role": "mixed",
+                "label": "Взрослая смешанная птица",
+                "daily_g": DEFAULT_ADULT_DAILY_G,
+            },
+        ],
+        "chicks": [
+            {
+                "from_day": start_day,
+                "to_day": end_day,
+                "daily_g": daily_g,
+            }
+            for start_day, end_day, daily_g in FeedService.chick_daily_schedule()
+        ],
+        "notes": [
+            "Возраст цыпленка считается от даты вывода.",
+            "После даты подсадки отдельный расход цыплячьего корма останавливается.",
+            "В назначении смеси можно изменить нормы и запас, если фактический рацион отличается.",
+        ],
+    }
+
+
+def _date_after_days(today, days_left: int | None) -> str | None:
+    if days_left is None:
+        return None
+    return (today + timedelta(days=max(int(days_left), 0))).isoformat()
+
+
+def _purchase_by_date(today, days_left: int | None, *, lead_days: int = 7) -> str | None:
+    if days_left is None:
+        return None
+    return (today + timedelta(days=max(int(days_left) - lead_days, 0))).isoformat()
 
 
 def _incubation_summary(

@@ -267,11 +267,25 @@ class WebAppTest(unittest.TestCase):
         payload = data_response.json()
         self.assertEqual(payload["selected_user_id"], 1)
         self.assertTrue(payload["feeds"]["stock_items"])
+        self.assertIn("feeding_norms", payload["feeds"])
+        self.assertEqual(payload["feeds"]["feeding_norms"]["adults"][0]["daily_g"], 120)
+        self.assertIsNotNone(payload["feeds"]["ready_mix"]["ends_at"])
+        self.assertIsNotNone(payload["feeds"]["ready_mix"]["purchase_by"])
+        stock_item = next(
+            item for item in payload["feeds"]["stock_items"] if item["name"] == "Смесь для кур"
+        )
+        self.assertIsNotNone(stock_item["ends_at"])
+        self.assertIsNotNone(stock_item["purchase_by"])
+        self.assertIn(stock_item["last_transaction"]["type"], {"purchase", "mix_output"})
         self.assertTrue(payload["history"])
         self.assertEqual(page_response.status_code, 200)
         self.assertIn("Корма и склад", page_response.text)
         self.assertIn("Добавить покупку", page_response.text)
         self.assertIn("Записать факт", page_response.text)
+        self.assertIn("Нормы расхода и формула", page_response.text)
+        self.assertIn("Курица/несушка", page_response.text)
+        self.assertIn("Хватит до", page_response.text)
+        self.assertIn("Докупить до", page_response.text)
         self.assertIn("Смесь для кур", page_response.text)
 
     def test_stock_purchase_can_be_created_from_web_form(self) -> None:
@@ -346,6 +360,7 @@ class WebAppTest(unittest.TestCase):
         self.assertTrue(payload["history"])
         self.assertEqual(page_response.status_code, 200)
         self.assertIn("Формула одного замеса", page_response.text)
+        self.assertIn("Нормы расхода и формула", page_response.text)
         self.assertIn("Создать замес", page_response.text)
         self.assertIn("Зерновая смесь для кур несушек", page_response.text)
 
@@ -399,6 +414,7 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("Добавить поголовье", page_response.text)
         self.assertIn("Создать еще одно стадо", page_response.text)
         self.assertIn("Если стадо уже есть", page_response.text)
+        self.assertIn("Нормы расхода и формула", page_response.text)
         self.assertIn("Основное стадо", page_response.text)
 
     def test_bird_group_can_be_created_from_web_form(self) -> None:

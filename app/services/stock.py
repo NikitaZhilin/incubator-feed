@@ -31,6 +31,9 @@ STOCK_KIND_LABELS = {
     "commercial_feed": "готовый корм",
     "other": "другое",
 }
+DEFAULT_HEN_DAILY_G = 120
+DEFAULT_ROOSTER_DAILY_G = 150
+DEFAULT_ADULT_DAILY_G = 120
 
 
 @dataclass(frozen=True)
@@ -322,9 +325,9 @@ class StockService:
         flock_id: int,
         stock_item_id: int,
         share_percent: float = 100,
-        daily_per_hen_g: float = 120,
-        daily_per_rooster_g: float = 150,
-        daily_per_adult_g: float = 120,
+        daily_per_hen_g: float = DEFAULT_HEN_DAILY_G,
+        daily_per_rooster_g: float = DEFAULT_ROOSTER_DAILY_G,
+        daily_per_adult_g: float = DEFAULT_ADULT_DAILY_G,
         reserve_percent: float = 0,
     ) -> FlockFeedAssignment:
         flock = self.feeds.get_flock(flock_id, user_id)

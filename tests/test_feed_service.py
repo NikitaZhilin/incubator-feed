@@ -286,6 +286,23 @@ class FeedServiceTest(unittest.TestCase):
         self.assertEqual(round(estimate.daily_usage_kg, 3), 0.275)
         self.assertEqual(joined_estimate.daily_usage_kg, 0)
 
+    def test_chick_daily_schedule_is_exposed_for_ui_formula(self) -> None:
+        self.assertEqual(FeedService.chick_daily_g(0), 15)
+        self.assertEqual(FeedService.chick_daily_g(8), 25)
+        self.assertEqual(FeedService.chick_daily_g(29), 70)
+        self.assertEqual(FeedService.chick_daily_g(85), 110)
+        self.assertEqual(
+            FeedService.chick_daily_schedule(),
+            (
+                (0, 7, 15),
+                (8, 14, 25),
+                (15, 28, 45),
+                (29, 56, 70),
+                (57, 84, 90),
+                (85, None, 110),
+            ),
+        )
+
     def test_invalid_non_finite_numbers_are_rejected(self) -> None:
         with self.assertRaises(ValueError):
             self.service.create_feed(
