@@ -20,6 +20,7 @@ def main_menu_keyboard(
         rows.append(feature_row)
     rows.extend(
         [
+            [InlineKeyboardButton(text="📊 Посмотреть сводку", callback_data="menu:summary")],
             [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:main")],
             [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings:menu")],
         ]

@@ -22,7 +22,7 @@ class TelegramMenuButtonTest(unittest.IsolatedAsyncioTestCase):
         await configure_telegram_menu_button(bot, config)
 
         self.assertIsInstance(bot.menu_button, MenuButtonWebApp)
-        self.assertEqual(bot.menu_button.text, "Mini App")
+        self.assertEqual(bot.menu_button.text, "АПП")
         self.assertEqual(bot.menu_button.web_app.url, "https://incubator.example.test/?auth=secret")
 
     async def test_without_miniapp_keeps_commands_menu_button(self) -> None:

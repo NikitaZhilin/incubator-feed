@@ -245,7 +245,7 @@ async def configure_telegram_menu_button(bot: Bot, config) -> None:
         if config.miniapp_open_url:
             await bot.set_chat_menu_button(
                 menu_button=MenuButtonWebApp(
-                    text="Mini App",
+                    text="АПП",
                     web_app=WebAppInfo(url=config.miniapp_open_url),
                 )
             )

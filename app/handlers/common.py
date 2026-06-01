@@ -1,11 +1,17 @@
+from datetime import datetime, timezone as datetime_timezone
+from zoneinfo import ZoneInfo
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.config import AppConfig
-from app.keyboards.menu import main_menu_keyboard, web_choice_keyboard
+from app.keyboards.menu import back_to_menu_keyboard, main_menu_keyboard, web_choice_keyboard
+from app.services.eggs import EggService
 from app.services.incubation import IncubationService
+from app.services.reminders import ReminderRunner
+from app.services.stock import StockService
 from app.version import APP_VERSION
 
 
@@ -335,6 +341,35 @@ async def web_unconfigured_callback(callback: CallbackQuery, config: AppConfig) 
     await callback.answer()
 
 
+@router.callback_query(F.data == "menu:summary")
+async def menu_summary(
+    callback: CallbackQuery,
+    incubation_service: IncubationService,
+    egg_service: EggService,
+    stock_service: StockService,
+    config: AppConfig,
+) -> None:
+    if callback.message is None:
+        await callback.answer("Не удалось открыть сводку из этого сообщения.", show_alert=True)
+        return
+    now = datetime.now(datetime_timezone.utc)
+    settings = incubation_service.get_user_settings(callback.from_user.id)
+    local_now = _local_now_from_settings(settings, now)
+    summary = ReminderRunner(
+        bot=callback.bot,
+        incubation_service=incubation_service,
+        egg_service=egg_service,
+        stock_service=stock_service,
+        timezone=config.timezone,
+    ).build_daily_summary_message(
+        user_id=callback.from_user.id,
+        local_now=local_now,
+        now=now,
+    )
+    await callback.message.answer(summary, reply_markup=back_to_menu_keyboard())
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("faq:"))
 async def faq_callback(callback: CallbackQuery) -> None:
     section = str(callback.data).split(":", 1)[1]
@@ -444,6 +479,16 @@ def format_web_unavailable_text(*, is_admin: bool = False) -> str:
         f"{text}\n\n"
         "Для администратора: укажите на сервере WEB_PUBLIC_URL и перезапустите Telegram-бота."
     )
+
+
+def _local_now_from_settings(settings: dict, now_utc: datetime) -> datetime:
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=datetime_timezone.utc)
+    try:
+        user_timezone = ZoneInfo(str(settings.get("timezone", "Europe/Moscow")))
+    except Exception:
+        user_timezone = ZoneInfo("Europe/Moscow")
+    return now_utc.astimezone(user_timezone)
 
 
 def faq_keyboard(section: str) -> InlineKeyboardMarkup:

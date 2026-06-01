@@ -268,6 +268,8 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("🥚 Инкубация", texts)
         self.assertIn("⚙️ Настройки", texts)
         self.assertIn("❓ FAQ", texts)
+        self.assertIn("📊 Посмотреть сводку", texts)
+        self.assertIn("menu:summary", _keyboard_callbacks(keyboard))
         self.assertIn("🌐 Открыть сайт", texts)
         self.assertIn("menu:web", _keyboard_callbacks(keyboard))
 

@@ -176,7 +176,7 @@ class ReminderRunner:
             if self.notifications and self.notifications.was_sent(event_key):
                 continue
             try:
-                message = self._build_daily_summary_message(
+                message = self.build_daily_summary_message(
                     user_id=user_id,
                     local_now=local_now,
                     now=now,
@@ -272,7 +272,7 @@ class ReminderRunner:
         except Exception:
             logger.exception("Failed to write reminder_runner heartbeat")
 
-    def _build_daily_summary_message(
+    def build_daily_summary_message(
         self,
         *,
         user_id: int,
@@ -296,7 +296,6 @@ class ReminderRunner:
                     "Яйца:",
                     f"- Сегодня записано: {stats.today_eggs} шт.",
                     f"- За 7 дней: {stats.week_eggs} шт.; среднее: {stats.week_average:.1f} шт./день.",
-                    f"- Несушки: {stats.active_hens_count} активных из {stats.total_hens_count}.",
                     "",
                 ]
             )

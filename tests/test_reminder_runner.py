@@ -306,6 +306,7 @@ class ReminderRunnerTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Проверить и заменить воду", text)
             self.assertIn("Дать корм", text)
             self.assertIn("Сегодня записано: 6 шт.", text)
+            self.assertNotIn("Несушки:", text)
             self.assertIn("Остаток:", text)
             self.assertIn("Критично", text)
 
