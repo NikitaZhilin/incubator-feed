@@ -168,7 +168,7 @@ python -B scripts\web_app.py
 Если web опубликован через домен или HTTPS reverse proxy, укажите
 `WEB_PUBLIC_URL`. В Telegram появляются отдельные кнопки `🌐 Открыть сайт` и,
 если URL начинается с `https://`, `📱 Открыть Mini App`. При HTTPS бот также
-настраивает Telegram menu button на Mini App при старте. Без `WEB_PUBLIC_URL`
+настраивает компактный Telegram menu button `Mini App` при старте. Без `WEB_PUBLIC_URL`
 кнопка показывает подсказку. Для автовхода по ссылке дополнительно задайте
 `WEB_LINK_TOKEN`.
 Для быстрого теста через ngrok можно запустить `.\scripts\start-ngrok-web.ps1`

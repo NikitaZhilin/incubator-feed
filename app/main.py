@@ -137,6 +137,9 @@ async def main() -> None:
             bot=bot,
             incubation_service=incubation_service,
             feed_service=feed_service,
+            egg_service=egg_service,
+            stock_service=stock_service,
+            users=users,
             notifications=notifications,
             heartbeats=heartbeats,
             heartbeat_version=heartbeat_version,
@@ -242,7 +245,7 @@ async def configure_telegram_menu_button(bot: Bot, config) -> None:
         if config.miniapp_open_url:
             await bot.set_chat_menu_button(
                 menu_button=MenuButtonWebApp(
-                    text="Открыть Mini App",
+                    text="Mini App",
                     web_app=WebAppInfo(url=config.miniapp_open_url),
                 )
             )

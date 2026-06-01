@@ -1,31 +1,38 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 import tempfile
 import unittest
 
 from app.domain import FeedEstimate, FeedStock
+from app.services.eggs import EggService
 from app.services.feeds import FeedService
 from app.services.incubation import IncubationService
 from app.services.reminders import ReminderRunner
+from app.services.stock import StockService
 from app.storage.database import Database
 from app.storage.repositories.analytics import AnalyticsRepository
 from app.storage.repositories.batches import BatchRepository
+from app.storage.repositories.eggs import EggRepository
 from app.storage.repositories.feeds import FeedRepository
 from app.storage.repositories.heartbeats import HeartbeatRepository
 from app.storage.repositories.notifications import NotificationRepository
 from app.storage.repositories.reminders import ReminderRepository
+from app.storage.repositories.stock import StockRepository
 from app.storage.repositories.users import UserRepository
 
 
 class FakeBot:
-    def __init__(self) -> None:
+    def __init__(self, *, fail_user_ids: set[int] | None = None) -> None:
+        self.fail_user_ids = {1} if fail_user_ids is None else fail_user_ids
         self.sent_to: list[int] = []
+        self.messages: list[tuple[int, str]] = []
 
     async def send_message(self, user_id: int, text: str) -> None:
-        if user_id == 1:
+        if user_id in self.fail_user_ids:
             raise RuntimeError("temporary telegram failure")
         self.sent_to.append(user_id)
+        self.messages.append((user_id, text))
 
 
 class FakeIncubationService:
@@ -227,6 +234,91 @@ class ReminderRunnerTest(unittest.IsolatedAsyncioTestCase):
             await runner._send_due_reminders(datetime(2026, 5, 25, 9, 0, tzinfo=timezone.utc))
 
             self.assertEqual(bot.sent_to, [])
+
+    async def test_daily_summary_is_sent_once_at_noon_with_mix_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Database(Path(temp_dir) / "test.db")
+            database.initialize()
+            users = UserRepository(database)
+            analytics = AnalyticsRepository(database)
+            feed_repository = FeedRepository(database)
+            incubation = IncubationService(
+                BatchRepository(database),
+                ReminderRepository(database),
+                users,
+                analytics,
+            )
+            feed_service = FeedService(feed_repository, analytics)
+            egg_service = EggService(EggRepository(database), feed_repository, timezone_name="Europe/Moscow")
+            stock_service = StockService(StockRepository(database), feed_repository, analytics)
+            notifications = NotificationRepository(database)
+            users.upsert(user_id=10)
+            users.update_settings(10, timezone="Europe/Moscow")
+            group = feed_service.create_bird_group(
+                user_id=10,
+                name="Несушки",
+                bird_count=10,
+                species="chicken",
+                role="hens",
+            )
+            flock = feed_service.create_flock(
+                user_id=10,
+                name="Основное стадо",
+                member_group_ids=[group.id],
+            )
+            mix = stock_service.add_purchase(
+                user_id=10,
+                name="Смесь для кур",
+                kind="finished_mix",
+                amount_kg=3,
+            )
+            stock_service.assign_flock_feed(
+                user_id=10,
+                flock_id=flock.id,
+                stock_item_id=mix.item.id,
+            )
+            egg_service.record_entry(
+                user_id=10,
+                eggs_count=6,
+                entry_date=date(2026, 6, 1),
+            )
+            bot = FakeBot(fail_user_ids=set())
+            runner = ReminderRunner(
+                bot=bot,
+                incubation_service=incubation,
+                egg_service=egg_service,
+                stock_service=stock_service,
+                users=users,
+                notifications=notifications,
+                timezone="UTC",
+            )
+
+            await runner._send_due_reminders(datetime(2026, 6, 1, 8, 59, tzinfo=timezone.utc))
+            self.assertEqual(bot.sent_to, [])
+
+            await runner._send_due_reminders(datetime(2026, 6, 1, 9, 0, tzinfo=timezone.utc))
+            await runner._send_due_reminders(datetime(2026, 6, 1, 9, 5, tzinfo=timezone.utc))
+
+            self.assertEqual(bot.sent_to, [10])
+            text = bot.messages[0][1]
+            self.assertIn("Ежедневная сводка хозяйства на 2026-06-01", text)
+            self.assertIn("Собрать яйца", text)
+            self.assertIn("Проверить и заменить воду", text)
+            self.assertIn("Дать корм", text)
+            self.assertIn("Сегодня записано: 6 шт.", text)
+            self.assertIn("Остаток:", text)
+            self.assertIn("Критично", text)
+
+            with database.connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT type, event_key, status
+                    FROM notification_log
+                    WHERE type = 'daily_summary'
+                    """
+                ).fetchone()
+            self.assertEqual(row["status"], "sent")
+            self.assertEqual(row["event_key"], "daily_summary:user_10:2026-06-01")
 
     async def test_post_hatch_reminder_is_sent_once_with_batch_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

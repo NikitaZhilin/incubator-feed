@@ -112,7 +112,7 @@ WEB_LINK_TOKEN=
 меню, настройках и разделе `О боте` всегда. Если `WEB_PUBLIC_URL` задан,
 показывается `🌐 Открыть сайт`; если URL начинается с `https://`, дополнительно
 показывается `📱 Открыть Mini App` через Telegram `web_app`. При HTTPS бот на
-старте также настраивает Telegram menu button на Mini App. Если вместе с
+старте также настраивает компактный Telegram menu button `Mini App`. Если вместе с
 `WEB_PUBLIC_URL` задан `WEB_LINK_TOKEN`, ссылки открываются с
 `?auth=<WEB_LINK_TOKEN>`. `WEB_ADMIN_TOKEN` в Telegram-ссылки не подставляется.
 
