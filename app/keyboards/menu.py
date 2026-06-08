@@ -64,6 +64,18 @@ def back_to_menu_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def daily_summary_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Добавить яйца", callback_data="eggs:add"),
+                InlineKeyboardButton(text="Переход в раздел корма", callback_data="feeds:menu"),
+            ],
+            [InlineKeyboardButton(text="Выйти в меню", callback_data="menu:home")],
+        ]
+    )
+
+
 def back_to_incubation_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[

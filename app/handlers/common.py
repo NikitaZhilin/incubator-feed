@@ -7,7 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.config import AppConfig
-from app.keyboards.menu import back_to_menu_keyboard, main_menu_keyboard, web_choice_keyboard
+from app.keyboards.menu import daily_summary_keyboard, main_menu_keyboard, web_choice_keyboard
 from app.services.eggs import EggService
 from app.services.incubation import IncubationService
 from app.services.reminders import ReminderRunner
@@ -366,7 +366,7 @@ async def menu_summary(
         local_now=local_now,
         now=now,
     )
-    await callback.message.answer(summary, reply_markup=back_to_menu_keyboard())
+    await callback.message.answer(summary, reply_markup=daily_summary_keyboard())
     await callback.answer()
 
 

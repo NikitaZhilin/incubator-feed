@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramNetworkError
 
+from app.keyboards.menu import daily_summary_keyboard
 from app.services.eggs import EggService
 from app.services.incubation import IncubationService
 from app.services.guides import post_hatch_care
@@ -188,7 +189,7 @@ class ReminderRunner:
                         event_key=event_key,
                         scheduled_for=local_now,
                     )
-                await self.bot.send_message(user_id, message)
+                await self.bot.send_message(user_id, message, reply_markup=daily_summary_keyboard())
             except Exception as exc:
                 logger.exception("Failed to send daily summary to user %s", user_id)
                 error_code = classify_telegram_error(exc)

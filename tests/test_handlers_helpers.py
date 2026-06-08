@@ -45,6 +45,7 @@ from app.keyboards.incubation import (
     number_adjust_keyboard,
 )
 from app.keyboards.menu import (
+    daily_summary_keyboard,
     incubation_menu_keyboard,
     main_menu_keyboard,
     settings_keyboard,
@@ -302,6 +303,18 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("📱 Открыть Mini App", _keyboard_texts(markup))
         self.assertIn("https://incubator.example.test/?auth=secret", _keyboard_urls(markup))
         self.assertIn("https://incubator.example.test/?auth=secret", _keyboard_web_app_urls(markup))
+
+    def test_daily_summary_keyboard_has_workflow_buttons(self) -> None:
+        keyboard = daily_summary_keyboard()
+
+        self.assertEqual(
+            _keyboard_texts(keyboard),
+            ["Добавить яйца", "Переход в раздел корма", "Выйти в меню"],
+        )
+        self.assertEqual(
+            _keyboard_callbacks(keyboard),
+            ["eggs:add", "feeds:menu", "menu:home"],
+        )
 
     def test_eggs_keyboards_have_section_navigation(self) -> None:
         self.assertIn("➕ Добавить яйца", _keyboard_texts(eggs_menu_keyboard()))

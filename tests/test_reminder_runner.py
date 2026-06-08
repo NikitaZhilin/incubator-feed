@@ -27,12 +27,14 @@ class FakeBot:
         self.fail_user_ids = {1} if fail_user_ids is None else fail_user_ids
         self.sent_to: list[int] = []
         self.messages: list[tuple[int, str]] = []
+        self.reply_markups = []
 
-    async def send_message(self, user_id: int, text: str) -> None:
+    async def send_message(self, user_id: int, text: str, reply_markup=None) -> None:
         if user_id in self.fail_user_ids:
             raise RuntimeError("temporary telegram failure")
         self.sent_to.append(user_id)
         self.messages.append((user_id, text))
+        self.reply_markups.append(reply_markup)
 
 
 class FakeIncubationService:
@@ -309,6 +311,15 @@ class ReminderRunnerTest(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("Несушки:", text)
             self.assertIn("Остаток:", text)
             self.assertIn("Критично", text)
+            markup_texts = [
+                button.text
+                for row in bot.reply_markups[0].inline_keyboard
+                for button in row
+            ]
+            self.assertEqual(
+                markup_texts,
+                ["Добавить яйца", "Переход в раздел корма", "Выйти в меню"],
+            )
 
             with database.connect() as connection:
                 row = connection.execute(
