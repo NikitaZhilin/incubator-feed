@@ -302,10 +302,22 @@ class ReminderRunner:
             )
 
         lines.append("Готовая смесь:")
-        lines.extend(self._finished_mix_summary_lines(user_id=user_id, now=now))
+        lines.extend(
+            self._finished_mix_summary_lines(
+                user_id=user_id,
+                now=now,
+                local_now=local_now,
+            )
+        )
         return "\n".join(lines)
 
-    def _finished_mix_summary_lines(self, *, user_id: int, now: datetime) -> list[str]:
+    def _finished_mix_summary_lines(
+        self,
+        *,
+        user_id: int,
+        now: datetime,
+        local_now: datetime,
+    ) -> list[str]:
         if self.stock_service is None:
             return ["- Склад смеси сейчас не подключен к сводке."]
 
@@ -317,11 +329,21 @@ class ReminderRunner:
         remaining_kg = sum(max(estimate.remaining_kg, 0) for estimate in estimates)
         daily_usage_kg = sum(max(estimate.daily_usage_kg, 0) for estimate in estimates)
         days_left = floor(remaining_kg / daily_usage_kg) if daily_usage_kg > 0 else None
+        last_mix = self.stock_service.last_mix_output(user_id)
         lines = [
+            f"- Последний замес: {_format_local_datetime(last_mix.created_at, local_now) if last_mix else 'не найден'}.",
             f"- Остаток: {_format_kg(remaining_kg)}.",
             f"- Расход: {_format_kg(daily_usage_kg)}/день.",
             f"- Хватит: {_format_days(days_left)}.",
         ]
+        if remaining_kg <= 0:
+            exhausted_at = self._finished_mix_exhausted_at(estimates=estimates, now=now)
+            if exhausted_at is not None:
+                lines.append(
+                    "- По расчету смесь закончилась "
+                    f"{_format_local_datetime(exhausted_at, local_now)} "
+                    f"({_format_days_ago(exhausted_at, local_now)} назад)."
+                )
 
         mix_advice = self._mix_advice_line(user_id=user_id, now=now)
         if remaining_kg <= 0:
@@ -358,6 +380,18 @@ class ReminderRunner:
         if missing:
             return "- Для нового замеса не хватает: " + ", ".join(missing[:5]) + "."
         return ""
+
+    def _finished_mix_exhausted_at(self, *, estimates, now: datetime) -> datetime | None:
+        if self.stock_service is None:
+            return None
+        exhausted_dates = [
+            exhausted_at
+            for estimate in estimates
+            if estimate.remaining_kg <= 0
+            for exhausted_at in [self.stock_service.estimate_item_exhausted_at(estimate.item, now=now)]
+            if exhausted_at is not None
+        ]
+        return max(exhausted_dates) if exhausted_dates else None
 
 
 def classify_telegram_error(exc: Exception) -> str:
@@ -414,3 +448,19 @@ def _format_days(value: int | None) -> str:
     if value is None:
         return "не рассчитано"
     return f"{value} дн."
+
+
+def _format_local_datetime(value: datetime, local_now: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=datetime_timezone.utc)
+    timezone = local_now.tzinfo or ZoneInfo("Europe/Moscow")
+    return value.astimezone(timezone).strftime("%Y-%m-%d %H:%M")
+
+
+def _format_days_ago(value: datetime, local_now: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=datetime_timezone.utc)
+    timezone = local_now.tzinfo or ZoneInfo("Europe/Moscow")
+    local_value = value.astimezone(timezone)
+    days = max((local_now.date() - local_value.date()).days, 0)
+    return f"{days} дн."

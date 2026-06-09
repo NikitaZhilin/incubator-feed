@@ -332,6 +332,75 @@ class ReminderRunnerTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(row["status"], "sent")
             self.assertEqual(row["event_key"], "daily_summary:user_10:2026-06-01")
 
+    async def test_daily_summary_reports_last_mix_and_exhausted_date(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Database(Path(temp_dir) / "test.db")
+            database.initialize()
+            users = UserRepository(database)
+            analytics = AnalyticsRepository(database)
+            feed_repository = FeedRepository(database)
+            stock_repository = StockRepository(database)
+            incubation = IncubationService(
+                BatchRepository(database),
+                ReminderRepository(database),
+                users,
+                analytics,
+            )
+            feed_service = FeedService(feed_repository, analytics)
+            egg_service = EggService(EggRepository(database), feed_repository, timezone_name="Europe/Moscow")
+            stock_service = StockService(stock_repository, feed_repository, analytics)
+            users.upsert(user_id=10)
+            group = feed_service.create_bird_group(
+                user_id=10,
+                name="Несушки",
+                bird_count=10,
+                species="chicken",
+                role="hens",
+            )
+            flock = feed_service.create_flock(
+                user_id=10,
+                name="Основное стадо",
+                member_group_ids=[group.id],
+            )
+            mix_item = stock_repository.get_or_create_item(
+                user_id=10,
+                name="Смесь для кур",
+                kind="finished_mix",
+            )
+            mixed_at = datetime(2026, 5, 29, 9, 0, tzinfo=timezone.utc)
+            stock_repository.add_transaction(
+                user_id=10,
+                stock_item_id=mix_item.id,
+                transaction_type="mix_output",
+                amount_kg=0.1,
+                balance_after_kg=0.1,
+                note="Замес #1",
+                created_at=mixed_at,
+            )
+            stock_repository.create_flock_assignment(
+                user_id=10,
+                flock_id=flock.id,
+                stock_item_id=mix_item.id,
+                started_at=mixed_at,
+            )
+            runner = ReminderRunner(
+                bot=FakeBot(fail_user_ids=set()),
+                incubation_service=incubation,
+                egg_service=egg_service,
+                stock_service=stock_service,
+                timezone="UTC",
+            )
+
+            text = runner.build_daily_summary_message(
+                user_id=10,
+                local_now=datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc),
+                now=datetime(2026, 6, 1, 9, 0, tzinfo=timezone.utc),
+            )
+
+            self.assertIn("Последний замес: 2026-05-29 09:00", text)
+            self.assertIn("По расчету смесь закончилась 2026-05-29", text)
+            self.assertIn("(3 дн. назад)", text)
+
     async def test_post_hatch_reminder_is_sent_once_with_batch_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             database = Database(Path(temp_dir) / "test.db")

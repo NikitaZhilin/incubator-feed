@@ -158,6 +158,21 @@ class StockRepository:
             ).fetchone()
         return self._transaction_from_row(row) if row else None
 
+    def last_transaction_by_type(self, user_id: int, transaction_type: str) -> StockTransaction | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, user_id, stock_item_id, type, amount_kg, balance_after_kg,
+                       note, related_mix_id, created_at
+                FROM stock_transactions
+                WHERE user_id = ? AND type = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (user_id, transaction_type),
+            ).fetchone()
+        return self._transaction_from_row(row) if row else None
+
     def list_transactions(self, user_id: int, limit: int = 20) -> list[StockTransaction]:
         with self.database.connect() as connection:
             rows = connection.execute(

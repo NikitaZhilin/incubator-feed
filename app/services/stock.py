@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from math import floor, isfinite
 import re
 
@@ -12,6 +12,7 @@ from app.domain import (
     FlockReport,
     StockEstimate,
     StockItem,
+    StockTransaction,
 )
 from app.services.feed_recipes import (
     DEFAULT_GRAIN_BASE,
@@ -95,6 +96,9 @@ class StockService:
         current = now or datetime.now(timezone.utc)
         return [self.estimate_item(item, now=current) for item in self.stock.list_items(user_id)]
 
+    def last_mix_output(self, user_id: int) -> StockTransaction | None:
+        return self.stock.last_transaction_by_type(user_id, "mix_output")
+
     def estimate_item(
         self,
         item: StockItem,
@@ -117,6 +121,26 @@ class StockService:
             days_left=days_left,
             last_transaction_at=last.created_at,
         )
+
+    def estimate_item_exhausted_at(
+        self,
+        item: StockItem,
+        *,
+        now: datetime | None = None,
+    ) -> datetime | None:
+        current = now or datetime.now(timezone.utc)
+        last = self.stock.last_transaction(item.id, item.user_id)
+        if last is None:
+            return None
+        daily_usage_kg = self._daily_usage_kg(item, current)
+        if daily_usage_kg <= 0:
+            return None
+        consumed_kg = self._consumed_since(item, last.created_at, current)
+        raw_remaining_kg = last.balance_after_kg - consumed_kg
+        if raw_remaining_kg > 0:
+            return None
+        days_since_exhausted = abs(raw_remaining_kg) / daily_usage_kg
+        return current - timedelta(days=days_since_exhausted)
 
     def add_purchase(
         self,
