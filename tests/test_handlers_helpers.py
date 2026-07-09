@@ -1,11 +1,11 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
 from app.config import AppConfig
 from app.handlers.common import build_share_text, faq_keyboard, format_faq, format_web_unavailable_text
-from app.handlers.incubation import _adjust_number
+from app.handlers.incubation import _adjust_number, _user_today
 from app.handlers.feeds import _format_flock_reports
 from app.handlers.settings import (
     _format_sections,
@@ -162,6 +162,19 @@ class HandlerHelpersTest(unittest.TestCase):
 
     def test_adjust_number_supports_max_action(self) -> None:
         self.assertEqual(_adjust_number(3, "max", min_value=0, max_value=12), 12)
+
+    def test_user_today_uses_user_timezone(self) -> None:
+        class FakeIncubationService:
+            def get_user_settings(self, user_id):
+                return {"timezone": "Pacific/Kiritimati"}
+
+        local_today = _user_today(
+            1,
+            FakeIncubationService(),
+            datetime(2026, 7, 9, 11, 30, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(local_today, date(2026, 7, 10))
 
     def test_about_bot_contains_version_links_and_release_notes(self) -> None:
         config = AppConfig(

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -26,7 +26,7 @@ from app.keyboards.menu import (
     back_to_incubation_keyboard,
 )
 from app.services.guides import incubation_calendar, post_hatch_care
-from app.services.incubation import IncubationService
+from app.services.incubation import IncubationService, to_user_local_time
 from app.utils.dates import DATE_FORMAT_HINT, parse_user_date
 
 
@@ -354,7 +354,10 @@ async def enter_title(
 
 @router.message(Command("batches"))
 async def list_batches(message: Message, incubation_service: IncubationService) -> None:
-    statuses = incubation_service.get_user_statuses(message.from_user.id)
+    statuses = incubation_service.get_user_statuses(
+        message.from_user.id,
+        today=_user_today(message.from_user.id, incubation_service),
+    )
     if not statuses:
         await message.answer("Активных партий пока нет. Добавьте первую через /new.")
         return
@@ -368,7 +371,10 @@ async def list_batches(message: Message, incubation_service: IncubationService) 
 
 @router.message(Command("today"))
 async def today(message: Message, incubation_service: IncubationService) -> None:
-    statuses = incubation_service.get_user_statuses(message.from_user.id)
+    statuses = incubation_service.get_user_statuses(
+        message.from_user.id,
+        today=_user_today(message.from_user.id, incubation_service),
+    )
     if not statuses:
         await message.answer("На сегодня задач нет: активных партий не найдено.")
         return
@@ -1048,7 +1054,7 @@ async def _create_batch_from_state(
         incubation_service.set_reminders(user_id, True, 9, 0)
         reminders_note = "\n\nЕжедневные напоминания по инкубации включены на 09:00."
     await state.clear()
-    status = incubation_service.get_status(batch, today=message.date.date())
+    status = incubation_service.get_status(batch, today=_user_today(user_id, incubation_service))
     await message.answer(
         "Партия добавлена.\n\n" + _format_status(status) + reminders_note,
         reply_markup=batch_actions_keyboard(batch.id, batch.is_active),
@@ -1056,7 +1062,10 @@ async def _create_batch_from_state(
 
 
 async def _send_batches(callback: CallbackQuery, incubation_service: IncubationService) -> None:
-    statuses = incubation_service.get_user_statuses(callback.from_user.id)
+    statuses = incubation_service.get_user_statuses(
+        callback.from_user.id,
+        today=_user_today(callback.from_user.id, incubation_service),
+    )
     if not statuses:
         await _answer_callback_message(
             callback,
@@ -1074,7 +1083,10 @@ async def _send_batches(callback: CallbackQuery, incubation_service: IncubationS
 
 
 async def _send_today(callback: CallbackQuery, incubation_service: IncubationService) -> None:
-    statuses = incubation_service.get_user_statuses(callback.from_user.id)
+    statuses = incubation_service.get_user_statuses(
+        callback.from_user.id,
+        today=_user_today(callback.from_user.id, incubation_service),
+    )
     if not statuses:
         await _answer_callback_message(
             callback,
@@ -1217,6 +1229,18 @@ def _format_status(status) -> str:
         f"{note}\n\n"
         f"Рекомендации:\n{recommendations}"
     )
+
+
+def _user_today(
+    user_id: int,
+    incubation_service: IncubationService,
+    now_utc: datetime | None = None,
+) -> date:
+    settings = incubation_service.get_user_settings(user_id)
+    return to_user_local_time(
+        now_utc or datetime.now(timezone.utc),
+        str(settings.get("timezone", "Europe/Moscow")),
+    ).date()
 
 
 def _day_label(status) -> str:

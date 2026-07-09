@@ -113,10 +113,16 @@ async def advisor_incubation_today(
     callback: CallbackQuery,
     state: FSMContext,
     poultry_advisor_service: PoultryAdvisorService,
+    incubation_service: IncubationService,
 ) -> None:
     await state.clear()
+    now = datetime.now(datetime_timezone.utc)
+    local_now = _local_now(callback.from_user.id, incubation_service, now)
     await callback.message.answer(
-        poultry_advisor_service.build_incubation_today_advice(callback.from_user.id),
+        poultry_advisor_service.build_incubation_today_advice(
+            callback.from_user.id,
+            today=local_now.date(),
+        ),
         reply_markup=advisor_back_keyboard(),
     )
     await callback.answer()

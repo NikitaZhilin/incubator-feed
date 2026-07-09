@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.storage.database import Database
 from app.services.feeds import FeedService
+from app.services.incubation import IncubationService
 from app.services.stock import StockService
 from app.storage.repositories.batches import BatchRepository
 from app.storage.repositories.eggs import EggRepository
@@ -19,6 +20,7 @@ from app.storage.repositories.stock import StockRepository
 from app.storage.repositories.users import UserRepository
 from app.web.config import WebConfig
 from app.web.main import create_app
+from app.web.summary import _incubation_summary
 
 
 class WebAppTest(unittest.TestCase):
@@ -256,6 +258,24 @@ class WebAppTest(unittest.TestCase):
         self.assertGreater(payload["feeds"]["ready_mix"]["remaining_kg"], 0)
         self.assertEqual(payload["feeds"]["bird_groups"]["hens"], 12)
         self.assertEqual(payload["incubation"]["active_batches"], 1)
+
+    def test_web_incubation_summary_uses_supplied_today(self) -> None:
+        today = date.today() - timedelta(days=1)
+        BatchRepository(self.database).create(
+            user_id=2,
+            species="chicken",
+            eggs_count=10,
+            start_date=today - timedelta(days=8),
+            title="Local date",
+        )
+
+        payload = _incubation_summary(
+            IncubationService(BatchRepository(self.database)),
+            user_id=2,
+            today=today,
+        )
+
+        self.assertEqual(payload["batches"][0]["day"], 9)
 
     def test_feeds_data_and_page_return_stock_snapshot(self) -> None:
         self._create_household_data()

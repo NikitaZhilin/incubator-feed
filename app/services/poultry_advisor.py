@@ -113,7 +113,7 @@ class PoultryAdvisorService:
         except Exception:
             lines.append("- Расчет кормов сейчас недоступен.")
 
-        incubation_lines = self._incubation_plan_lines(user_id=user_id)
+        incubation_lines = self._incubation_plan_lines(user_id=user_id, today=today)
         if incubation_lines:
             lines.extend(["", "Инкубация:"])
             lines.extend(incubation_lines)
@@ -256,7 +256,7 @@ class PoultryAdvisorService:
     ) -> str:
         current_date = today or date.today()
         lines = ["Инкубация сегодня:", ""]
-        statuses = self.incubation_service.get_user_statuses(user_id)
+        statuses = self.incubation_service.get_user_statuses(user_id, today=current_date)
         if not statuses:
             lines.append("- Активных партий нет. Если есть новая закладка, добавьте партию в разделе `Инкубация`.")
             return "\n".join(lines)
@@ -350,7 +350,7 @@ class PoultryAdvisorService:
             pass
 
         try:
-            statuses = self.incubation_service.get_user_statuses(user_id)
+            statuses = self.incubation_service.get_user_statuses(user_id, today=local_now.date())
             if statuses:
                 first = statuses[0]
                 if first.recommendations:
@@ -431,8 +431,8 @@ class PoultryAdvisorService:
             warnings.append("- Взрослые куры заведены как смешанная группа: яйца не увидят их как несушек.")
         return warnings
 
-    def _incubation_plan_lines(self, *, user_id: int) -> list[str]:
-        statuses = self.incubation_service.get_user_statuses(user_id)
+    def _incubation_plan_lines(self, *, user_id: int, today: date) -> list[str]:
+        statuses = self.incubation_service.get_user_statuses(user_id, today=today)
         if not statuses:
             return []
         max_batches = int(self.content.get("incubation", {}).get("max_batches_in_today_plan", 3))

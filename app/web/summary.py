@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -88,6 +88,7 @@ class WebSummaryBuilder:
         payload["incubation"] = _incubation_summary(
             incubation_service,
             user_id=selected_user_id,
+            today=today,
         )
         return payload
 
@@ -775,8 +776,9 @@ def _incubation_summary(
     incubation: IncubationService,
     *,
     user_id: int,
+    today: date,
 ) -> dict:
-    statuses = incubation.get_user_statuses(user_id)
+    statuses = incubation.get_user_statuses(user_id, today=today)
     stats = incubation.get_stats(user_id)
     return {
         "active_batches": stats.active_batches,

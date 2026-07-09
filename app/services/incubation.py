@@ -216,8 +216,9 @@ class IncubationService:
 
         return recommendations
 
-    def get_user_statuses(self, user_id: int) -> list[BatchStatus]:
-        return [self.get_status(batch) for batch in self.list_active(user_id)]
+    def get_user_statuses(self, user_id: int, today: date | None = None) -> list[BatchStatus]:
+        current_date = today or date.today()
+        return [self.get_status(batch, today=current_date) for batch in self.list_active(user_id)]
 
     def get_stats(self, user_id: int) -> IncubationStats:
         batches = self.batches.list_all_for_user(user_id)

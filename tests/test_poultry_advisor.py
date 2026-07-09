@@ -1,8 +1,11 @@
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
+from app.handlers import poultry_advisor as poultry_advisor_handlers
 from app.services.eggs import EggService
 from app.services.feeds import FeedService
 from app.services.incubation import IncubationService
@@ -208,6 +211,22 @@ class PoultryAdvisorServiceTest(unittest.TestCase):
         self.assertIn("день", text)
         self.assertIn("не переворачивайте", text.lower())
 
+    def test_incubation_today_uses_supplied_date_for_batch_day(self) -> None:
+        user_id = 15
+        today = date.today() - timedelta(days=1)
+        self.incubation_service.create_batch(
+            user_id=user_id,
+            species="chicken",
+            eggs_count=10,
+            start_date=today - timedelta(days=8),
+            title="Локальная дата",
+        )
+
+        text = self.advisor.build_incubation_today_advice(user_id, today=today)
+
+        self.assertIn("\u0434\u0435\u043d\u044c 9", text)
+        self.assertNotIn("\u0434\u0435\u043d\u044c 10", text)
+
     def test_health_red_flags_response_is_safe(self) -> None:
         text = self.advisor.build_health_red_flags_advice()
 
@@ -227,6 +246,69 @@ class PoultryAdvisorServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(lines, [])
+
+
+class PoultryAdvisorHandlerTest(unittest.IsolatedAsyncioTestCase):
+    async def test_incubation_today_uses_user_local_date(self) -> None:
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2026, 7, 9, 11, 30, tzinfo=timezone.utc)
+
+        class FakeState:
+            def __init__(self) -> None:
+                self.cleared = False
+
+            async def clear(self) -> None:
+                self.cleared = True
+
+        class FakeMessage:
+            def __init__(self) -> None:
+                self.answers = []
+
+            async def answer(self, text, reply_markup=None) -> None:
+                self.answers.append((text, reply_markup))
+
+        class FakeCallback:
+            def __init__(self) -> None:
+                self.from_user = SimpleNamespace(id=42)
+                self.message = FakeMessage()
+                self.answered = False
+
+            async def answer(self) -> None:
+                self.answered = True
+
+        class FakeAdvisor:
+            def __init__(self) -> None:
+                self.received_user_id = None
+                self.received_today = None
+
+            def build_incubation_today_advice(self, user_id, *, today=None) -> str:
+                self.received_user_id = user_id
+                self.received_today = today
+                return f"today={today}"
+
+        class FakeIncubationService:
+            def get_user_settings(self, user_id):
+                return {"timezone": "Pacific/Kiritimati"}
+
+        callback = FakeCallback()
+        state = FakeState()
+        advisor = FakeAdvisor()
+
+        with patch.object(poultry_advisor_handlers, "datetime", FixedDateTime):
+            await poultry_advisor_handlers.advisor_incubation_today(
+                callback,
+                state,
+                advisor,
+                FakeIncubationService(),
+            )
+
+        self.assertTrue(state.cleared)
+        self.assertTrue(callback.answered)
+        self.assertEqual(advisor.received_user_id, 42)
+        self.assertEqual(advisor.received_today, date(2026, 7, 10))
+        self.assertEqual(callback.message.answers[0][0], "today=2026-07-10")
 
 
 if __name__ == "__main__":
