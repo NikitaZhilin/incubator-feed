@@ -79,8 +79,8 @@ class UserRepository:
             rows = connection.execute(
                 """
                 SELECT user_id, timezone, notification_time, notify_incubation,
-                       notify_feed, notify_eggs, notify_post_hatch_care, notify_service,
-                       units, farm_name, is_active
+                       notify_feed, notify_eggs, notify_post_hatch_care,
+                       notify_poultry_advisor, notify_service, units, farm_name, is_active
                 FROM users
                 ORDER BY user_id
                 """
@@ -105,8 +105,8 @@ class UserRepository:
             row = connection.execute(
                 """
                 SELECT user_id, timezone, notification_time, notify_incubation,
-                       notify_feed, notify_eggs, notify_post_hatch_care, notify_service,
-                       units, farm_name, is_active
+                       notify_feed, notify_eggs, notify_post_hatch_care,
+                       notify_poultry_advisor, notify_service, units, farm_name, is_active
                 FROM users
                 WHERE user_id = ?
                 """,
@@ -121,6 +121,7 @@ class UserRepository:
                 "notify_feed": True,
                 "notify_eggs": True,
                 "notify_post_hatch_care": True,
+                "notify_poultry_advisor": True,
                 "notify_service": True,
                 "units": "metric",
                 "farm_name": "",
@@ -136,6 +137,7 @@ class UserRepository:
             "notify_feed",
             "notify_eggs",
             "notify_post_hatch_care",
+            "notify_poultry_advisor",
             "notify_service",
             "units",
             "farm_name",
@@ -166,6 +168,11 @@ class UserRepository:
             "notify_feed": bool(row["notify_feed"]),
             "notify_eggs": bool(row["notify_eggs"]) if "notify_eggs" in row.keys() else True,
             "notify_post_hatch_care": bool(row["notify_post_hatch_care"]),
+            "notify_poultry_advisor": (
+                bool(row["notify_poultry_advisor"])
+                if "notify_poultry_advisor" in row.keys()
+                else True
+            ),
             "notify_service": bool(row["notify_service"]),
             "units": str(row["units"]),
             "farm_name": str(row["farm_name"] or ""),

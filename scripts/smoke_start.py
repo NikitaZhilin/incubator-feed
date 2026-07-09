@@ -11,12 +11,15 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from app.config import load_config
 from app.handlers import register_handlers
 from app.services.admin import AdminService
+from app.services.eggs import EggService
 from app.services.feeds import FeedService
 from app.services.stock import StockService
 from app.services.incubation import IncubationService
+from app.services.poultry_advisor import PoultryAdvisorService
 from app.storage.database import Database
 from app.storage.repositories.analytics import AnalyticsRepository
 from app.storage.repositories.batches import BatchRepository
+from app.storage.repositories.eggs import EggRepository
 from app.storage.repositories.feeds import FeedRepository
 from app.storage.repositories.notifications import NotificationRepository
 from app.storage.repositories.reminders import ReminderRepository
@@ -32,15 +35,27 @@ def main() -> None:
     analytics = AnalyticsRepository(database)
     notifications = NotificationRepository(database)
     dispatcher = Dispatcher(storage=MemoryStorage())
-    dispatcher["incubation_service"] = IncubationService(
+    incubation_service = IncubationService(
         BatchRepository(database),
         ReminderRepository(database),
         users,
         analytics,
     )
+    dispatcher["incubation_service"] = incubation_service
     feed_repository = FeedRepository(database)
-    dispatcher["feed_service"] = FeedService(feed_repository, analytics)
-    dispatcher["stock_service"] = StockService(StockRepository(database), feed_repository, analytics)
+    feed_service = FeedService(feed_repository, analytics)
+    egg_service = EggService(EggRepository(database), feed_repository, timezone_name=config.timezone)
+    stock_service = StockService(StockRepository(database), feed_repository, analytics)
+    dispatcher["feed_service"] = feed_service
+    dispatcher["egg_service"] = egg_service
+    dispatcher["stock_service"] = stock_service
+    dispatcher["poultry_advisor_service"] = PoultryAdvisorService(
+        incubation_service=incubation_service,
+        feed_service=feed_service,
+        egg_service=egg_service,
+        stock_service=stock_service,
+        timezone_name=config.timezone,
+    )
     dispatcher["admin_service"] = AdminService(
         database=database,
         users=users,

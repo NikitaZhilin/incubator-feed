@@ -18,6 +18,8 @@ def main_menu_keyboard(
     rows: list[list[InlineKeyboardButton]] = []
     if feature_row:
         rows.append(feature_row)
+    if _enabled(settings, "notify_poultry_advisor"):
+        rows.append([InlineKeyboardButton(text="🐔 Птицевод", callback_data="advisor:menu")])
     rows.extend(
         [
             [InlineKeyboardButton(text="📊 Посмотреть сводку", callback_data="menu:summary")],
@@ -126,6 +128,12 @@ def settings_sections_keyboard(settings: dict) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text=f"🐣 Уход после вывода: {_status_label(settings, 'notify_post_hatch_care')}",
                     callback_data="settings:toggle:notify_post_hatch_care",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"🐔 Птицевод: {_status_label(settings, 'notify_poultry_advisor')}",
+                    callback_data="settings:toggle:notify_poultry_advisor",
                 )
             ],
             [

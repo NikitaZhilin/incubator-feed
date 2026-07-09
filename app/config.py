@@ -28,6 +28,7 @@ class AppConfig:
     changelog_url: str
     web_public_url: str = ""
     web_link_token: str = ""
+    telegram_proxy_url: str = ""
     timezone: str = "Europe/Moscow"
     admin_startup_notice_mode: str = "once_per_deploy"
     release_deployed_at: str = ""
@@ -173,6 +174,7 @@ def load_config() -> AppConfig:
         or default_changelog_url,
         web_public_url=os.getenv("WEB_PUBLIC_URL", "").strip(),
         web_link_token=os.getenv("WEB_LINK_TOKEN", "").strip(),
+        telegram_proxy_url=os.getenv("TELEGRAM_PROXY_URL", "").strip(),
         timezone=os.getenv("BOT_TIMEZONE", "Europe/Moscow"),
         release_deployed_at=os.getenv("RELEASE_DEPLOYED_AT", "").strip(),
         release_commit=os.getenv("RELEASE_COMMIT", "").strip(),

@@ -5,7 +5,9 @@ import traceback
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramNetworkError, TelegramServerError
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import MenuButtonCommands, MenuButtonWebApp, WebAppInfo
 
@@ -19,6 +21,7 @@ from app.services.feeds import FeedService
 from app.services.heartbeats import HeartbeatLoop
 from app.services.stock import StockService
 from app.services.admin import AdminService
+from app.services.poultry_advisor import PoultryAdvisorService
 from app.services.release_notifications import AdminStartupNotificationService, ReleaseNotificationService
 from app.services.reminders import ReminderRunner
 from app.services.weather import OpenMeteoWeatherClient
@@ -34,6 +37,11 @@ from app.storage.repositories.users import UserRepository
 from app.storage.repositories.stock import StockRepository
 from app.utils.single_instance import SingleInstanceLock
 from app.version import APP_VERSION
+
+
+POLLING_RETRY_INITIAL_SECONDS = 5
+POLLING_RETRY_MAX_SECONDS = 60
+RETRIABLE_POLLING_EXCEPTIONS = (TelegramNetworkError, TelegramServerError)
 
 
 def setup_logging(log_file, level: int) -> None:
@@ -107,6 +115,13 @@ async def main() -> None:
             timezone_name=config.timezone,
         )
         stock_service = StockService(StockRepository(database), feed_repository, analytics)
+        poultry_advisor_service = PoultryAdvisorService(
+            incubation_service=incubation_service,
+            feed_service=feed_service,
+            egg_service=egg_service,
+            stock_service=stock_service,
+            timezone_name=config.timezone,
+        )
         admin_service = AdminService(
             database=database,
             users=users,
@@ -118,6 +133,7 @@ async def main() -> None:
         bot = Bot(
             token=config.bot_token,
             default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+            session=build_bot_session(config),
         )
         await configure_telegram_menu_button(bot, config)
         dispatcher = Dispatcher(storage=MemoryStorage())
@@ -125,6 +141,7 @@ async def main() -> None:
         dispatcher["feed_service"] = feed_service
         dispatcher["egg_service"] = egg_service
         dispatcher["stock_service"] = stock_service
+        dispatcher["poultry_advisor_service"] = poultry_advisor_service
         dispatcher["admin_service"] = admin_service
         dispatcher["analytics"] = analytics
         dispatcher["config"] = config
@@ -139,6 +156,7 @@ async def main() -> None:
             feed_service=feed_service,
             egg_service=egg_service,
             stock_service=stock_service,
+            poultry_advisor_service=poultry_advisor_service,
             users=users,
             notifications=notifications,
             heartbeats=heartbeats,
@@ -211,12 +229,26 @@ async def main() -> None:
                 except Exception:
                     logging.exception("Admin startup notice failed")
         try:
-            try:
-                await dispatcher.start_polling(bot)
-            except Exception as exc:
-                analytics.log_critical("polling", exc)
-                await notify_admins_about_failure(bot, config.admin_ids, exc)
-                raise
+            polling_retry_delay = POLLING_RETRY_INITIAL_SECONDS
+            while True:
+                try:
+                    await dispatcher.start_polling(bot)
+                    break
+                except RETRIABLE_POLLING_EXCEPTIONS as exc:
+                    logging.warning(
+                        "Polling temporarily failed; retrying in %s seconds: %s",
+                        polling_retry_delay,
+                        exc,
+                    )
+                    await asyncio.sleep(polling_retry_delay)
+                    polling_retry_delay = min(
+                        polling_retry_delay * 2,
+                        POLLING_RETRY_MAX_SECONDS,
+                    )
+                except Exception as exc:
+                    analytics.log_critical("polling", exc)
+                    await notify_admins_about_failure(bot, config.admin_ids, exc)
+                    raise
         finally:
             await polling_heartbeat.stop()
             await reminder_runner.stop()
@@ -238,6 +270,13 @@ async def notify_admins_about_failure(bot: Bot, admin_ids: frozenset[int], exc: 
             await bot.send_message(admin_id, message)
         except Exception:
             logging.exception("Failed to notify admin %s about failure", admin_id)
+
+
+def build_bot_session(config) -> AiohttpSession:
+    if config.telegram_proxy_url:
+        logging.info("Telegram proxy is configured")
+        return AiohttpSession(proxy=config.telegram_proxy_url)
+    return AiohttpSession()
 
 
 async def configure_telegram_menu_button(bot: Bot, config) -> None:

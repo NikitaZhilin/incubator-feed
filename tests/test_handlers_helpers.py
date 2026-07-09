@@ -52,6 +52,12 @@ from app.keyboards.menu import (
     settings_sections_keyboard,
     web_choice_keyboard,
 )
+from app.keyboards.poultry_advisor import (
+    advisor_back_keyboard,
+    advisor_feed_keyboard,
+    advisor_health_keyboard,
+    advisor_menu_keyboard,
+)
 
 
 def _keyboard_texts(keyboard) -> list[str]:
@@ -120,6 +126,12 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("1 часть = 1 литровая кружка", text)
         self.assertIn("stock:mix", callbacks)
         self.assertIn("menu:home", callbacks)
+
+        advisor_text = format_faq("poultry_advisor")
+        advisor_callbacks = _keyboard_callbacks(faq_keyboard("poultry_advisor"))
+        self.assertIn("собирает данные из кормов", advisor_text)
+        self.assertIn("не назначает лекарства", advisor_text)
+        self.assertIn("advisor:menu", advisor_callbacks)
 
         stock_history_text = format_faq("stock_history")
         self.assertIn("почему изменился остаток", stock_history_text)
@@ -234,6 +246,7 @@ class HandlerHelpersTest(unittest.TestCase):
                 "notify_feed": True,
                 "notify_eggs": True,
                 "notify_post_hatch_care": False,
+                "notify_poultry_advisor": True,
                 "notify_service": True,
             }
         )
@@ -241,6 +254,7 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("пропадает из главного меню", text)
         self.assertIn("Инкубация: выключено", text)
         self.assertIn("Яйца: включено", text)
+        self.assertIn("Птицевод: включено", text)
         self.assertIn("Системные сообщения: включено", text)
         self.assertNotIn("Сервисные", text)
 
@@ -253,6 +267,7 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertNotIn("Инкубация вкл/выкл", texts)
 
         self.assertIn("❓ FAQ", _keyboard_texts(settings_sections_keyboard({"notify_feed": True})))
+        self.assertIn("🐔 Птицевод: включено", _keyboard_texts(settings_sections_keyboard({"notify_poultry_advisor": True})))
 
     def test_main_menu_hides_disabled_sections(self) -> None:
         keyboard = main_menu_keyboard(
@@ -260,6 +275,7 @@ class HandlerHelpersTest(unittest.TestCase):
                 "notify_feed": False,
                 "notify_eggs": False,
                 "notify_incubation": True,
+                "notify_poultry_advisor": False,
             }
         )
         texts = _keyboard_texts(keyboard)
@@ -270,9 +286,32 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("⚙️ Настройки", texts)
         self.assertIn("❓ FAQ", texts)
         self.assertIn("📊 Посмотреть сводку", texts)
+        self.assertNotIn("🐔 Птицевод", texts)
         self.assertIn("menu:summary", _keyboard_callbacks(keyboard))
         self.assertIn("🌐 Открыть сайт", texts)
         self.assertIn("menu:web", _keyboard_callbacks(keyboard))
+
+    def test_main_menu_shows_poultry_advisor_when_enabled(self) -> None:
+        keyboard = main_menu_keyboard({"notify_poultry_advisor": True})
+
+        self.assertIn("🐔 Птицевод", _keyboard_texts(keyboard))
+        self.assertIn("advisor:menu", _keyboard_callbacks(keyboard))
+
+    def test_poultry_advisor_keyboards_have_expected_callbacks(self) -> None:
+        menu_callbacks = _keyboard_callbacks(advisor_menu_keyboard())
+        menu_texts = _keyboard_texts(advisor_menu_keyboard())
+
+        self.assertIn("📋 План на сегодня", menu_texts)
+        self.assertIn("🌾 Корма и замес", menu_texts)
+        self.assertIn("🥚 Мало яиц", menu_texts)
+        self.assertIn("🩺 Проблема с птицей", menu_texts)
+        self.assertIn("advisor:today", menu_callbacks)
+        self.assertIn("advisor:feed", menu_callbacks)
+        self.assertIn("advisor:health", menu_callbacks)
+        self.assertIn("faq:poultry_advisor", menu_callbacks)
+        self.assertIn("advisor:menu", _keyboard_callbacks(advisor_back_keyboard()))
+        self.assertIn("advisor:mix_timing", _keyboard_callbacks(advisor_feed_keyboard()))
+        self.assertIn("advisor:health:red_flags", _keyboard_callbacks(advisor_health_keyboard()))
 
     def test_main_menu_and_settings_show_web_button_and_use_url_when_configured(self) -> None:
         main_keyboard = main_menu_keyboard(

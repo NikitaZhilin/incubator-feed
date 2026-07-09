@@ -8,6 +8,7 @@ from app.domain import FeedEstimate, FeedStock
 from app.services.eggs import EggService
 from app.services.feeds import FeedService
 from app.services.incubation import IncubationService
+from app.services.poultry_advisor import PoultryAdvisorService
 from app.services.reminders import ReminderRunner
 from app.services.stock import StockService
 from app.storage.database import Database
@@ -400,6 +401,81 @@ class ReminderRunnerTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Последний замес: 2026-05-29 09:00", text)
             self.assertIn("По расчету смесь закончилась 2026-05-29", text)
             self.assertIn("(3 дн. назад)", text)
+
+    async def test_daily_summary_includes_poultry_advisor_action_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Database(Path(temp_dir) / "test.db")
+            database.initialize()
+            users = UserRepository(database)
+            analytics = AnalyticsRepository(database)
+            feed_repository = FeedRepository(database)
+            incubation = IncubationService(
+                BatchRepository(database),
+                ReminderRepository(database),
+                users,
+                analytics,
+            )
+            feed_service = FeedService(feed_repository, analytics)
+            egg_service = EggService(EggRepository(database), feed_repository, timezone_name="Europe/Moscow")
+            stock_service = StockService(StockRepository(database), feed_repository, analytics)
+            advisor = PoultryAdvisorService(
+                incubation_service=incubation,
+                feed_service=feed_service,
+                egg_service=egg_service,
+                stock_service=stock_service,
+                timezone_name="Europe/Moscow",
+            )
+            users.upsert(user_id=10)
+            users.update_settings(10, timezone="Europe/Moscow")
+            group = feed_service.create_bird_group(
+                user_id=10,
+                name="Несушки",
+                bird_count=10,
+                species="chicken",
+                role="hens",
+            )
+            flock = feed_service.create_flock(
+                user_id=10,
+                name="Основное стадо",
+                member_group_ids=[group.id],
+            )
+            mix = stock_service.add_purchase(
+                user_id=10,
+                name="Смесь для кур",
+                kind="finished_mix",
+                amount_kg=2,
+            )
+            stock_service.assign_flock_feed(
+                user_id=10,
+                flock_id=flock.id,
+                stock_item_id=mix.item.id,
+            )
+            runner = ReminderRunner(
+                bot=FakeBot(fail_user_ids=set()),
+                incubation_service=incubation,
+                egg_service=egg_service,
+                stock_service=stock_service,
+                poultry_advisor_service=advisor,
+                timezone="UTC",
+            )
+
+            text = runner.build_daily_summary_message(
+                user_id=10,
+                local_now=datetime.now(timezone.utc),
+                now=datetime.now(timezone.utc),
+                settings=users.get_settings(10),
+            )
+
+            self.assertIn("Совет птицевода:", text)
+            self.assertIn("пора готовить замес", text)
+
+            disabled_text = runner.build_daily_summary_message(
+                user_id=10,
+                local_now=datetime.now(timezone.utc),
+                now=datetime.now(timezone.utc),
+                settings={"notify_poultry_advisor": False},
+            )
+            self.assertNotIn("Совет птицевода:", disabled_text)
 
     async def test_post_hatch_reminder_is_sent_once_with_batch_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

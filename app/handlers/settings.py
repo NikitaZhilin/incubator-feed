@@ -79,6 +79,7 @@ async def settings_toggle(callback: CallbackQuery, incubation_service: Incubatio
         "notify_feed",
         "notify_eggs",
         "notify_post_hatch_care",
+        "notify_poultry_advisor",
         "notify_service",
     }:
         await callback.answer("Настройка не найдена", show_alert=True)
@@ -271,6 +272,7 @@ def _format_sections(settings: dict) -> str:
         f"Корма: {status(bool(settings.get('notify_feed', True)))}\n"
         f"Яйца: {status(bool(settings.get('notify_eggs', True)))}\n"
         f"Уход после вывода: {status(bool(settings.get('notify_post_hatch_care', True)))}\n"
+        f"Птицевод: {status(bool(settings.get('notify_poultry_advisor', True)))}\n"
         f"Системные сообщения: {status(bool(settings.get('notify_service', True)))}"
     )
 

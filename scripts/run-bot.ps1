@@ -4,7 +4,14 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
 
 $PidFile = Join-Path $ProjectRoot "bot.pid"
-$Python = if ($env:BOT_PYTHON) { $env:BOT_PYTHON } else { "python" }
+$VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+$Python = if ($env:BOT_PYTHON) {
+    $env:BOT_PYTHON
+} elseif (Test-Path $VenvPython) {
+    $VenvPython
+} else {
+    "python"
+}
 
 if (Test-Path $PidFile) {
     $ExistingPid = [int](Get-Content -Raw -LiteralPath $PidFile)

@@ -14,10 +14,18 @@ if (-not (Get-Command ngrok -ErrorAction SilentlyContinue)) {
 $env:WEB_ENABLED = "true"
 $env:WEB_HOST = "127.0.0.1"
 $env:WEB_PORT = [string]$Port
+$VenvPython = Join-Path $Root ".venv\Scripts\python.exe"
+$Python = if ($env:BOT_PYTHON) {
+    $env:BOT_PYTHON
+} elseif (Test-Path $VenvPython) {
+    $VenvPython
+} else {
+    "python"
+}
 
 Write-Host "Starting web service on $LocalUrl ..."
 $webProcess = Start-Process `
-    -FilePath "python" `
+    -FilePath $Python `
     -ArgumentList @("-B", "scripts\web_app.py") `
     -WorkingDirectory $Root `
     -WindowStyle Hidden `

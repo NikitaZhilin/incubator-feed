@@ -10,6 +10,7 @@ from app.config import AppConfig
 from app.keyboards.menu import daily_summary_keyboard, main_menu_keyboard, web_choice_keyboard
 from app.services.eggs import EggService
 from app.services.incubation import IncubationService
+from app.services.poultry_advisor import PoultryAdvisorService
 from app.services.reminders import ReminderRunner
 from app.services.stock import StockService
 from app.version import APP_VERSION
@@ -33,6 +34,21 @@ FAQ_SECTIONS = {
             "или вчера, посмотреть статистику, прогноз и временно исключить курицу, которая не несется.\n\n"
             "Настройки - раздел для параметров бота: название хозяйства, часовой пояс, время уведомлений, "
             "включение разделов, версия и история обновлений."
+        ),
+    },
+    "poultry_advisor": {
+        "title": "❓ FAQ: птицевод",
+        "back": ("⬅️ К птицеводу", "advisor:menu"),
+        "text": (
+            "Раздел `Птицевод` собирает данные из кормов, яиц, поголовья и инкубации "
+            "и превращает их в короткие практические рекомендации.\n\n"
+            "Он не заменяет учет: для точных советов нужно вести стада, назначать смесь, "
+            "записывать яйца и добавлять инкубационные партии.\n\n"
+            "`План на сегодня` показывает задачи по воде, корму, яйцам, смеси и активным партиям. "
+            "`Корма и замес` помогает понять, на сколько хватит смеси и чего не хватает для замеса. "
+            "`Мало яиц` объясняет просадку через данные и список проверок.\n\n"
+            "Медицинские советы ограничены безопасной первой реакцией. Бот не ставит диагнозы "
+            "и не назначает лекарства."
         ),
     },
     "incubation": {
@@ -347,6 +363,7 @@ async def menu_summary(
     incubation_service: IncubationService,
     egg_service: EggService,
     stock_service: StockService,
+    poultry_advisor_service: PoultryAdvisorService,
     config: AppConfig,
 ) -> None:
     if callback.message is None:
@@ -360,11 +377,13 @@ async def menu_summary(
         incubation_service=incubation_service,
         egg_service=egg_service,
         stock_service=stock_service,
+        poultry_advisor_service=poultry_advisor_service,
         timezone=config.timezone,
     ).build_daily_summary_message(
         user_id=callback.from_user.id,
         local_now=local_now,
         now=now,
+        settings=settings,
     )
     await callback.message.answer(summary, reply_markup=daily_summary_keyboard())
     await callback.answer()
@@ -396,6 +415,8 @@ async def help_command(message: Message) -> None:
         "/calendar - что делать по дням инкубации\n"
         "/care - уход после вывода\n"
         "/feed - добавить корм или ингредиент на склад\n\n"
+        "Птицевод:\n"
+        "/advisor - план на сегодня, корма и замес, мало яиц, инкубация сегодня, проблема с птицей.\n\n"
         "Яйца:\n"
         "Главное меню -> Яйца - ежедневный сбор, прогноз и куры, которые временно не несутся.\n\n"
         "Настройки:\n"

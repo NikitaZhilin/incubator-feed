@@ -48,6 +48,7 @@ class ConfigTest(unittest.TestCase):
                     "ADMIN_STARTUP_NOTICE_MODE": "off",
                     "GITHUB_URL": "https://github.com/example/project",
                     "CHANGELOG_URL": "https://github.com/example/project/releases",
+                    "TELEGRAM_PROXY_URL": "socks5://127.0.0.1:1080",
                     "WEB_PUBLIC_URL": "https://incubator.example.test",
                     "WEB_LINK_TOKEN": "link-secret",
                 },
@@ -65,6 +66,7 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(config.admin_startup_notice_mode, "off")
         self.assertEqual(config.github_url, "https://github.com/example/project")
         self.assertEqual(config.changelog_url, "https://github.com/example/project/releases")
+        self.assertEqual(config.telegram_proxy_url, "socks5://127.0.0.1:1080")
         self.assertEqual(config.web_public_url, "https://incubator.example.test")
         self.assertEqual(config.web_link_token, "link-secret")
         self.assertEqual(config.web_open_url, "https://incubator.example.test/?auth=link-secret")

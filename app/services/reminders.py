@@ -14,6 +14,7 @@ from app.services.eggs import EggService
 from app.services.incubation import IncubationService
 from app.services.guides import post_hatch_care
 from app.services.feeds import FeedService
+from app.services.poultry_advisor import PoultryAdvisorService
 from app.services.stock import StockService
 from app.storage.repositories.heartbeats import HeartbeatRepository
 from app.storage.repositories.notifications import NotificationRepository
@@ -32,6 +33,7 @@ class ReminderRunner:
         feed_service: FeedService | None = None,
         egg_service: EggService | None = None,
         stock_service: StockService | None = None,
+        poultry_advisor_service: PoultryAdvisorService | None = None,
         users: UserRepository | None = None,
         notifications: NotificationRepository | None = None,
         heartbeats: HeartbeatRepository | None = None,
@@ -45,6 +47,7 @@ class ReminderRunner:
         self.feed_service = feed_service
         self.egg_service = egg_service
         self.stock_service = stock_service
+        self.poultry_advisor_service = poultry_advisor_service
         self.users = users
         self.notifications = notifications
         self.heartbeats = heartbeats
@@ -181,6 +184,7 @@ class ReminderRunner:
                     user_id=user_id,
                     local_now=local_now,
                     now=now,
+                    settings=settings,
                 )
                 if self.notifications:
                     self.notifications.record_attempt(
@@ -279,6 +283,7 @@ class ReminderRunner:
         user_id: int,
         local_now: datetime,
         now: datetime,
+        settings: dict | None = None,
     ) -> str:
         lines = [
             f"Ежедневная сводка хозяйства на {local_now.date().isoformat()}:",
@@ -309,6 +314,16 @@ class ReminderRunner:
                 local_now=local_now,
             )
         )
+        if self.poultry_advisor_service is not None:
+            advice_lines = self.poultry_advisor_service.build_daily_summary_advice_lines(
+                user_id,
+                local_now=local_now,
+                now_utc=now,
+                settings=settings,
+            )
+            if advice_lines:
+                lines.extend(["", "Совет птицевода:"])
+                lines.extend(f"- {line}" for line in advice_lines)
         return "\n".join(lines)
 
     def _finished_mix_summary_lines(

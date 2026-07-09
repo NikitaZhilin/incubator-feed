@@ -32,6 +32,10 @@ class MigrationsAndContentTest(unittest.TestCase):
                     row["name"]
                     for row in connection.execute("PRAGMA table_info(service_heartbeats)").fetchall()
                 }
+                user_columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(users)").fetchall()
+                }
 
         self.assertIn("schema_migrations", tables)
         self.assertIn("notification_log", tables)
@@ -55,6 +59,7 @@ class MigrationsAndContentTest(unittest.TestCase):
         self.assertIn("service_name", heartbeat_columns)
         self.assertIn("last_seen_at", heartbeat_columns)
         self.assertIn("metadata_json", heartbeat_columns)
+        self.assertIn("notify_poultry_advisor", user_columns)
 
     def test_existing_database_is_migrated_without_dropping_data(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -127,7 +132,7 @@ class MigrationsAndContentTest(unittest.TestCase):
             with database.connect() as migrated:
                 row = migrated.execute(
                     """
-                    SELECT notification_time, notify_incubation, notify_eggs
+                    SELECT notification_time, notify_incubation, notify_eggs, notify_poultry_advisor
                     FROM users
                     WHERE user_id = 7
                     """
@@ -136,6 +141,7 @@ class MigrationsAndContentTest(unittest.TestCase):
         self.assertEqual(row["notification_time"], "08:30")
         self.assertEqual(row["notify_incubation"], 1)
         self.assertEqual(row["notify_eggs"], 1)
+        self.assertEqual(row["notify_poultry_advisor"], 1)
 
     def test_content_structure_is_valid(self) -> None:
         self.assertTrue(CONTENT["version"])
