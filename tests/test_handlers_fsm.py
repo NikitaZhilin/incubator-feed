@@ -34,6 +34,7 @@ from app.handlers.feeds import (
     stock_mix_check_all,
     stock_mix_confirm,
     stock_mix_cycle_done,
+    stock_mix_fed_start,
     stock_mix_plan,
     stock_mix_toggle,
     stock_purchase_amount,
@@ -411,6 +412,32 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
             [],
         )
         self.assertTrue(callback.answered)
+
+    async def test_already_fed_mix_can_choose_date_without_checklist(self) -> None:
+        for name in [
+            "Кукуруза",
+            "Пшеница",
+            "Ячмень",
+            "Комбикорм",
+            "Мясокостная мука",
+            "Рыбная мука",
+            "Ракушка",
+            "Премикс",
+        ]:
+            self.stock_service.add_purchase(
+                user_id=1,
+                name=name,
+                kind="ingredient",
+                amount_kg=100,
+            )
+        state = FakeState()
+        await stock_mix_plan(FakeCallback("stock:mix_plan:wheat:2"), state, self.stock_service)
+        fed_callback = FakeCallback("stock:mix_fed_start:wheat:2")
+
+        await stock_mix_fed_start(fed_callback, state, self.stock_service)
+
+        self.assertIn("Когда замесы были сделаны?", fed_callback.message.answers[-1][0])
+        self.assertTrue(fed_callback.answered)
 
     async def test_mix_checklist_advances_one_cycle_at_a_time(self) -> None:
         for name in [

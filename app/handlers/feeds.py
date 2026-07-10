@@ -936,10 +936,6 @@ async def stock_mix_fed_start(callback: CallbackQuery, state: FSMContext, stock_
     if plan is None or plan.grain_base_code != grain_base or plan.mix_count != mix_count:
         await callback.answer("Откройте расчет замеса заново.", show_alert=True)
         return
-    data = await state.get_data()
-    if plan.can_produce and not _mix_checklist_is_complete(data, plan, mix_count):
-        await callback.answer("Сначала отметьте ингредиенты всех замесов.", show_alert=True)
-        return
     await state.update_data(mix_record_mode="already_fed")
     await callback.message.answer(
         _format_mix_fed_date_prompt(plan),
@@ -2196,12 +2192,6 @@ async def _record_already_fed_mix(
         return
     await state.clear()
     await message.answer(_format_mix_already_fed_created(saved_plan), reply_markup=stock_menu_keyboard())
-
-
-def _mix_checklist_is_complete(data: dict, plan, total_cycles: int) -> bool:
-    checked = set(data.get("mix_checked_indices", []))
-    current_cycle = int(data.get("mix_current_cycle", 1))
-    return current_cycle >= total_cycles and len(checked) >= len(plan.ingredients)
 
 
 def _local_today(user_id: int, incubation_service: IncubationService) -> date:

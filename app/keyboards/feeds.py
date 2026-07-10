@@ -324,16 +324,16 @@ def stock_mix_checklist_keyboard(
                         )
                     ]
                 )
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            text=_already_fed_mix_button_text(total),
-                            callback_data=f"stock:mix_fed_start:{plan.grain_base_code}:{plan.mix_count:g}",
-                        )
-                    ]
-                )
         else:
             rows.append([InlineKeyboardButton(text="Отметить все ингредиенты", callback_data="stock:mix_check_all")])
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=_already_fed_mix_button_text(total),
+                    callback_data=f"stock:mix_fed_start:{plan.grain_base_code}:{plan.mix_count:g}",
+                )
+            ]
+        )
     rows.append([InlineKeyboardButton(text="⬅️ К смеси", callback_data="stock:mix")])
     rows.append([InlineKeyboardButton(text="📦 К складу", callback_data="stock:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

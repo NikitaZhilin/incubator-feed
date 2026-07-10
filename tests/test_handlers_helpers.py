@@ -441,6 +441,7 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("✅ Кукуруза: 3.5 части", texts)
         self.assertIn("⬜ Премикс: 0.1 части", texts)
         self.assertIn("Отметить все ингредиенты", texts)
+        self.assertIn("🕘 Записать как уже скормленные", texts)
         self.assertNotIn("Продолжить после отметок", texts)
 
     def test_mix_checklist_final_button_updates_stock(self) -> None:
