@@ -146,6 +146,11 @@ def build_web_feeds(
                 "balance_after_kg": round(transaction.balance_after_kg, 3),
                 "note": transaction.note,
                 "created_at": transaction.created_at.isoformat(),
+                "occurred_at": (
+                    transaction.occurred_at.isoformat()
+                    if transaction.occurred_at is not None
+                    else None
+                ),
             }
         )
 
@@ -215,16 +220,32 @@ def build_web_mix(
     for transaction in stock_service.list_history(int(selected_user_id), limit=60):
         if transaction.type != "mix_output":
             continue
+        mix = (
+            stock_repository.get_mix_production(transaction.related_mix_id)
+            if transaction.related_mix_id is not None
+            else None
+        )
         item = stock_repository.get_item(transaction.stock_item_id, int(selected_user_id))
         history.append(
             {
                 "id": transaction.id,
                 "mix_id": transaction.related_mix_id,
+                "mix_mode": mix.mode if mix is not None else "to_stock",
                 "item_name": item.name if item else "",
                 "amount_kg": round(transaction.amount_kg, 3),
                 "balance_after_kg": round(transaction.balance_after_kg, 3),
                 "note": transaction.note,
                 "created_at": transaction.created_at.isoformat(),
+                "occurred_at": (
+                    transaction.occurred_at.isoformat()
+                    if transaction.occurred_at is not None
+                    else None
+                ),
+                "produced_at": (
+                    mix.produced_at.isoformat()
+                    if mix is not None and mix.produced_at is not None
+                    else None
+                ),
             }
         )
         if len(history) >= 20:

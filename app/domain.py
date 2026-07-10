@@ -170,6 +170,7 @@ class StockTransaction:
     note: str
     related_mix_id: int | None
     created_at: datetime
+    occurred_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -182,6 +183,8 @@ class MixProduction:
     output_stock_item_id: int
     output_kg: float
     created_at: datetime
+    mode: str = "to_stock"
+    produced_at: datetime | None = None
 
 
 @dataclass(frozen=True)

@@ -20,6 +20,16 @@ class StockServiceTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
+    def _seed_mix_ingredients(self, user_id: int = 1, amount_kg: float = 100) -> None:
+        plan = self.service.plan_mix(user_id=user_id, mix_count=1)
+        for ingredient in plan.ingredients:
+            self.service.add_purchase(
+                user_id=user_id,
+                name=ingredient.name,
+                kind="ingredient",
+                amount_kg=amount_kg,
+            )
+
     def test_purchase_creates_stock_item_and_estimate(self) -> None:
         estimate = self.service.add_purchase(
             user_id=1,
@@ -56,6 +66,83 @@ class StockServiceTest(unittest.TestCase):
         self.assertTrue(plan.can_produce)
         self.assertGreater(estimates["Смесь для кур"].remaining_kg, 20)
         self.assertLess(estimates["Кукуруза"].remaining_kg, 100)
+
+    def test_already_fed_mix_writes_off_only_new_output(self) -> None:
+        self._seed_mix_ingredients()
+        existing = self.service.add_purchase(
+            user_id=1,
+            name="Смесь для кур",
+            kind="finished_mix",
+            amount_kg=12,
+        )
+        occurred_at = datetime(2026, 7, 4, 12, tzinfo=timezone.utc)
+        created_at = datetime(2026, 7, 11, 9, tzinfo=timezone.utc)
+
+        plan = self.service.produce_mix(
+            user_id=1,
+            mix_count=3,
+            already_fed=True,
+            occurred_at=occurred_at,
+            created_at=created_at,
+        )
+
+        estimate = self.service.estimate_item(existing.item, now=created_at)
+        history = self.service.list_history(1, limit=20)
+        write_off = history[0]
+        output = history[1]
+        mix = self.service.stock.get_mix_production(write_off.related_mix_id)
+
+        self.assertEqual(round(estimate.remaining_kg, 3), 12)
+        self.assertEqual(write_off.type, "write_off")
+        self.assertEqual(output.type, "mix_output")
+        self.assertEqual(round(output.balance_after_kg, 3), round(12 + plan.output_kg, 3))
+        self.assertEqual(round(write_off.amount_kg, 3), round(-plan.output_kg, 3))
+        self.assertEqual(write_off.balance_after_kg, 12)
+        self.assertEqual(write_off.occurred_at, occurred_at)
+        self.assertEqual(output.occurred_at, occurred_at)
+        self.assertEqual(mix.mode, "already_fed")
+        self.assertEqual(mix.produced_at, occurred_at)
+
+    def test_already_fed_mix_can_be_recorded_without_current_ingredients(self) -> None:
+        created_at = datetime(2026, 7, 11, 9, tzinfo=timezone.utc)
+
+        plan = self.service.produce_mix(
+            user_id=1,
+            mix_count=1,
+            already_fed=True,
+            occurred_at=None,
+            created_at=created_at,
+        )
+
+        estimates = {item.item.name: item for item in self.service.list_estimates(1, now=created_at)}
+        transactions = [
+            item
+            for item in self.service.list_history(1, limit=20)
+            if item.related_mix_id is not None
+        ]
+
+        self.assertEqual(round(estimates[plan.output_name].remaining_kg, 3), 0)
+        self.assertEqual([item.type for item in transactions[:2]], ["write_off", "mix_output"])
+        self.assertTrue(all(item.occurred_at is None for item in transactions))
+        self.assertIsNone(self.service.last_mix_output(1))
+
+    def test_last_mix_output_ignores_already_fed_mix(self) -> None:
+        self._seed_mix_ingredients(amount_kg=200)
+        normal_created_at = datetime(2026, 7, 10, 9, tzinfo=timezone.utc)
+        self.service.produce_mix(user_id=1, mix_count=1, created_at=normal_created_at)
+
+        self.service.produce_mix(
+            user_id=1,
+            mix_count=1,
+            already_fed=True,
+            occurred_at=datetime(2026, 7, 4, 12, tzinfo=timezone.utc),
+            created_at=datetime(2026, 7, 11, 9, tzinfo=timezone.utc),
+        )
+
+        last_mix = self.service.last_mix_output(1)
+
+        self.assertIsNotNone(last_mix)
+        self.assertEqual(last_mix.created_at, normal_created_at)
 
     def test_mix_can_use_layer_grain_mix_instead_of_wheat(self) -> None:
         for name in [

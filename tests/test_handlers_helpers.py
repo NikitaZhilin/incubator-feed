@@ -27,8 +27,10 @@ from app.keyboards.feeds import (
     stock_cancel_keyboard,
     stock_history_keyboard,
     stock_mix_checklist_keyboard,
+    stock_mix_fed_date_keyboard,
     stock_items_keyboard,
     stock_mix_quick_keyboard,
+    stock_mix_unavailable_keyboard,
 )
 from app.keyboards.eggs import (
     egg_entry_date_keyboard,
@@ -455,7 +457,44 @@ class HandlerHelpersTest(unittest.TestCase):
         texts = _keyboard_texts(keyboard)
 
         self.assertIn("✅ Замес готов, обновить склад", texts)
+        self.assertIn("🕘 Записать как уже скормленный", texts)
         self.assertNotIn("✅ Завершить и списать склад", texts)
+
+    def test_mix_checklist_final_button_uses_plural_for_fed_mixes(self) -> None:
+        plan = SimpleNamespace(
+            mix_count=2,
+            grain_base_code="wheat",
+            can_produce=True,
+            ingredients=(
+                SimpleNamespace(name="Кукуруза", parts=3.5, required_kg=2.52),
+            ),
+        )
+
+        keyboard = stock_mix_checklist_keyboard(plan, checked_indices={0}, current_cycle=2, total_cycles=2)
+        texts = _keyboard_texts(keyboard)
+
+        self.assertIn("🕘 Записать как уже скормленные", texts)
+
+    def test_mix_unavailable_keyboard_allows_already_fed_record(self) -> None:
+        plan = SimpleNamespace(mix_count=3, grain_base_code="wheat", max_mix_count=2)
+
+        keyboard = stock_mix_unavailable_keyboard(plan)
+        texts = _keyboard_texts(keyboard)
+        callbacks = _keyboard_callbacks(keyboard)
+
+        self.assertIn("🕘 Записать как уже скормленные", texts)
+        self.assertIn("stock:mix_fed_start:wheat:3", callbacks)
+        self.assertIn("stock:mix_plan:wheat:1", callbacks)
+        self.assertNotIn("stock:mix_confirm:wheat:3", callbacks)
+
+    def test_mix_fed_date_keyboard_has_unknown_instead_of_yesterday(self) -> None:
+        texts = _keyboard_texts(stock_mix_fed_date_keyboard())
+
+        self.assertIn("Сегодня", texts)
+        self.assertIn("7 дней назад", texts)
+        self.assertIn("Без даты / не помню", texts)
+        self.assertIn("Ввести дату", texts)
+        self.assertNotIn("Вчера", texts)
 
     def test_mix_quick_buttons_open_plan_before_writeoff(self) -> None:
         quick_keyboard = stock_mix_quick_keyboard("wheat", 3)

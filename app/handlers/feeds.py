@@ -5,8 +5,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import StateFilter
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from math import isfinite
+from zoneinfo import ZoneInfo
 
 from app.domain import FeedEstimate
 from app.domain import PROFILES
@@ -32,7 +33,9 @@ from app.keyboards.feeds import (
     stock_items_keyboard,
     stock_kind_keyboard,
     stock_history_keyboard,
+    stock_mix_fed_date_keyboard,
     stock_mix_quick_keyboard,
+    stock_mix_unavailable_keyboard,
     stock_menu_keyboard,
 )
 from app.services.feeds import FeedService
@@ -93,6 +96,7 @@ class StockPurchaseFlow(StatesGroup):
 class StockMixFlow(StatesGroup):
     grain_base = State()
     count = State()
+    fed_date = State()
 
 
 class StockAssignFlow(StatesGroup):
@@ -145,6 +149,7 @@ FEED_FLOW_STATES = (
     StockPurchaseFlow.amount,
     StockMixFlow.count,
     StockMixFlow.grain_base,
+    StockMixFlow.fed_date,
     StockAssignFlow.group,
     StockAssignFlow.item,
     StockAssignFlow.rate,
@@ -805,7 +810,8 @@ async def stock_mix_count(
     )
     await state.clear()
     if not plan.can_produce:
-        await message.answer(_format_mix_plan(plan), reply_markup=stock_menu_keyboard())
+        await _store_mix_state(state, plan)
+        await message.answer(_format_mix_plan(plan), reply_markup=stock_mix_unavailable_keyboard(plan))
         return
     await _send_mix_checklist(message, state, plan)
 
@@ -829,9 +835,10 @@ async def stock_mix_plan(callback: CallbackQuery, state: FSMContext, stock_servi
         await _edit_mix_checklist(callback.message, state, plan)
     else:
         await state.clear()
+        await _store_mix_state(state, plan)
         await callback.message.answer(
             _format_mix_plan(plan),
-            reply_markup=stock_mix_quick_keyboard(grain_base, int(plan.max_mix_count)),
+            reply_markup=stock_mix_unavailable_keyboard(plan),
         )
     await callback.answer()
 
@@ -911,6 +918,96 @@ async def stock_mix_cycle_done(callback: CallbackQuery, state: FSMContext, stock
         edit=True,
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("stock:mix_fed_start:"))
+async def stock_mix_fed_start(callback: CallbackQuery, state: FSMContext, stock_service: StockService) -> None:
+    parts = str(callback.data).split(":")
+    if len(parts) != 4:
+        await callback.answer("Откройте расчет замеса заново.", show_alert=True)
+        return
+    grain_base = parts[2]
+    try:
+        mix_count = _parse_mix_cycle_count(float(parts[3]))
+    except ValueError as exc:
+        await callback.answer(str(exc), show_alert=True)
+        return
+    plan = await _mix_plan_from_state(callback.from_user.id, state, stock_service)
+    if plan is None or plan.grain_base_code != grain_base or plan.mix_count != mix_count:
+        await callback.answer("Откройте расчет замеса заново.", show_alert=True)
+        return
+    data = await state.get_data()
+    if plan.can_produce and not _mix_checklist_is_complete(data, plan, mix_count):
+        await callback.answer("Сначала отметьте ингредиенты всех замесов.", show_alert=True)
+        return
+    await state.update_data(mix_record_mode="already_fed")
+    await callback.message.answer(
+        _format_mix_fed_date_prompt(plan),
+        reply_markup=stock_mix_fed_date_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("stock:mix_fed_date:"))
+async def stock_mix_fed_date(
+    callback: CallbackQuery,
+    state: FSMContext,
+    stock_service: StockService,
+    incubation_service: IncubationService,
+) -> None:
+    choice = str(callback.data).rsplit(":", 1)[1]
+    if choice == "manual":
+        await state.set_state(StockMixFlow.fed_date)
+        await callback.message.answer(
+            f"Введите дату фактического замеса: {DATE_FORMAT_HINT}.",
+            reply_markup=stock_mix_fed_date_keyboard(),
+        )
+        await callback.answer()
+        return
+    occurred_at = None
+    if choice == "today":
+        occurred_at = _occurred_at_for_date(_local_today(callback.from_user.id, incubation_service))
+    elif choice == "week_ago":
+        occurred_at = _occurred_at_for_date(
+            _local_today(callback.from_user.id, incubation_service) - timedelta(days=7)
+        )
+    elif choice != "unknown":
+        await callback.answer("Не понял дату замеса.", show_alert=True)
+        return
+    await _record_already_fed_mix(
+        callback.message,
+        user_id=callback.from_user.id,
+        state=state,
+        stock_service=stock_service,
+        occurred_at=occurred_at,
+    )
+    await callback.answer()
+
+
+@router.message(StockMixFlow.fed_date)
+async def stock_mix_fed_manual_date(
+    message: Message,
+    state: FSMContext,
+    stock_service: StockService,
+    incubation_service: IncubationService,
+) -> None:
+    try:
+        occurred_date = parse_user_date(message.text or "")
+    except ValueError as exc:
+        incubation_service.track_scenario_error(
+            user_id=message.from_user.id,
+            scenario="stock_mix_fed_date",
+            message="invalid_date",
+        )
+        await message.answer(str(exc), reply_markup=stock_mix_fed_date_keyboard())
+        return
+    await _record_already_fed_mix(
+        message,
+        user_id=message.from_user.id,
+        state=state,
+        stock_service=stock_service,
+        occurred_at=_occurred_at_for_date(occurred_date),
+    )
 
 
 @router.callback_query(F.data.startswith("stock:mix_confirm:"))
@@ -1997,13 +2094,7 @@ async def _send_mix_checklist(
     total_cycles = _parse_mix_cycle_count(plan.mix_count)
     checked = checked_indices or set()
     current = min(max(current_cycle, 1), total_cycles)
-    await state.update_data(
-        mix_grain_base=plan.grain_base_code,
-        mix_count=total_cycles,
-        mix_total_cycles=total_cycles,
-        mix_current_cycle=current,
-        mix_checked_indices=sorted(checked),
-    )
+    await _store_mix_state(state, plan, checked_indices=checked, current_cycle=current)
     text = _format_mix_plan(
         plan,
         checked_indices=checked,
@@ -2024,6 +2115,24 @@ async def _send_mix_checklist(
             if "message is not modified" in str(exc).lower():
                 return
     await message.answer(text, reply_markup=reply_markup)
+
+
+async def _store_mix_state(
+    state: FSMContext,
+    plan,
+    *,
+    checked_indices: set[int] | None = None,
+    current_cycle: int = 1,
+) -> None:
+    total_cycles = _parse_mix_cycle_count(plan.mix_count)
+    current = min(max(current_cycle, 1), total_cycles)
+    await state.update_data(
+        mix_grain_base=plan.grain_base_code,
+        mix_count=total_cycles,
+        mix_total_cycles=total_cycles,
+        mix_current_cycle=current,
+        mix_checked_indices=sorted(checked_indices or set()),
+    )
 
 
 async def _edit_mix_checklist(
@@ -2059,6 +2168,53 @@ async def _mix_plan_from_state(user_id: int, state: FSMContext, stock_service: S
         )
     except ValueError:
         return None
+
+
+async def _record_already_fed_mix(
+    message: Message,
+    *,
+    user_id: int,
+    state: FSMContext,
+    stock_service: StockService,
+    occurred_at: datetime | None,
+) -> None:
+    plan = await _mix_plan_from_state(user_id, state, stock_service)
+    if plan is None:
+        await state.clear()
+        await message.answer("Откройте расчет замеса заново.", reply_markup=stock_menu_keyboard())
+        return
+    try:
+        saved_plan = stock_service.produce_mix(
+            user_id=user_id,
+            mix_count=_parse_mix_cycle_count(plan.mix_count),
+            grain_base=plan.grain_base_code,
+            already_fed=True,
+            occurred_at=occurred_at,
+        )
+    except ValueError as exc:
+        await message.answer(str(exc), reply_markup=stock_menu_keyboard())
+        return
+    await state.clear()
+    await message.answer(_format_mix_already_fed_created(saved_plan), reply_markup=stock_menu_keyboard())
+
+
+def _mix_checklist_is_complete(data: dict, plan, total_cycles: int) -> bool:
+    checked = set(data.get("mix_checked_indices", []))
+    current_cycle = int(data.get("mix_current_cycle", 1))
+    return current_cycle >= total_cycles and len(checked) >= len(plan.ingredients)
+
+
+def _local_today(user_id: int, incubation_service: IncubationService) -> date:
+    settings = incubation_service.get_user_settings(user_id)
+    try:
+        zone = ZoneInfo(str(settings.get("timezone", "Europe/Moscow")))
+    except Exception:
+        zone = ZoneInfo("Europe/Moscow")
+    return datetime.now(timezone.utc).astimezone(zone).date()
+
+
+def _occurred_at_for_date(value: date) -> datetime:
+    return datetime.combine(value, time(hour=12), tzinfo=timezone.utc)
 
 
 async def _send_flock_detail(message: Message, user_id: int, flock_id: int, feed_service: FeedService) -> None:
@@ -2397,6 +2553,29 @@ def _format_mix_parts(parts: float) -> str:
     return f"{parts:g} {unit}"
 
 
+def _format_mix_fed_date_prompt(plan) -> str:
+    total = _parse_mix_cycle_count(plan.mix_count)
+    subject = "замес был сделан" if total == 1 else "замесы были сделаны"
+    lines = [
+        f"Когда {subject}?",
+        "",
+        "После сохранения ингредиенты спишутся, готовая смесь добавится и сразу спишется как уже скормленная.",
+        "Текущий остаток готовой смеси не увеличится.",
+    ]
+    missing = [ingredient for ingredient in plan.ingredients if ingredient.missing_kg > 0]
+    if missing:
+        lines.extend(["", "По текущему складу не хватает:"])
+        for ingredient in missing[:6]:
+            lines.append(
+                f"- {ingredient.name}: {ingredient.missing_kg:.2f} кг "
+                f"(есть {ingredient.available_kg:.2f} кг)"
+            )
+        if len(missing) > 6:
+            lines.append(f"- еще позиций: {len(missing) - 6}")
+        lines.append("Такой прошлый замес все равно можно записать.")
+    return "\n".join(lines)
+
+
 def _format_mix_created(plan) -> str:
     return (
         "Замес создан.\n\n"
@@ -2405,6 +2584,12 @@ def _format_mix_created(plan) -> str:
         f"Добавлено готовой смеси: около {plan.output_kg:.1f} кг.\n\n"
         "Ингредиенты списаны со склада."
     )
+
+
+def _format_mix_already_fed_created(plan) -> str:
+    if _parse_mix_cycle_count(plan.mix_count) == 1:
+        return "Замес записан как уже скормленный."
+    return "Замесы записаны как уже скормленные."
 
 
 def _parse_float(value: str | None, *, allow_zero: bool = False) -> float:

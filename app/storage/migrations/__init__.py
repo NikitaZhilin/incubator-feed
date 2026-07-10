@@ -20,6 +20,7 @@ MIGRATIONS = (
     "012_weather_parts",
     "013_service_heartbeats",
     "014_poultry_advisor_settings",
+    "015_stock_mix_already_fed",
 )
 
 

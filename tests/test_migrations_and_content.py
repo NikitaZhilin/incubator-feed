@@ -36,6 +36,14 @@ class MigrationsAndContentTest(unittest.TestCase):
                     row["name"]
                     for row in connection.execute("PRAGMA table_info(users)").fetchall()
                 }
+                stock_transaction_columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(stock_transactions)").fetchall()
+                }
+                mix_production_columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(mix_productions)").fetchall()
+                }
 
         self.assertIn("schema_migrations", tables)
         self.assertIn("notification_log", tables)
@@ -60,6 +68,9 @@ class MigrationsAndContentTest(unittest.TestCase):
         self.assertIn("last_seen_at", heartbeat_columns)
         self.assertIn("metadata_json", heartbeat_columns)
         self.assertIn("notify_poultry_advisor", user_columns)
+        self.assertIn("occurred_at", stock_transaction_columns)
+        self.assertIn("mode", mix_production_columns)
+        self.assertIn("produced_at", mix_production_columns)
 
     def test_existing_database_is_migrated_without_dropping_data(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

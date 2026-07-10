@@ -12,6 +12,9 @@ from app.domain import (
 from app.storage.database import Database
 
 
+_UNSET = object()
+
+
 class StockRepository:
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -101,16 +104,18 @@ class StockRepository:
         note: str = "",
         related_mix_id: int | None = None,
         created_at: datetime | None = None,
+        occurred_at: datetime | None | object = _UNSET,
     ) -> StockTransaction:
         timestamp = created_at or datetime.now(timezone.utc)
+        occurred_timestamp = timestamp if occurred_at is _UNSET else occurred_at
         with self.database.connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO stock_transactions (
                     user_id, stock_item_id, type, amount_kg, balance_after_kg,
-                    note, related_mix_id, created_at
+                    note, related_mix_id, created_at, occurred_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user_id,
@@ -121,6 +126,7 @@ class StockRepository:
                     note[:255],
                     related_mix_id,
                     timestamp.isoformat(),
+                    occurred_timestamp.isoformat() if occurred_timestamp is not None else None,
                 ),
             )
             transaction_id = int(cursor.lastrowid)
@@ -135,7 +141,7 @@ class StockRepository:
             row = connection.execute(
                 """
                 SELECT id, user_id, stock_item_id, type, amount_kg, balance_after_kg,
-                       note, related_mix_id, created_at
+                       note, related_mix_id, created_at, occurred_at
                 FROM stock_transactions
                 WHERE id = ?
                 """,
@@ -148,7 +154,7 @@ class StockRepository:
             row = connection.execute(
                 """
                 SELECT id, user_id, stock_item_id, type, amount_kg, balance_after_kg,
-                       note, related_mix_id, created_at
+                       note, related_mix_id, created_at, occurred_at
                 FROM stock_transactions
                 WHERE stock_item_id = ? AND user_id = ?
                 ORDER BY created_at DESC, id DESC
@@ -158,18 +164,35 @@ class StockRepository:
             ).fetchone()
         return self._transaction_from_row(row) if row else None
 
-    def last_transaction_by_type(self, user_id: int, transaction_type: str) -> StockTransaction | None:
+    def last_transaction_by_type(
+        self,
+        user_id: int,
+        transaction_type: str,
+        *,
+        excluded_mix_modes: tuple[str, ...] = (),
+    ) -> StockTransaction | None:
+        join_sql = ""
+        mode_filter = ""
+        params: list[object] = [user_id, transaction_type]
+        if excluded_mix_modes:
+            placeholders = ", ".join("?" for _ in excluded_mix_modes)
+            join_sql = "LEFT JOIN mix_productions AS mp ON mp.id = st.related_mix_id"
+            mode_filter = f"AND (st.related_mix_id IS NULL OR mp.mode NOT IN ({placeholders}))"
+            params.extend(excluded_mix_modes)
         with self.database.connect() as connection:
             row = connection.execute(
-                """
-                SELECT id, user_id, stock_item_id, type, amount_kg, balance_after_kg,
-                       note, related_mix_id, created_at
-                FROM stock_transactions
-                WHERE user_id = ? AND type = ?
-                ORDER BY created_at DESC, id DESC
+                f"""
+                SELECT st.id, st.user_id, st.stock_item_id, st.type, st.amount_kg,
+                       st.balance_after_kg, st.note, st.related_mix_id,
+                       st.created_at, st.occurred_at
+                FROM stock_transactions AS st
+                {join_sql}
+                WHERE st.user_id = ? AND st.type = ?
+                {mode_filter}
+                ORDER BY st.created_at DESC, st.id DESC
                 LIMIT 1
                 """,
-                (user_id, transaction_type),
+                tuple(params),
             ).fetchone()
         return self._transaction_from_row(row) if row else None
 
@@ -178,7 +201,7 @@ class StockRepository:
             rows = connection.execute(
                 """
                 SELECT id, user_id, stock_item_id, type, amount_kg, balance_after_kg,
-                       note, related_mix_id, created_at
+                       note, related_mix_id, created_at, occurred_at
                 FROM stock_transactions
                 WHERE user_id = ?
                 ORDER BY created_at DESC, id DESC
@@ -198,16 +221,19 @@ class StockRepository:
         output_stock_item_id: int,
         output_kg: float,
         created_at: datetime | None = None,
+        mode: str = "to_stock",
+        produced_at: datetime | None | object = _UNSET,
     ) -> MixProduction:
         timestamp = created_at or datetime.now(timezone.utc)
+        produced_timestamp = timestamp if produced_at is _UNSET else produced_at
         with self.database.connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO mix_productions (
                     user_id, recipe_code, recipe_version, mix_count,
-                    output_stock_item_id, output_kg, created_at
+                    output_stock_item_id, output_kg, created_at, mode, produced_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user_id,
@@ -217,6 +243,8 @@ class StockRepository:
                     output_stock_item_id,
                     output_kg,
                     timestamp.isoformat(),
+                    mode,
+                    produced_timestamp.isoformat() if produced_timestamp is not None else None,
                 ),
             )
             mix_id = int(cursor.lastrowid)
@@ -227,7 +255,7 @@ class StockRepository:
             row = connection.execute(
                 """
                 SELECT id, user_id, recipe_code, recipe_version, mix_count,
-                       output_stock_item_id, output_kg, created_at
+                       output_stock_item_id, output_kg, created_at, mode, produced_at
                 FROM mix_productions
                 WHERE id = ?
                 """,
@@ -471,6 +499,7 @@ class StockRepository:
 
     @staticmethod
     def _transaction_from_row(row: sqlite3.Row) -> StockTransaction:
+        occurred_at = row["occurred_at"] if "occurred_at" in row.keys() else None
         return StockTransaction(
             id=int(row["id"]),
             user_id=int(row["user_id"]),
@@ -481,10 +510,15 @@ class StockRepository:
             note=str(row["note"] or ""),
             related_mix_id=int(row["related_mix_id"]) if row["related_mix_id"] else None,
             created_at=datetime.fromisoformat(str(row["created_at"])),
+            occurred_at=(
+                datetime.fromisoformat(str(occurred_at)) if occurred_at is not None else None
+            ),
         )
 
     @staticmethod
     def _mix_from_row(row: sqlite3.Row) -> MixProduction:
+        mode = row["mode"] if "mode" in row.keys() else "to_stock"
+        produced_at = row["produced_at"] if "produced_at" in row.keys() else row["created_at"]
         return MixProduction(
             id=int(row["id"]),
             user_id=int(row["user_id"]),
@@ -494,6 +528,10 @@ class StockRepository:
             output_stock_item_id=int(row["output_stock_item_id"]),
             output_kg=float(row["output_kg"]),
             created_at=datetime.fromisoformat(str(row["created_at"])),
+            mode=str(mode or "to_stock"),
+            produced_at=(
+                datetime.fromisoformat(str(produced_at)) if produced_at is not None else None
+            ),
         )
 
     @staticmethod

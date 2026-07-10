@@ -35,6 +35,8 @@ STOCK_KIND_LABELS = {
 DEFAULT_HEN_DAILY_G = 120
 DEFAULT_ROOSTER_DAILY_G = 150
 DEFAULT_ADULT_DAILY_G = 120
+MIX_MODE_TO_STOCK = "to_stock"
+MIX_MODE_ALREADY_FED = "already_fed"
 
 
 @dataclass(frozen=True)
@@ -97,7 +99,11 @@ class StockService:
         return [self.estimate_item(item, now=current) for item in self.stock.list_items(user_id)]
 
     def last_mix_output(self, user_id: int) -> StockTransaction | None:
-        return self.stock.last_transaction_by_type(user_id, "mix_output")
+        return self.stock.last_transaction_by_type(
+            user_id,
+            "mix_output",
+            excluded_mix_modes=(MIX_MODE_ALREADY_FED,),
+        )
 
     def estimate_item(
         self,
@@ -254,23 +260,31 @@ class StockService:
         user_id: int,
         mix_count: float,
         grain_base: str = DEFAULT_GRAIN_BASE,
+        already_fed: bool = False,
+        occurred_at: datetime | None = None,
+        created_at: datetime | None = None,
     ) -> MixPlan:
         plan = self.plan_mix(user_id=user_id, mix_count=mix_count, grain_base=grain_base)
-        if not plan.can_produce:
+        if not plan.can_produce and not already_fed:
             raise ValueError("Недостаточно ингредиентов для замеса.")
         output = self.stock.get_or_create_item(
             user_id=user_id,
             name=plan.output_name,
             kind="finished_mix",
         )
-        mix = self.stock.create_mix_production(
-            user_id=user_id,
-            recipe_code=plan.recipe_code,
-            recipe_version=plan.recipe_version,
-            mix_count=plan.mix_count,
-            output_stock_item_id=output.id,
-            output_kg=plan.output_kg,
-        )
+        mix_payload = {
+            "user_id": user_id,
+            "recipe_code": plan.recipe_code,
+            "recipe_version": plan.recipe_version,
+            "mix_count": plan.mix_count,
+            "output_stock_item_id": output.id,
+            "output_kg": plan.output_kg,
+            "created_at": created_at,
+            "mode": MIX_MODE_ALREADY_FED if already_fed else MIX_MODE_TO_STOCK,
+        }
+        if already_fed:
+            mix_payload["produced_at"] = occurred_at
+        mix = self.stock.create_mix_production(**mix_payload)
         for required in plan.ingredients:
             if required.stock_item_id is None:
                 ingredient_item = self.stock.get_or_create_item(
@@ -298,6 +312,7 @@ class StockService:
                 note=f"Замес #{mix.id}",
                 related_mix_id=mix.id,
                 created_at=mix.created_at,
+                occurred_at=occurred_at if already_fed else mix.created_at,
             )
         output_current = self.estimate_item(output, now=mix.created_at)
         self.stock.add_transaction(
@@ -306,11 +321,28 @@ class StockService:
             transaction_type="mix_output",
             amount_kg=plan.output_kg,
             balance_after_kg=output_current.remaining_kg + plan.output_kg,
-            note=f"Замес #{mix.id}",
+            note=f"Замес #{mix.id}" + (" (уже скормлен)" if already_fed else ""),
             related_mix_id=mix.id,
             created_at=mix.created_at,
+            occurred_at=occurred_at if already_fed else mix.created_at,
         )
-        self._track("mix_produced", user_id=user_id, entity_id=mix.id)
+        if already_fed:
+            self.stock.add_transaction(
+                user_id=user_id,
+                stock_item_id=output.id,
+                transaction_type="write_off",
+                amount_kg=-plan.output_kg,
+                balance_after_kg=output_current.remaining_kg,
+                note=f"Замес #{mix.id}: уже скормлен",
+                related_mix_id=mix.id,
+                created_at=mix.created_at,
+                occurred_at=occurred_at,
+            )
+        self._track(
+            "mix_recorded_already_fed" if already_fed else "mix_produced",
+            user_id=user_id,
+            entity_id=mix.id,
+        )
         return plan
 
     def assign_feed(

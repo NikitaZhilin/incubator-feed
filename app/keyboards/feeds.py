@@ -324,11 +324,55 @@ def stock_mix_checklist_keyboard(
                         )
                     ]
                 )
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            text=_already_fed_mix_button_text(total),
+                            callback_data=f"stock:mix_fed_start:{plan.grain_base_code}:{plan.mix_count:g}",
+                        )
+                    ]
+                )
         else:
             rows.append([InlineKeyboardButton(text="Отметить все ингредиенты", callback_data="stock:mix_check_all")])
     rows.append([InlineKeyboardButton(text="⬅️ К смеси", callback_data="stock:mix")])
     rows.append([InlineKeyboardButton(text="📦 К складу", callback_data="stock:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def stock_mix_unavailable_keyboard(plan) -> InlineKeyboardMarkup:
+    total = int(plan.mix_count)
+    base_keyboard = stock_mix_quick_keyboard(plan.grain_base_code, int(plan.max_mix_count))
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=_already_fed_mix_button_text(total),
+                    callback_data=f"stock:mix_fed_start:{plan.grain_base_code}:{plan.mix_count:g}",
+                )
+            ],
+            *base_keyboard.inline_keyboard,
+        ],
+    )
+
+
+def stock_mix_fed_date_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Сегодня", callback_data="stock:mix_fed_date:today"),
+                InlineKeyboardButton(text="7 дней назад", callback_data="stock:mix_fed_date:week_ago"),
+            ],
+            [InlineKeyboardButton(text="Без даты / не помню", callback_data="stock:mix_fed_date:unknown")],
+            [InlineKeyboardButton(text="Ввести дату", callback_data="stock:mix_fed_date:manual")],
+            [InlineKeyboardButton(text="⬅️ К смеси", callback_data="stock:mix")],
+        ]
+    )
+
+
+def _already_fed_mix_button_text(total_cycles: int) -> str:
+    if total_cycles == 1:
+        return "🕘 Записать как уже скормленный"
+    return "🕘 Записать как уже скормленные"
 
 
 def _format_mix_parts(parts: float) -> str:
