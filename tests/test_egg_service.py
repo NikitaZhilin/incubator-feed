@@ -102,6 +102,47 @@ class EggServiceTest(unittest.TestCase):
         self.assertEqual(stats.next_week_forecast, 53)
         self.assertEqual(round(stats.eggs_per_active_hen, 3), 0.625)
 
+    def test_multi_day_distribution_handles_different_totals(self) -> None:
+        self.assertEqual(EggService.distribute_eggs(15, 3), [5, 5, 5])
+        self.assertEqual(EggService.distribute_eggs(20, 3), [7, 7, 6])
+        self.assertEqual(EggService.distribute_eggs(40, 3), [14, 13, 13])
+
+    def test_multi_day_collection_records_entries_by_date(self) -> None:
+        distribution = self.egg_service.preview_multi_day_distribution(
+            1,
+            20,
+            days=3,
+            today=date(2026, 5, 28),
+        )
+
+        entries = self.egg_service.record_multi_day_collection(1, 20, distribution)
+        history = self.egg_service.history(1, days=3, today=date(2026, 5, 28))
+
+        self.assertEqual([entry.eggs_count for entry in entries], [7, 7, 6])
+        self.assertEqual(
+            history,
+            [(date(2026, 5, 28), 7), (date(2026, 5, 27), 7), (date(2026, 5, 26), 6)],
+        )
+        self.assertTrue(all("Сбор за несколько дней" in entry.note for entry in entries))
+
+    def test_unknown_multi_day_period_uses_average_and_empty_days(self) -> None:
+        self.egg_service.record_today(1, 7, today=date(2026, 5, 20))
+        self.egg_service.record_today(1, 7, today=date(2026, 5, 21))
+
+        distribution = self.egg_service.preview_multi_day_distribution(
+            1,
+            40,
+            today=date(2026, 5, 27),
+        )
+
+        self.assertEqual(len(distribution), 6)
+        self.assertEqual([day for day, _ in distribution], [date(2026, 5, 27), date(2026, 5, 26), date(2026, 5, 25), date(2026, 5, 24), date(2026, 5, 23), date(2026, 5, 22)])
+        self.assertEqual([count for _, count in distribution], [7, 7, 7, 7, 6, 6])
+
+    def test_unknown_multi_day_period_requires_statistics(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Недостаточно статистики"):
+            self.egg_service.preview_multi_day_distribution(1, 20, today=date(2026, 5, 28))
+
     def test_update_entry_moves_eggs_to_correct_day(self) -> None:
         entry = self.egg_service.record_today(1, 7, today=date(2026, 5, 25))
 

@@ -8,11 +8,19 @@ from app.handlers.common import cancel_any, my_id_command
 from app.handlers.eggs import (
     EggEditFlow,
     EggEntryFlow,
+    EggMultiDayFlow,
     eggs_add,
+    eggs_add_multi,
+    eggs_add_regular,
     eggs_add_date,
     eggs_count as egg_entry_count,
     eggs_edit_date_save,
     eggs_edit_date_start,
+    eggs_multi_day_auto,
+    eggs_multi_day_confirm,
+    eggs_multi_day_days,
+    eggs_multi_day_manual,
+    eggs_multi_day_total,
 )
 from app.handlers.feeds import (
     ChangeFeed,
@@ -34,7 +42,8 @@ from app.handlers.feeds import (
     stock_mix_check_all,
     stock_mix_confirm,
     stock_mix_cycle_done,
-    stock_mix_fed_start,
+    stock_mix_mode_already_fed,
+    stock_mix_mode_now,
     stock_mix_plan,
     stock_mix_toggle,
     stock_purchase_amount,
@@ -173,8 +182,12 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
 
         await eggs_add(add_callback, state)
 
-        self.assertIn("За какой день", add_callback.message.answers[-1][0])
+        self.assertIn("Какой сбор", add_callback.message.answers[-1][0])
         self.assertTrue(add_callback.answered)
+
+        regular_callback = FakeCallback("eggs:add_regular")
+        await eggs_add_regular(regular_callback, state)
+        self.assertIn("За какой день", regular_callback.message.answers[-1][0])
 
         with patch.object(self.egg_service, "current_date", return_value=date(2026, 5, 27)):
             date_callback = FakeCallback("eggs:add_date:yesterday")
@@ -191,6 +204,60 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Дата: 2026-05-26", count_message.answers[-1][0])
         history = self.egg_service.history(1, days=2, today=date(2026, 5, 27))
         self.assertEqual(history, [(date(2026, 5, 27), 0), (date(2026, 5, 26), 6)])
+
+    async def test_multi_day_egg_entry_can_be_recorded_with_manual_period(self) -> None:
+        state = FakeState()
+        add_callback = FakeCallback("eggs:add_multi")
+
+        await eggs_add_multi(add_callback, state)
+
+        self.assertEqual(state.state, EggMultiDayFlow.total_count)
+        self.assertIn("общее количество", add_callback.message.answers[-1][0])
+
+        total_message = FakeMessage("20")
+        await eggs_multi_day_total(total_message, state)
+
+        self.assertEqual(state.data["multi_day_total"], 20)
+        self.assertIn("Как определить период", total_message.answers[-1][0])
+
+        manual_callback = FakeCallback("eggs:multi_days:manual")
+        await eggs_multi_day_manual(manual_callback, state)
+
+        self.assertEqual(state.state, EggMultiDayFlow.days_count)
+        self.assertIn("За сколько дней", manual_callback.message.answers[-1][0])
+
+        with patch.object(self.egg_service, "current_date", return_value=date(2026, 5, 27)):
+            days_message = FakeMessage("3")
+            await eggs_multi_day_days(days_message, state, self.egg_service)
+
+        self.assertEqual(state.state, EggMultiDayFlow.confirm)
+        self.assertIn("2026-05-27: 7", days_message.answers[-1][0])
+        self.assertIn("2026-05-26: 7", days_message.answers[-1][0])
+        self.assertIn("2026-05-25: 6", days_message.answers[-1][0])
+
+        confirm_callback = FakeCallback("eggs:multi_days:confirm")
+        await eggs_multi_day_confirm(confirm_callback, state, self.egg_service)
+
+        self.assertTrue(state.cleared)
+        self.assertIn("Сбор за несколько дней записан", confirm_callback.message.answers[-1][0])
+        history = self.egg_service.history(1, days=3, today=date(2026, 5, 27))
+        self.assertEqual(history, [(date(2026, 5, 27), 7), (date(2026, 5, 26), 7), (date(2026, 5, 25), 6)])
+
+    async def test_multi_day_egg_entry_auto_period_uses_average(self) -> None:
+        self.egg_service.record_today(1, 7, today=date(2026, 5, 20))
+        self.egg_service.record_today(1, 7, today=date(2026, 5, 21))
+        state = FakeState()
+        await state.update_data(multi_day_total=20)
+
+        with patch.object(self.egg_service, "current_date", return_value=date(2026, 5, 27)):
+            callback = FakeCallback("eggs:multi_days:auto")
+            await eggs_multi_day_auto(callback, state, self.egg_service)
+
+        self.assertEqual(state.state, EggMultiDayFlow.confirm)
+        self.assertIn("2026-05-27: 7", callback.message.answers[-1][0])
+        self.assertIn("2026-05-26: 7", callback.message.answers[-1][0])
+        self.assertIn("2026-05-25: 6", callback.message.answers[-1][0])
+        self.assertIn("Период рассчитан", callback.message.answers[-1][0])
 
     async def test_egg_entry_date_can_be_edited(self) -> None:
         entry = self.egg_service.record_today(1, 7, today=date(2026, 5, 25))
@@ -399,10 +466,7 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         await stock_mix_plan(callback, state, self.stock_service)
 
         self.assertEqual(callback.message.answers, [])
-        self.assertIn("Формула на 1 замес", callback.message.edits[-1][0])
-        self.assertIn("Кукуруза: 3.5 части", callback.message.edits[-1][0])
-        self.assertIn("Пшеница: 2.5 части", callback.message.edits[-1][0])
-        self.assertIn("Текущий замес: 1 из 2", callback.message.edits[-1][0])
+        self.assertIn("Как записать замесы?", callback.message.edits[-1][0])
         self.assertEqual(
             [
                 item.item.name
@@ -412,6 +476,15 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
             [],
         )
         self.assertTrue(callback.answered)
+
+        mode_callback = FakeCallback("stock:mix_mode:now")
+        await stock_mix_mode_now(mode_callback, state, self.stock_service)
+
+        self.assertEqual(mode_callback.message.answers, [])
+        self.assertIn("Формула на 1 замес", mode_callback.message.edits[-1][0])
+        self.assertIn("Кукуруза: 3.5 части", mode_callback.message.edits[-1][0])
+        self.assertIn("Пшеница: 2.5 части", mode_callback.message.edits[-1][0])
+        self.assertIn("Текущий замес: 1 из 2", mode_callback.message.edits[-1][0])
 
     async def test_already_fed_mix_can_choose_date_without_checklist(self) -> None:
         for name in [
@@ -432,9 +505,9 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
             )
         state = FakeState()
         await stock_mix_plan(FakeCallback("stock:mix_plan:wheat:2"), state, self.stock_service)
-        fed_callback = FakeCallback("stock:mix_fed_start:wheat:2")
+        fed_callback = FakeCallback("stock:mix_mode:already_fed")
 
-        await stock_mix_fed_start(fed_callback, state, self.stock_service)
+        await stock_mix_mode_already_fed(fed_callback, state, self.stock_service)
 
         self.assertIn("Когда замесы были сделаны?", fed_callback.message.answers[-1][0])
         self.assertTrue(fed_callback.answered)
@@ -460,6 +533,7 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         callback = FakeCallback("stock:mix_plan:wheat:2")
 
         await stock_mix_plan(callback, state, self.stock_service)
+        await stock_mix_mode_now(FakeCallback("stock:mix_mode:now"), state, self.stock_service)
         check_all_callback = FakeCallback("stock:mix_check_all")
         await stock_mix_check_all(check_all_callback, state, self.stock_service)
         self.assertEqual(check_all_callback.message.answers, [])
@@ -508,6 +582,7 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
             )
         state = FakeState()
         await stock_mix_plan(FakeCallback("stock:mix_plan:wheat:1"), state, self.stock_service)
+        await stock_mix_mode_now(FakeCallback("stock:mix_mode:now"), state, self.stock_service)
         toggle_callback = FakeCallback("stock:mix_toggle:0")
 
         await stock_mix_toggle(toggle_callback, state, self.stock_service)

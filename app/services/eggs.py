@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta, timezone
+from math import ceil
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.domain import DailyWeather, EggEntry, EggStats, HenLayingExclusion, WeatherSettings
@@ -14,6 +15,8 @@ EXCLUSION_REASON_LABELS = {
     "sick": "болеет или восстановление",
     "other": "другая причина",
 }
+
+MAX_MULTI_DAY_COLLECTION_DAYS = 30
 
 
 class EggService:
@@ -55,6 +58,109 @@ class EggService:
         note: str = "",
     ) -> EggEntry:
         return self.record_today(user_id, eggs_count, today=entry_date, note=note)
+
+    def preview_multi_day_distribution(
+        self,
+        user_id: int,
+        total_eggs: int,
+        *,
+        days: int | None = None,
+        today: date | None = None,
+        use_empty_days: bool = False,
+    ) -> list[tuple[date, int]]:
+        if total_eggs <= 0:
+            raise ValueError("Количество яиц должно быть больше нуля.")
+        current_date = today or self.current_date()
+        if days is None:
+            average = self.average_recorded_eggs(user_id)
+            if average <= 0:
+                raise ValueError("Недостаточно статистики. Укажите количество дней вручную.")
+            days = min(max(ceil(total_eggs / average), 2), MAX_MULTI_DAY_COLLECTION_DAYS)
+            use_empty_days = True
+        self._validate_multi_day_period(days)
+        if use_empty_days:
+            dates = self.recent_empty_days(user_id, count=days, today=current_date)
+            if not dates:
+                raise ValueError("За последние 30 дней нет пустых дней. Укажите количество дней вручную.")
+        else:
+            dates = [current_date - timedelta(days=offset) for offset in range(days)]
+        counts = self.distribute_eggs(total_eggs, len(dates))
+        return list(zip(dates, counts))
+
+    def record_multi_day_collection(
+        self,
+        user_id: int,
+        total_eggs: int,
+        distribution: list[tuple[date, int]],
+        *,
+        auto_period: bool = False,
+    ) -> list[EggEntry]:
+        if not distribution:
+            raise ValueError("Нет дат для распределения сбора.")
+        if total_eggs <= 0:
+            raise ValueError("Количество яиц должно быть больше нуля.")
+        if sum(count for _, count in distribution) != total_eggs:
+            raise ValueError("Распределение не сходится с общим количеством яиц.")
+        days = len(distribution)
+        note = f"Сбор за несколько дней: {total_eggs} шт. за {days} дн."
+        if auto_period:
+            note += ", период рассчитан автоматически"
+        return [
+            self.record_entry(
+                user_id,
+                eggs_count,
+                entry_date=entry_date,
+                note=note,
+            )
+            for entry_date, eggs_count in distribution
+        ]
+
+    def average_recorded_eggs(self, user_id: int) -> float:
+        return float(self.eggs.average_daily_total(user_id) or 0)
+
+    def recent_empty_days(
+        self,
+        user_id: int,
+        *,
+        count: int,
+        today: date | None = None,
+        max_lookback_days: int = MAX_MULTI_DAY_COLLECTION_DAYS,
+    ) -> list[date]:
+        if count <= 0:
+            raise ValueError("Количество дней должно быть больше нуля.")
+        current_date = today or self.current_date()
+        lookback_days = max(max_lookback_days, count)
+        start_date = current_date - timedelta(days=lookback_days - 1)
+        existing_dates = self.eggs.entry_dates_between(
+            user_id,
+            start_date=start_date,
+            end_date=current_date,
+        )
+        days: list[date] = []
+        for offset in range(lookback_days):
+            candidate = current_date - timedelta(days=offset)
+            if candidate not in existing_dates:
+                days.append(candidate)
+                if len(days) >= count:
+                    break
+        return days
+
+    @staticmethod
+    def distribute_eggs(total_eggs: int, days: int) -> list[int]:
+        if total_eggs < 0:
+            raise ValueError("Количество яиц не может быть отрицательным.")
+        if days <= 0:
+            raise ValueError("Количество дней должно быть больше нуля.")
+        base = total_eggs // days
+        remainder = total_eggs % days
+        return [base + (1 if index < remainder else 0) for index in range(days)]
+
+    @staticmethod
+    def _validate_multi_day_period(days: int) -> None:
+        if days < 2:
+            raise ValueError("Период должен быть минимум 2 дня.")
+        if days > MAX_MULTI_DAY_COLLECTION_DAYS:
+            raise ValueError(f"Период должен быть не больше {MAX_MULTI_DAY_COLLECTION_DAYS} дней.")
 
     def get_entry(self, user_id: int, entry_id: int) -> EggEntry | None:
         return self.eggs.get_entry(entry_id, user_id)

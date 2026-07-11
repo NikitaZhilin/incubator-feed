@@ -150,6 +150,36 @@ class EggRepository:
             ).fetchall()
         return {date.fromisoformat(str(row["entry_date"])): int(row["total"] or 0) for row in rows}
 
+    def average_daily_total(self, user_id: int) -> float | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT AVG(total) AS average
+                FROM (
+                    SELECT SUM(eggs_count) AS total
+                    FROM egg_entries
+                    WHERE user_id = ?
+                    GROUP BY entry_date
+                )
+                """,
+                (user_id,),
+            ).fetchone()
+        if row is None or row["average"] is None:
+            return None
+        return float(row["average"])
+
+    def entry_dates_between(self, user_id: int, *, start_date: date, end_date: date) -> set[date]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT DISTINCT entry_date
+                FROM egg_entries
+                WHERE user_id = ? AND entry_date BETWEEN ? AND ?
+                """,
+                (user_id, start_date.isoformat(), end_date.isoformat()),
+            ).fetchall()
+        return {date.fromisoformat(str(row["entry_date"])) for row in rows}
+
     def create_exclusion(
         self,
         *,

@@ -34,6 +34,7 @@ from app.keyboards.feeds import (
     stock_kind_keyboard,
     stock_history_keyboard,
     stock_mix_fed_date_keyboard,
+    stock_mix_mode_keyboard,
     stock_mix_quick_keyboard,
     stock_mix_unavailable_keyboard,
     stock_menu_keyboard,
@@ -813,7 +814,7 @@ async def stock_mix_count(
         await _store_mix_state(state, plan)
         await message.answer(_format_mix_plan(plan), reply_markup=stock_mix_unavailable_keyboard(plan))
         return
-    await _send_mix_checklist(message, state, plan)
+    await _send_mix_mode_choice(message, state, plan)
 
 
 @router.callback_query(F.data.startswith("stock:mix_plan:"))
@@ -832,7 +833,7 @@ async def stock_mix_plan(callback: CallbackQuery, state: FSMContext, stock_servi
         await callback.answer()
         return
     if plan.can_produce:
-        await _edit_mix_checklist(callback.message, state, plan)
+        await _edit_mix_mode_choice(callback.message, state, plan)
     else:
         await state.clear()
         await _store_mix_state(state, plan)
@@ -840,6 +841,30 @@ async def stock_mix_plan(callback: CallbackQuery, state: FSMContext, stock_servi
             _format_mix_plan(plan),
             reply_markup=stock_mix_unavailable_keyboard(plan),
         )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "stock:mix_mode:now")
+async def stock_mix_mode_now(callback: CallbackQuery, state: FSMContext, stock_service: StockService) -> None:
+    plan = await _mix_plan_from_state(callback.from_user.id, state, stock_service)
+    if plan is None:
+        await callback.answer("Откройте расчет замеса заново.", show_alert=True)
+        return
+    if not plan.can_produce:
+        await callback.message.answer(_format_mix_plan(plan), reply_markup=stock_mix_unavailable_keyboard(plan))
+        await callback.answer()
+        return
+    await _edit_mix_checklist(callback.message, state, plan)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "stock:mix_mode:already_fed")
+async def stock_mix_mode_already_fed(callback: CallbackQuery, state: FSMContext, stock_service: StockService) -> None:
+    plan = await _mix_plan_from_state(callback.from_user.id, state, stock_service)
+    if plan is None:
+        await callback.answer("Откройте расчет замеса заново.", show_alert=True)
+        return
+    await _send_mix_fed_date_prompt(callback.message, state, plan)
     await callback.answer()
 
 
@@ -936,11 +961,7 @@ async def stock_mix_fed_start(callback: CallbackQuery, state: FSMContext, stock_
     if plan is None or plan.grain_base_code != grain_base or plan.mix_count != mix_count:
         await callback.answer("Откройте расчет замеса заново.", show_alert=True)
         return
-    await state.update_data(mix_record_mode="already_fed")
-    await callback.message.answer(
-        _format_mix_fed_date_prompt(plan),
-        reply_markup=stock_mix_fed_date_keyboard(),
-    )
+    await _send_mix_fed_date_prompt(callback.message, state, plan)
     await callback.answer()
 
 
@@ -2078,6 +2099,32 @@ async def _answer_mix_dashboard(message: Message, user_id: int, stock_service: S
     )
 
 
+async def _send_mix_mode_choice(message: Message, state: FSMContext, plan, *, edit: bool = False) -> None:
+    await _store_mix_state(state, plan, checked_indices=set(), current_cycle=1)
+    text = _format_mix_mode_prompt(plan)
+    reply_markup = stock_mix_mode_keyboard(plan)
+    if edit:
+        try:
+            await message.edit_text(text, reply_markup=reply_markup)
+            return
+        except TelegramBadRequest as exc:
+            if "message is not modified" in str(exc).lower():
+                return
+    await message.answer(text, reply_markup=reply_markup)
+
+
+async def _edit_mix_mode_choice(message: Message, state: FSMContext, plan) -> None:
+    await _send_mix_mode_choice(message, state, plan, edit=True)
+
+
+async def _send_mix_fed_date_prompt(message: Message, state: FSMContext, plan) -> None:
+    await state.update_data(mix_record_mode="already_fed")
+    await message.answer(
+        _format_mix_fed_date_prompt(plan),
+        reply_markup=stock_mix_fed_date_keyboard(),
+    )
+
+
 async def _send_mix_checklist(
     message: Message,
     state: FSMContext,
@@ -2536,6 +2583,16 @@ def _format_mix_plan(
         lines.append(f"Ингредиентов не хватает. Максимум сейчас: {plan.max_mix_count:.1f} замеса.")
     lines.append("Расчет примерный: вес зависит от влажности и фракции ингредиентов.")
     return "\n".join(lines)
+
+
+def _format_mix_mode_prompt(plan) -> str:
+    total = _parse_mix_cycle_count(plan.mix_count)
+    subject = "замес" if total == 1 else "замесы"
+    return (
+        f"Как записать {subject}?\n\n"
+        f"Готовой смеси получится примерно {plan.output_kg:.1f} кг.\n"
+        "Если смесь уже была сделана и скормлена раньше, выберите запись как уже скормленную."
+    )
 
 
 def _format_mix_parts(parts: float) -> str:

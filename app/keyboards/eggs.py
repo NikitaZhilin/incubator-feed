@@ -83,6 +83,16 @@ def eggs_cancel_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def egg_entry_mode_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Обычный сбор", callback_data="eggs:add_regular")],
+            [InlineKeyboardButton(text="Сбор за несколько дней", callback_data="eggs:add_multi")],
+            [InlineKeyboardButton(text="Отмена", callback_data="eggs:menu")],
+        ]
+    )
+
+
 def egg_entry_date_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -90,6 +100,25 @@ def egg_entry_date_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="Сегодня", callback_data="eggs:add_date:today"),
                 InlineKeyboardButton(text="Вчера", callback_data="eggs:add_date:yesterday"),
             ],
+            [InlineKeyboardButton(text="Отмена", callback_data="eggs:menu")],
+        ]
+    )
+
+
+def egg_multi_day_period_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Указать количество дней", callback_data="eggs:multi_days:manual")],
+            [InlineKeyboardButton(text="Не помню период", callback_data="eggs:multi_days:auto")],
+            [InlineKeyboardButton(text="Отмена", callback_data="eggs:menu")],
+        ]
+    )
+
+
+def egg_multi_day_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Записать", callback_data="eggs:multi_days:confirm")],
             [InlineKeyboardButton(text="Отмена", callback_data="eggs:menu")],
         ]
     )

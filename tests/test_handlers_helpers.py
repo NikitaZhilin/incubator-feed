@@ -28,12 +28,16 @@ from app.keyboards.feeds import (
     stock_history_keyboard,
     stock_mix_checklist_keyboard,
     stock_mix_fed_date_keyboard,
+    stock_mix_mode_keyboard,
     stock_items_keyboard,
     stock_mix_quick_keyboard,
     stock_mix_unavailable_keyboard,
 )
 from app.keyboards.eggs import (
     egg_entry_date_keyboard,
+    egg_entry_mode_keyboard,
+    egg_multi_day_confirm_keyboard,
+    egg_multi_day_period_keyboard,
     eggs_history_keyboard,
     eggs_menu_keyboard,
     exclusions_keyboard,
@@ -376,8 +380,13 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("❓ FAQ", _keyboard_texts(eggs_menu_keyboard()))
         self.assertIn("✏️ Исправить запись", _keyboard_texts(eggs_history_keyboard()))
         self.assertIn("❓ FAQ", _keyboard_texts(eggs_history_keyboard()))
+        self.assertIn("Обычный сбор", _keyboard_texts(egg_entry_mode_keyboard()))
+        self.assertIn("Сбор за несколько дней", _keyboard_texts(egg_entry_mode_keyboard()))
         self.assertIn("Сегодня", _keyboard_texts(egg_entry_date_keyboard()))
         self.assertIn("Вчера", _keyboard_texts(egg_entry_date_keyboard()))
+        self.assertIn("Указать количество дней", _keyboard_texts(egg_multi_day_period_keyboard()))
+        self.assertIn("Не помню период", _keyboard_texts(egg_multi_day_period_keyboard()))
+        self.assertIn("Записать", _keyboard_texts(egg_multi_day_confirm_keyboard()))
         self.assertIn("⬅️ К яйцам", _keyboard_texts(exclusions_keyboard([])))
         self.assertIn("❓ FAQ", _keyboard_texts(exclusions_keyboard([])))
         self.assertIn("✏️ Изменить город", _keyboard_texts(weather_keyboard()))
@@ -441,7 +450,7 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("✅ Кукуруза: 3.5 части", texts)
         self.assertIn("⬜ Премикс: 0.1 части", texts)
         self.assertIn("Отметить все ингредиенты", texts)
-        self.assertIn("🕘 Записать как уже скормленные", texts)
+        self.assertNotIn("🕘 Записать как уже скормленные", texts)
         self.assertNotIn("Продолжить после отметок", texts)
 
     def test_mix_checklist_final_button_updates_stock(self) -> None:
@@ -458,10 +467,10 @@ class HandlerHelpersTest(unittest.TestCase):
         texts = _keyboard_texts(keyboard)
 
         self.assertIn("✅ Замес готов, обновить склад", texts)
-        self.assertIn("🕘 Записать как уже скормленный", texts)
+        self.assertNotIn("🕘 Записать как уже скормленный", texts)
         self.assertNotIn("✅ Завершить и списать склад", texts)
 
-    def test_mix_checklist_final_button_uses_plural_for_fed_mixes(self) -> None:
+    def test_mix_mode_keyboard_allows_current_or_already_fed_record(self) -> None:
         plan = SimpleNamespace(
             mix_count=2,
             grain_base_code="wheat",
@@ -471,10 +480,14 @@ class HandlerHelpersTest(unittest.TestCase):
             ),
         )
 
-        keyboard = stock_mix_checklist_keyboard(plan, checked_indices={0}, current_cycle=2, total_cycles=2)
+        keyboard = stock_mix_mode_keyboard(plan)
         texts = _keyboard_texts(keyboard)
+        callbacks = _keyboard_callbacks(keyboard)
 
+        self.assertIn("Сделать сейчас", texts)
         self.assertIn("🕘 Записать как уже скормленные", texts)
+        self.assertIn("stock:mix_mode:now", callbacks)
+        self.assertIn("stock:mix_mode:already_fed", callbacks)
 
     def test_mix_unavailable_keyboard_allows_already_fed_record(self) -> None:
         plan = SimpleNamespace(mix_count=3, grain_base_code="wheat", max_mix_count=2)

@@ -11,9 +11,12 @@ from app.domain import DailyWeather, EggEntry, EggStats, HenLayingExclusion
 from app.keyboards.eggs import (
     egg_entries_keyboard,
     egg_entry_edit_keyboard,
+    egg_entry_mode_keyboard,
     eggs_back_keyboard,
     eggs_cancel_keyboard,
     egg_entry_date_keyboard,
+    egg_multi_day_confirm_keyboard,
+    egg_multi_day_period_keyboard,
     eggs_history_keyboard,
     eggs_menu_keyboard,
     exclusion_reason_keyboard,
@@ -29,6 +32,12 @@ router = Router()
 
 class EggEntryFlow(StatesGroup):
     count = State()
+
+
+class EggMultiDayFlow(StatesGroup):
+    total_count = State()
+    days_count = State()
+    confirm = State()
 
 
 class EggEditFlow(StatesGroup):
@@ -54,6 +63,16 @@ async def eggs_menu(callback: CallbackQuery, state: FSMContext, egg_service: Egg
 
 @router.callback_query(F.data == "eggs:add")
 async def eggs_add(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.message.answer(
+        "Какой сбор записать?",
+        reply_markup=egg_entry_mode_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "eggs:add_regular")
+async def eggs_add_regular(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await callback.message.answer(
         "За какой день добавить сбор яиц?",
@@ -98,6 +117,120 @@ async def eggs_count(message: Message, state: FSMContext, egg_service: EggServic
         f"Несушек в расчете: {entry.active_hens_count} из {entry.total_hens_count}",
         reply_markup=eggs_menu_keyboard(),
     )
+
+
+@router.callback_query(F.data == "eggs:add_multi")
+async def eggs_add_multi(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await state.set_state(EggMultiDayFlow.total_count)
+    await callback.message.answer(
+        "Введите общее количество собранных яиц.",
+        reply_markup=eggs_cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.message(EggMultiDayFlow.total_count)
+async def eggs_multi_day_total(message: Message, state: FSMContext) -> None:
+    try:
+        total = int((message.text or "").strip())
+        if total <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("Введите целое количество яиц больше нуля.", reply_markup=eggs_cancel_keyboard())
+        return
+    await state.update_data(multi_day_total=total)
+    await message.answer(
+        "Как определить период для распределения?",
+        reply_markup=egg_multi_day_period_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "eggs:multi_days:manual")
+async def eggs_multi_day_manual(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    if "multi_day_total" not in data:
+        await callback.answer("Начните ввод сбора заново.", show_alert=True)
+        return
+    await state.set_state(EggMultiDayFlow.days_count)
+    await callback.message.answer(
+        "За сколько дней распределить сбор?\n\nВведите целое число от 2 до 30.",
+        reply_markup=eggs_cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "eggs:multi_days:auto")
+async def eggs_multi_day_auto(callback: CallbackQuery, state: FSMContext, egg_service: EggService) -> None:
+    data = await state.get_data()
+    try:
+        total = int(data["multi_day_total"])
+        distribution = egg_service.preview_multi_day_distribution(
+            callback.from_user.id,
+            total,
+            use_empty_days=True,
+        )
+    except (KeyError, ValueError) as exc:
+        await state.set_state(EggMultiDayFlow.days_count)
+        await callback.message.answer(
+            f"{exc}\n\nВведите количество дней вручную.",
+            reply_markup=eggs_cancel_keyboard(),
+        )
+        await callback.answer()
+        return
+    await _store_multi_day_distribution(state, distribution, auto_period=True)
+    await state.set_state(EggMultiDayFlow.confirm)
+    await callback.message.answer(
+        _format_multi_day_preview(total, distribution, auto_period=True),
+        reply_markup=egg_multi_day_confirm_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.message(EggMultiDayFlow.days_count)
+async def eggs_multi_day_days(message: Message, state: FSMContext, egg_service: EggService) -> None:
+    try:
+        days = int((message.text or "").strip())
+        data = await state.get_data()
+        total = int(data["multi_day_total"])
+        distribution = egg_service.preview_multi_day_distribution(
+            message.from_user.id,
+            total,
+            days=days,
+        )
+    except (KeyError, ValueError) as exc:
+        await message.answer(str(exc), reply_markup=eggs_cancel_keyboard())
+        return
+    await _store_multi_day_distribution(state, distribution, auto_period=False)
+    await state.set_state(EggMultiDayFlow.confirm)
+    await message.answer(
+        _format_multi_day_preview(total, distribution, auto_period=False),
+        reply_markup=egg_multi_day_confirm_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "eggs:multi_days:confirm")
+async def eggs_multi_day_confirm(callback: CallbackQuery, state: FSMContext, egg_service: EggService) -> None:
+    data = await state.get_data()
+    try:
+        total = int(data["multi_day_total"])
+        distribution = _multi_day_distribution_from_state(data)
+        entries = egg_service.record_multi_day_collection(
+            callback.from_user.id,
+            total,
+            distribution,
+            auto_period=bool(data.get("multi_day_auto")),
+        )
+    except (KeyError, ValueError) as exc:
+        await callback.message.answer(str(exc), reply_markup=eggs_menu_keyboard())
+        await callback.answer()
+        return
+    await state.clear()
+    await callback.message.answer(
+        _format_multi_day_created(total, entries),
+        reply_markup=eggs_menu_keyboard(),
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "eggs:stats")
@@ -418,6 +551,59 @@ def _parse_egg_manual_date(value: str, *, egg_service: EggService) -> date:
     if cleaned in {"вчера", "yesterday"}:
         return egg_service.current_date() - timedelta(days=1)
     return parse_user_date(value)
+
+
+async def _store_multi_day_distribution(
+    state: FSMContext,
+    distribution: list[tuple[date, int]],
+    *,
+    auto_period: bool,
+) -> None:
+    await state.update_data(
+        multi_day_distribution=[(entry_date.isoformat(), eggs_count) for entry_date, eggs_count in distribution],
+        multi_day_auto=auto_period,
+    )
+
+
+def _multi_day_distribution_from_state(data: dict) -> list[tuple[date, int]]:
+    raw_distribution = data.get("multi_day_distribution")
+    if not isinstance(raw_distribution, list) or not raw_distribution:
+        raise ValueError("Распределение не найдено. Начните ввод сбора заново.")
+    distribution: list[tuple[date, int]] = []
+    for item in raw_distribution:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            raise ValueError("Распределение повреждено. Начните ввод сбора заново.")
+        distribution.append((date.fromisoformat(str(item[0])), int(item[1])))
+    return distribution
+
+
+def _format_multi_day_preview(
+    total: int,
+    distribution: list[tuple[date, int]],
+    *,
+    auto_period: bool,
+) -> str:
+    lines = [
+        f"Распределить {total} яиц за {len(distribution)} дн.:",
+        "",
+    ]
+    lines.extend(f"{entry_date.isoformat()}: {eggs_count} шт." for entry_date, eggs_count in distribution)
+    if auto_period:
+        lines.extend(["", "Период рассчитан по средней яйценоскости и ближайшим пустым дням."])
+    lines.extend(["", "Проверьте распределение перед записью."])
+    return "\n".join(lines)
+
+
+def _format_multi_day_created(total: int, entries: list[EggEntry]) -> str:
+    lines = [
+        "Сбор за несколько дней записан.",
+        "",
+        f"Всего: {total} яиц",
+        f"Период: {len(entries)} дн.",
+        "Записи добавлены:",
+    ]
+    lines.extend(f"{entry.entry_date.isoformat()}: {entry.eggs_count} шт." for entry in entries)
+    return "\n".join(lines)
 
 
 async def _answer_eggs_menu(message: Message, user_id: int, egg_service: EggService) -> None:
