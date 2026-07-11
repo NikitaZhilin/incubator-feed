@@ -1,4 +1,5 @@
 from datetime import date, datetime, timezone
+import re
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,6 +8,7 @@ from app.config import AppConfig
 from app.handlers.common import build_share_text, faq_keyboard, format_faq, format_web_unavailable_text
 from app.handlers.incubation import _adjust_number, _user_today
 from app.handlers.feeds import _format_flock_reports
+from app.services.help_content import HELP_CONTENT_DIR, HELP_TOPICS
 from app.handlers.settings import (
     _format_sections,
     _format_settings,
@@ -51,6 +53,7 @@ from app.keyboards.incubation import (
     number_adjust_keyboard,
 )
 from app.keyboards.menu import (
+    about_bot_keyboard,
     daily_summary_keyboard,
     incubation_menu_keyboard,
     main_menu_keyboard,
@@ -160,6 +163,22 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("назначьте стаду готовую", flocks_text)
         self.assertIn("сколько это стадо съедает в день", flocks_text)
 
+    def test_faq_topics_are_backed_by_markdown_files(self) -> None:
+        for key, topic in HELP_TOPICS.items():
+            with self.subTest(topic=key):
+                path = HELP_CONTENT_DIR / topic.filename
+                self.assertTrue(path.exists())
+                self.assertGreater(len(path.read_text(encoding="utf-8").strip()), 20)
+
+    def test_faq_buttons_have_registered_file_topics(self) -> None:
+        keyboard_dir = Path(__file__).resolve().parents[1] / "app" / "keyboards"
+        topic_keys: set[str] = set()
+        for path in keyboard_dir.glob("*.py"):
+            topic_keys.update(re.findall(r'callback_data="faq:([a-z_]+)"', path.read_text(encoding="utf-8")))
+
+        self.assertGreater(len(topic_keys), 10)
+        self.assertEqual(set(), topic_keys - set(HELP_TOPICS))
+
     def test_adjust_number_respects_minimum(self) -> None:
         self.assertEqual(_adjust_number(1, "-10", min_value=1), 1)
 
@@ -214,6 +233,7 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("Коммит: abcdef123456", text)
         self.assertIn("сайт пока не подключен", text)
         self.assertIn("https://github.com/example/project", text)
+        self.assertIn("Документация:", text)
         self.assertIn("- Исправлен расчет смеси", text)
         self.assertIn("Бот находится в тестировании", text)
 
@@ -242,6 +262,16 @@ class HandlerHelpersTest(unittest.TestCase):
 
         self.assertIn("сайт настроен", text)
         self.assertIn("https://incubator.example.test", text)
+
+    def test_about_keyboard_contains_documentation_link(self) -> None:
+        keyboard = about_bot_keyboard(
+            github_url="https://github.com/example/project",
+            changelog_url="https://github.com/example/project/blob/main/docs/CHANGELOG.md",
+            docs_url="https://github.com/example/project/tree/main/docs",
+        )
+
+        self.assertIn("📚 Документация", _keyboard_texts(keyboard))
+        self.assertIn("https://github.com/example/project/tree/main/docs", _keyboard_urls(keyboard))
 
     def test_settings_summary_is_russian_and_command_free(self) -> None:
         text = _format_settings(

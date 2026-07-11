@@ -22,6 +22,7 @@ class WebConfig:
     release_commit: str
     github_url: str
     changelog_url: str
+    docs_url: str = "https://github.com/NikitaZhilin/incubator-feed/tree/main/docs"
     timezone_name: str = "Europe/Moscow"
     public_url: str = ""
     link_token: str = ""
@@ -43,6 +44,7 @@ def load_web_config() -> WebConfig:
 
     default_github_url = "https://github.com/NikitaZhilin/incubator-feed"
     default_changelog_url = "https://github.com/NikitaZhilin/incubator-feed/blob/main/docs/CHANGELOG.md"
+    default_docs_url = "https://github.com/NikitaZhilin/incubator-feed/tree/main/docs"
     release_version = os.getenv("RELEASE_VERSION", os.getenv("APP_VERSION", "")).strip()
     if not release_version and environment == "prod":
         release_version = APP_VERSION
@@ -68,6 +70,7 @@ def load_web_config() -> WebConfig:
         github_url=os.getenv("GITHUB_URL", default_github_url).strip() or default_github_url,
         changelog_url=os.getenv("CHANGELOG_URL", default_changelog_url).strip()
         or default_changelog_url,
+        docs_url=os.getenv("DOCS_URL", default_docs_url).strip() or default_docs_url,
         timezone_name=os.getenv("BOT_TIMEZONE", "Europe/Moscow").strip() or "Europe/Moscow",
         public_url=os.getenv("WEB_PUBLIC_URL", "").strip(),
         link_token=os.getenv("WEB_LINK_TOKEN", "").strip(),

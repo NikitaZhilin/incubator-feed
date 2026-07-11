@@ -26,6 +26,7 @@ class AppConfig:
     release_importance: str
     github_url: str
     changelog_url: str
+    docs_url: str = "https://github.com/NikitaZhilin/incubator-feed/tree/main/docs"
     web_public_url: str = ""
     web_link_token: str = ""
     telegram_proxy_url: str = ""
@@ -150,6 +151,7 @@ def load_config() -> AppConfig:
 
     default_github_url = "https://github.com/NikitaZhilin/incubator-feed"
     default_changelog_url = "https://github.com/NikitaZhilin/incubator-feed/blob/main/docs/CHANGELOG.md"
+    default_docs_url = "https://github.com/NikitaZhilin/incubator-feed/tree/main/docs"
 
     return AppConfig(
         bot_token=read_bot_token(root, environment=environment),
@@ -172,6 +174,7 @@ def load_config() -> AppConfig:
         github_url=os.getenv("GITHUB_URL", default_github_url).strip() or default_github_url,
         changelog_url=os.getenv("CHANGELOG_URL", default_changelog_url).strip()
         or default_changelog_url,
+        docs_url=os.getenv("DOCS_URL", default_docs_url).strip() or default_docs_url,
         web_public_url=os.getenv("WEB_PUBLIC_URL", "").strip(),
         web_link_token=os.getenv("WEB_LINK_TOKEN", "").strip(),
         telegram_proxy_url=os.getenv("TELEGRAM_PROXY_URL", "").strip(),

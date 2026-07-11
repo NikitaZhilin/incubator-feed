@@ -80,6 +80,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             "commit": current.release_commit or None,
             "github_url": current.github_url,
             "changelog_url": current.changelog_url,
+            "docs_url": current.docs_url,
         }
 
 
@@ -1030,6 +1031,7 @@ def _build_about_payload(config: WebConfig, *, user_id: int | None = None) -> di
             "commit": config.release_commit or None,
             "github_url": config.github_url,
             "changelog_url": config.changelog_url,
+            "docs_url": config.docs_url,
         },
     }
 
@@ -1661,7 +1663,8 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
   </p>
   <p>
     <a href="{escape(config.github_url)}">GitHub</a> ·
-    <a href="{escape(config.changelog_url)}">История изменений</a>
+    <a href="{escape(config.changelog_url)}">История изменений</a> ·
+    <a href="{escape(config.docs_url)}">Документация</a>
   </p>
 
   <h2>Runtime-сервисы</h2>
@@ -2516,7 +2519,8 @@ def _render_about_page(config: WebConfig, payload: dict, *, auth_token: str = ""
   <h2>Ссылки</h2>
   <p>
     <a href="{escape(str(release.get("github_url") or config.github_url))}">GitHub</a> ·
-    <a href="{escape(str(release.get("changelog_url") or config.changelog_url))}">История изменений</a>
+    <a href="{escape(str(release.get("changelog_url") or config.changelog_url))}">История изменений</a> ·
+    <a href="{escape(str(release.get("docs_url") or config.docs_url))}">Документация</a>
   </p>
 
   <h2>Настройки хозяйства</h2>

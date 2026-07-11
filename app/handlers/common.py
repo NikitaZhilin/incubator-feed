@@ -9,6 +9,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from app.config import AppConfig
 from app.keyboards.menu import daily_summary_keyboard, main_menu_keyboard, web_choice_keyboard
 from app.services.eggs import EggService
+from app.services.help_content import HELP_TOPICS, format_help_topic
 from app.services.incubation import IncubationService
 from app.services.poultry_advisor import PoultryAdvisorService
 from app.services.reminders import ReminderRunner
@@ -19,7 +20,8 @@ from app.version import APP_VERSION
 router = Router()
 
 
-FAQ_SECTIONS = {
+# Deprecated inline copy; runtime FAQ content is loaded from app/content/help/*.md.
+_UNUSED_INLINE_FAQ_SECTIONS = {
     "main": {
         "title": "❓ FAQ: главное меню",
         "back": ("🏠 Главное меню", "menu:home"),
@@ -484,8 +486,7 @@ async def _get_bot_username(message: Message) -> str | None:
 
 
 def format_faq(section: str) -> str:
-    data = FAQ_SECTIONS[section]
-    return f"{data['title']}\n\n{data['text']}"
+    return format_help_topic(section)
 
 
 def format_web_unavailable_text(*, is_admin: bool = False) -> str:
@@ -513,7 +514,8 @@ def _local_now_from_settings(settings: dict, now_utc: datetime) -> datetime:
 
 
 def faq_keyboard(section: str) -> InlineKeyboardMarkup:
-    label, callback_data = FAQ_SECTIONS[section]["back"]
+    topic = HELP_TOPICS[section]
+    label, callback_data = topic.back_label, topic.back_callback
     rows = [[InlineKeyboardButton(text=label, callback_data=callback_data)]]
     if callback_data != "menu:home":
         rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")])

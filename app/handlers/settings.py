@@ -130,6 +130,7 @@ async def settings_about(callback: CallbackQuery, config: AppConfig) -> None:
         reply_markup=about_bot_keyboard(
             github_url=config.github_url,
             changelog_url=config.changelog_url,
+            docs_url=config.docs_url,
             web_url=config.web_open_url,
             miniapp_url=config.miniapp_open_url,
         ),
@@ -322,6 +323,9 @@ def format_about_bot(config: AppConfig) -> str:
             "",
             "История изменений:",
             config.changelog_url,
+            "",
+            "Документация:",
+            config.docs_url,
         ]
     )
     if notes:

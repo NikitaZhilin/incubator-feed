@@ -162,6 +162,7 @@ def about_bot_keyboard(
     *,
     github_url: str,
     changelog_url: str,
+    docs_url: str = "",
     web_url: str = "",
     miniapp_url: str = "",
 ) -> InlineKeyboardMarkup:
@@ -171,6 +172,8 @@ def about_bot_keyboard(
             InlineKeyboardButton(text="📝 История изменений", url=changelog_url),
         ],
     ]
+    if docs_url:
+        rows.append([InlineKeyboardButton(text="📚 Документация", url=docs_url)])
     rows.extend(_web_choice_rows(web_url=web_url, miniapp_url=miniapp_url) or [[_web_button(web_url)]])
     rows.extend(
         [

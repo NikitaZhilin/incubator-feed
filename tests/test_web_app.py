@@ -42,6 +42,7 @@ class WebAppTest(unittest.TestCase):
             release_commit="abc123",
             github_url="https://github.com/example/project",
             changelog_url="https://github.com/example/project/blob/main/docs/CHANGELOG.md",
+            docs_url="https://github.com/example/project/tree/main/docs",
             link_token="link-token",
             release_notes="Добавлена web-страница смеси; Добавлен экран о боте",
             release_importance="minor",
@@ -231,6 +232,7 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(payload["environment"], "test")
         self.assertEqual(payload["release_importance"], "minor")
         self.assertEqual(payload["release_notes"], ["Добавлена web-страница смеси", "Добавлен экран о боте"])
+        self.assertEqual(payload["docs_url"], "https://github.com/example/project/tree/main/docs")
 
     def test_index_returns_html_summary(self) -> None:
         self._write_ok_heartbeats()
@@ -819,10 +821,12 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(payload["settings"]["timezone"], "Europe/Moscow")
         self.assertEqual(payload["runtime"]["status"], "ok")
         self.assertTrue(payload["runtime"]["heartbeats"])
+        self.assertEqual(payload["release"]["docs_url"], "https://github.com/example/project/tree/main/docs")
         self.assertEqual(page_response.status_code, 200)
         self.assertIn("О боте", page_response.text)
         self.assertIn("Добавлена web-страница смеси", page_response.text)
         self.assertIn("GitHub", page_response.text)
+        self.assertIn("Документация", page_response.text)
 
     def test_sections_can_be_updated_from_web_form(self) -> None:
         self._write_ok_heartbeats()

@@ -44,7 +44,7 @@ The workflow updates the project on the VPS, writes `.env.prod` from GitHub
 Secrets, runs migrations, rebuilds the Docker image, and starts the bot as a
 Docker container with `--restart unless-stopped`.
 
-Regular deploys are silent for users. Version, GitHub and changelog links are
+Regular deploys are silent for users. Version, GitHub, documentation and changelog links are
 available in Telegram under `Настройки -> О боте`. A release notice is sent only
 when it is explicitly enabled. `medium` sends a short "bot was updated and
 restarted" message with the main menu; `major` and `critical` also include
@@ -130,8 +130,8 @@ docker run --rm --env-file .env.prod \
 ## What reaches users after deploy
 
 Regular push to `main` deploys code to the VPS but should not distract users.
-The bot updates `Настройки -> О боте` with version, GitHub/changelog links,
-deploy time and release notes.
+The bot updates `Настройки -> О боте` with version, GitHub/documentation/changelog links,
+deploy time and release notes. The documentation link is controlled by `DOCS_URL`.
 
 Use a user-visible release notice only for changes that users should see
 immediately:

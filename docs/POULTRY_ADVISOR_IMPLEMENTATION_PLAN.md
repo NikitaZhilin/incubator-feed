@@ -861,21 +861,15 @@ poultry_advisor_service: PoultryAdvisorService | None = None
 
 ## 17. FAQ и справка
 
-Файл:
+Текущая справка бота вынесена из обработчиков в отдельные markdown-файлы:
 
 ```text
-app/handlers/common.py
+app/services/help_content.py
+app/content/help/poultry_advisor.md
 ```
 
-Добавить FAQ-секцию:
-
-```python
-"poultry_advisor": {
-    "title": "FAQ: птицевод",
-    "back": ("⬅️ К птицеводу", "advisor:menu"),
-    "text": "..."
-}
-```
+`app/services/help_content.py` хранит реестр тем, заголовки и кнопки возврата.
+Текст раздела `Птицевод` редактируется в `app/content/help/poultry_advisor.md`.
 
 Содержание:
 
@@ -884,11 +878,11 @@ app/handlers/common.py
 - для расчетов нужны стада, смесь, несушки и записи яиц;
 - медицинские вопросы не являются диагнозом.
 
-Добавить кнопку FAQ в `advisor_menu_keyboard`.
+Кнопка FAQ в `advisor_menu_keyboard` ведет на тему `poultry_advisor`.
 
 Тест:
 
-- `test_faq_has_poultry_advisor_section`.
+- `test_faq_topics_are_backed_by_markdown_files`.
 
 ## 18. Тестовая стратегия
 
