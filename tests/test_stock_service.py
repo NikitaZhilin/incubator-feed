@@ -88,8 +88,9 @@ class StockServiceTest(unittest.TestCase):
 
         estimate = self.service.estimate_item(existing.item, now=created_at)
         history = self.service.list_history(1, limit=20)
-        write_off = history[0]
-        output = history[1]
+        mix_transactions = [item for item in history if item.related_mix_id is not None]
+        write_off = next(item for item in mix_transactions if item.type == "write_off")
+        output = next(item for item in mix_transactions if item.type == "mix_output")
         mix = self.service.stock.get_mix_production(write_off.related_mix_id)
 
         self.assertEqual(round(estimate.remaining_kg, 3), 12)

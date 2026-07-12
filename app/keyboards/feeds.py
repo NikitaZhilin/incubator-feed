@@ -343,20 +343,44 @@ def stock_mix_mode_keyboard(plan) -> InlineKeyboardMarkup:
     )
 
 
-def stock_mix_unavailable_keyboard(plan) -> InlineKeyboardMarkup:
-    total = int(plan.mix_count)
-    base_keyboard = stock_mix_quick_keyboard(plan.grain_base_code, int(plan.max_mix_count))
+def stock_mix_entry_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="Сделать новый замес сейчас", callback_data="stock:mix_flow:now")],
+            [
+                InlineKeyboardButton(
+                    text="Записать прошлый замес как уже скормленный",
+                    callback_data="stock:mix_flow:already_fed",
+                )
+            ],
+            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:mix")],
+            [
+                InlineKeyboardButton(text="⬅️ К складу", callback_data="stock:menu"),
+                InlineKeyboardButton(text="🌾 К кормам", callback_data="feeds:menu"),
+            ],
+        ]
+    )
+
+
+def stock_mix_unavailable_keyboard(plan, *, record_mode: str | None = None) -> InlineKeyboardMarkup:
+    total = int(plan.mix_count)
+    rows = []
+    if record_mode != "now":
+        rows.append(
             [
                 InlineKeyboardButton(
                     text=_already_fed_mix_button_text(total),
                     callback_data=f"stock:mix_fed_start:{plan.grain_base_code}:{plan.mix_count:g}",
                 )
-            ],
-            *base_keyboard.inline_keyboard,
-        ],
+            ]
+        )
+    base_keyboard = stock_mix_quick_keyboard(
+        plan.grain_base_code,
+        int(plan.max_mix_count),
+        record_mode=record_mode or "now",
     )
+    rows.extend(base_keyboard.inline_keyboard)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def stock_mix_fed_date_keyboard() -> InlineKeyboardMarkup:
@@ -384,36 +408,47 @@ def _format_mix_parts(parts: float) -> str:
     return f"{parts:g} {unit}"
 
 
-def stock_mix_quick_keyboard(grain_base: str, max_mix_count: int) -> InlineKeyboardMarkup:
+def stock_mix_quick_keyboard(
+    grain_base: str,
+    max_mix_count: int,
+    *,
+    record_mode: str = "now",
+) -> InlineKeyboardMarkup:
     rows = []
-    quick_limit = min(max_mix_count, 9)
+    available_limit = max_mix_count
+    if record_mode == "already_fed":
+        available_limit = max(max_mix_count, 9)
+    quick_limit = min(available_limit, 9)
     for start in range(1, quick_limit + 1, 3):
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"Рассчитать {count}",
+                    text=_mix_quick_button_text(count, record_mode=record_mode),
                     callback_data=f"stock:mix_plan:{grain_base}:{count}",
                 )
                 for count in range(start, min(start + 3, quick_limit + 1))
             ]
         )
-    if max_mix_count > quick_limit:
+    if available_limit > quick_limit:
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"Рассчитать максимум ({max_mix_count})",
-                    callback_data=f"stock:mix_plan:{grain_base}:{max_mix_count}",
+                    text=_mix_quick_button_text(available_limit, record_mode=record_mode, maximum=True),
+                    callback_data=f"stock:mix_plan:{grain_base}:{available_limit}",
                 )
             ]
         )
+    wheat_label = "✓ Пшеница" if grain_base == "wheat" else "Пшеница"
+    layer_grain_label = "✓ Зерносмесь" if grain_base == "layer_grain_mix" else "Зерносмесь"
     rows.append(
         [
-            InlineKeyboardButton(text="Пшеница", callback_data="stock:mix_grain:wheat"),
-            InlineKeyboardButton(text="Зерносмесь", callback_data="stock:mix_grain:layer_grain_mix"),
+            InlineKeyboardButton(text=wheat_label, callback_data="stock:mix_grain:wheat"),
+            InlineKeyboardButton(text=layer_grain_label, callback_data="stock:mix_grain:layer_grain_mix"),
         ]
     )
-    rows.append([InlineKeyboardButton(text="Ввести вручную", callback_data=f"stock:mix_manual:{grain_base}")])
+    rows.append([InlineKeyboardButton(text="Ввести количество", callback_data=f"stock:mix_manual:{grain_base}")])
     rows.append([InlineKeyboardButton(text="❓ FAQ", callback_data="faq:mix")])
+    rows.append([InlineKeyboardButton(text="⬅️ К выбору режима", callback_data="stock:mix")])
     rows.append(
         [
             InlineKeyboardButton(text="⬅️ К складу", callback_data="stock:menu"),
@@ -421,6 +456,24 @@ def stock_mix_quick_keyboard(grain_base: str, max_mix_count: int) -> InlineKeybo
         ]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _mix_quick_button_text(count: int, *, record_mode: str, maximum: bool = False) -> str:
+    if record_mode == "already_fed":
+        if maximum:
+            return f"Списать максимум ({count})"
+        return f"Списать {count} {_mix_cycle_word(count)}"
+    if maximum:
+        return f"Сделать максимум ({count})"
+    return f"Сделать {count} {_mix_cycle_word(count)}"
+
+
+def _mix_cycle_word(count: int) -> str:
+    if count % 10 == 1 and count % 100 != 11:
+        return "замес"
+    if count % 10 in {2, 3, 4} and count % 100 not in {12, 13, 14}:
+        return "замеса"
+    return "замесов"
 
 
 def stock_assign_groups_keyboard(groups) -> InlineKeyboardMarkup:

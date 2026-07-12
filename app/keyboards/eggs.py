@@ -105,6 +105,19 @@ def egg_entry_date_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def egg_multi_day_collection_date_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Сегодня", callback_data="eggs:multi_date:today"),
+                InlineKeyboardButton(text="Вчера", callback_data="eggs:multi_date:yesterday"),
+            ],
+            [InlineKeyboardButton(text="Ввести дату", callback_data="eggs:multi_date:manual")],
+            [InlineKeyboardButton(text="Отмена", callback_data="eggs:menu")],
+        ]
+    )
+
+
 def egg_multi_day_period_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[

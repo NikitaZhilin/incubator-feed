@@ -15,6 +15,7 @@ from app.keyboards.eggs import (
     eggs_back_keyboard,
     eggs_cancel_keyboard,
     egg_entry_date_keyboard,
+    egg_multi_day_collection_date_keyboard,
     egg_multi_day_confirm_keyboard,
     egg_multi_day_period_keyboard,
     eggs_history_keyboard,
@@ -35,6 +36,7 @@ class EggEntryFlow(StatesGroup):
 
 
 class EggMultiDayFlow(StatesGroup):
+    collection_date = State()
     total_count = State()
     days_count = State()
     confirm = State()
@@ -122,12 +124,46 @@ async def eggs_count(message: Message, state: FSMContext, egg_service: EggServic
 @router.callback_query(F.data == "eggs:add_multi")
 async def eggs_add_multi(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await state.set_state(EggMultiDayFlow.total_count)
+    await state.set_state(EggMultiDayFlow.collection_date)
     await callback.message.answer(
-        "Введите общее количество собранных яиц.",
-        reply_markup=eggs_cancel_keyboard(),
+        "Когда фактически собрали эти яйца?",
+        reply_markup=egg_multi_day_collection_date_keyboard(),
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("eggs:multi_date:"))
+async def eggs_multi_day_collection_date(callback: CallbackQuery, state: FSMContext, egg_service: EggService) -> None:
+    choice = str(callback.data).rsplit(":", 1)[1]
+    if choice == "manual":
+        await state.set_state(EggMultiDayFlow.collection_date)
+        await callback.message.answer(
+            f"Введите дату фактического сбора: {DATE_FORMAT_HINT}.",
+            reply_markup=eggs_cancel_keyboard(),
+        )
+        await callback.answer()
+        return
+    try:
+        collection_date = _egg_entry_date_from_choice(choice, today=egg_service.current_date())
+    except ValueError:
+        await callback.answer("Дата не найдена.", show_alert=True)
+        return
+    await _set_multi_day_collection_date(callback.message, state, collection_date)
+    await callback.answer()
+
+
+@router.message(EggMultiDayFlow.collection_date)
+async def eggs_multi_day_collection_date_manual(
+    message: Message,
+    state: FSMContext,
+    egg_service: EggService,
+) -> None:
+    try:
+        collection_date = _parse_egg_manual_date(message.text or "", egg_service=egg_service)
+    except ValueError as exc:
+        await message.answer(str(exc), reply_markup=eggs_cancel_keyboard())
+        return
+    await _set_multi_day_collection_date(message, state, collection_date)
 
 
 @router.message(EggMultiDayFlow.total_count)
@@ -165,9 +201,11 @@ async def eggs_multi_day_auto(callback: CallbackQuery, state: FSMContext, egg_se
     data = await state.get_data()
     try:
         total = int(data["multi_day_total"])
+        collection_date = _multi_day_collection_date_from_state(data, egg_service)
         distribution = egg_service.preview_multi_day_distribution(
             callback.from_user.id,
             total,
+            today=collection_date,
             use_empty_days=True,
         )
     except (KeyError, ValueError) as exc:
@@ -181,7 +219,7 @@ async def eggs_multi_day_auto(callback: CallbackQuery, state: FSMContext, egg_se
     await _store_multi_day_distribution(state, distribution, auto_period=True)
     await state.set_state(EggMultiDayFlow.confirm)
     await callback.message.answer(
-        _format_multi_day_preview(total, distribution, auto_period=True),
+        _format_multi_day_preview(total, distribution, auto_period=True, collection_date=collection_date),
         reply_markup=egg_multi_day_confirm_keyboard(),
     )
     await callback.answer()
@@ -193,10 +231,12 @@ async def eggs_multi_day_days(message: Message, state: FSMContext, egg_service: 
         days = int((message.text or "").strip())
         data = await state.get_data()
         total = int(data["multi_day_total"])
+        collection_date = _multi_day_collection_date_from_state(data, egg_service)
         distribution = egg_service.preview_multi_day_distribution(
             message.from_user.id,
             total,
             days=days,
+            today=collection_date,
         )
     except (KeyError, ValueError) as exc:
         await message.answer(str(exc), reply_markup=eggs_cancel_keyboard())
@@ -204,7 +244,7 @@ async def eggs_multi_day_days(message: Message, state: FSMContext, egg_service: 
     await _store_multi_day_distribution(state, distribution, auto_period=False)
     await state.set_state(EggMultiDayFlow.confirm)
     await message.answer(
-        _format_multi_day_preview(total, distribution, auto_period=False),
+        _format_multi_day_preview(total, distribution, auto_period=False, collection_date=collection_date),
         reply_markup=egg_multi_day_confirm_keyboard(),
     )
 
@@ -553,6 +593,22 @@ def _parse_egg_manual_date(value: str, *, egg_service: EggService) -> date:
     return parse_user_date(value)
 
 
+async def _set_multi_day_collection_date(message: Message, state: FSMContext, collection_date: date) -> None:
+    await state.update_data(multi_day_collection_date=collection_date.isoformat())
+    await state.set_state(EggMultiDayFlow.total_count)
+    await message.answer(
+        f"Введите общее количество собранных яиц.\n\nДата фактического сбора: {collection_date.isoformat()}.",
+        reply_markup=eggs_cancel_keyboard(),
+    )
+
+
+def _multi_day_collection_date_from_state(data: dict, egg_service: EggService) -> date:
+    raw_date = data.get("multi_day_collection_date")
+    if not raw_date:
+        return egg_service.current_date()
+    return date.fromisoformat(str(raw_date))
+
+
 async def _store_multi_day_distribution(
     state: FSMContext,
     distribution: list[tuple[date, int]],
@@ -582,9 +638,10 @@ def _format_multi_day_preview(
     distribution: list[tuple[date, int]],
     *,
     auto_period: bool,
+    collection_date: date,
 ) -> str:
     lines = [
-        f"Распределить {total} яиц за {len(distribution)} дн.:",
+        f"Сбор от {collection_date.isoformat()}: распределить {total} яиц за {len(distribution)} дн.:",
         "",
     ]
     lines.extend(f"{entry_date.isoformat()}: {eggs_count} шт." for entry_date, eggs_count in distribution)

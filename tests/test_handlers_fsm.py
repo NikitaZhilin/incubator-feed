@@ -17,6 +17,7 @@ from app.handlers.eggs import (
     eggs_edit_date_save,
     eggs_edit_date_start,
     eggs_multi_day_auto,
+    eggs_multi_day_collection_date,
     eggs_multi_day_confirm,
     eggs_multi_day_days,
     eggs_multi_day_manual,
@@ -42,6 +43,7 @@ from app.handlers.feeds import (
     stock_mix_check_all,
     stock_mix_confirm,
     stock_mix_cycle_done,
+    stock_mix_flow_start,
     stock_mix_mode_already_fed,
     stock_mix_mode_now,
     stock_mix_plan,
@@ -211,8 +213,16 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
 
         await eggs_add_multi(add_callback, state)
 
+        self.assertEqual(state.state, EggMultiDayFlow.collection_date)
+        self.assertIn("Когда фактически собрали", add_callback.message.answers[-1][0])
+
+        with patch.object(self.egg_service, "current_date", return_value=date(2026, 5, 27)):
+            date_callback = FakeCallback("eggs:multi_date:today")
+            await eggs_multi_day_collection_date(date_callback, state, self.egg_service)
+
         self.assertEqual(state.state, EggMultiDayFlow.total_count)
-        self.assertIn("общее количество", add_callback.message.answers[-1][0])
+        self.assertEqual(state.data["multi_day_collection_date"], "2026-05-27")
+        self.assertIn("общее количество", date_callback.message.answers[-1][0])
 
         total_message = FakeMessage("20")
         await eggs_multi_day_total(total_message, state)
@@ -226,11 +236,11 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.state, EggMultiDayFlow.days_count)
         self.assertIn("За сколько дней", manual_callback.message.answers[-1][0])
 
-        with patch.object(self.egg_service, "current_date", return_value=date(2026, 5, 27)):
-            days_message = FakeMessage("3")
-            await eggs_multi_day_days(days_message, state, self.egg_service)
+        days_message = FakeMessage("3")
+        await eggs_multi_day_days(days_message, state, self.egg_service)
 
         self.assertEqual(state.state, EggMultiDayFlow.confirm)
+        self.assertIn("Сбор от 2026-05-27", days_message.answers[-1][0])
         self.assertIn("2026-05-27: 7", days_message.answers[-1][0])
         self.assertIn("2026-05-26: 7", days_message.answers[-1][0])
         self.assertIn("2026-05-25: 6", days_message.answers[-1][0])
@@ -254,6 +264,7 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
             await eggs_multi_day_auto(callback, state, self.egg_service)
 
         self.assertEqual(state.state, EggMultiDayFlow.confirm)
+        self.assertIn("Сбор от 2026-05-27", callback.message.answers[-1][0])
         self.assertIn("2026-05-27: 7", callback.message.answers[-1][0])
         self.assertIn("2026-05-26: 7", callback.message.answers[-1][0])
         self.assertIn("2026-05-25: 6", callback.message.answers[-1][0])
@@ -485,6 +496,45 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Кукуруза: 3.5 части", mode_callback.message.edits[-1][0])
         self.assertIn("Пшеница: 2.5 части", mode_callback.message.edits[-1][0])
         self.assertIn("Текущий замес: 1 из 2", mode_callback.message.edits[-1][0])
+
+    async def test_current_mix_flow_opens_checklist_without_extra_mode_choice(self) -> None:
+        for name in [
+            "Кукуруза",
+            "Пшеница",
+            "Ячмень",
+            "Комбикорм",
+            "Мясокостная мука",
+            "Рыбная мука",
+            "Ракушка",
+            "Премикс",
+        ]:
+            self.stock_service.add_purchase(
+                user_id=1,
+                name=name,
+                kind="ingredient",
+                amount_kg=100,
+            )
+        state = FakeState()
+
+        await stock_mix_flow_start(FakeCallback("stock:mix_flow:now"), state, self.stock_service)
+        callback = FakeCallback("stock:mix_plan:wheat:2")
+        await stock_mix_plan(callback, state, self.stock_service)
+
+        self.assertEqual(callback.message.answers, [])
+        self.assertIn("Формула на 1 замес", callback.message.edits[-1][0])
+        self.assertIn("Текущий замес: 1 из 2", callback.message.edits[-1][0])
+        self.assertNotIn("Как записать", callback.message.edits[-1][0])
+
+    async def test_already_fed_mix_flow_goes_to_date_without_checklist(self) -> None:
+        state = FakeState()
+
+        await stock_mix_flow_start(FakeCallback("stock:mix_flow:already_fed"), state, self.stock_service)
+        callback = FakeCallback("stock:mix_plan:wheat:2")
+        await stock_mix_plan(callback, state, self.stock_service)
+
+        self.assertEqual(callback.message.edits, [])
+        self.assertIn("Когда замесы были сделаны?", callback.message.answers[-1][0])
+        self.assertNotIn("Формула на 1 замес", callback.message.answers[-1][0])
 
     async def test_already_fed_mix_can_choose_date_without_checklist(self) -> None:
         for name in [

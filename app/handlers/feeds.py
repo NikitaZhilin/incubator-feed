@@ -33,6 +33,7 @@ from app.keyboards.feeds import (
     stock_items_keyboard,
     stock_kind_keyboard,
     stock_history_keyboard,
+    stock_mix_entry_keyboard,
     stock_mix_fed_date_keyboard,
     stock_mix_mode_keyboard,
     stock_mix_quick_keyboard,
@@ -98,6 +99,10 @@ class StockMixFlow(StatesGroup):
     grain_base = State()
     count = State()
     fed_date = State()
+
+
+MIX_RECORD_MODE_NOW = "now"
+MIX_RECORD_MODE_ALREADY_FED = "already_fed"
 
 
 class StockAssignFlow(StatesGroup):
@@ -741,12 +746,27 @@ async def stock_mix_start(callback: CallbackQuery, state: FSMContext, stock_serv
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("stock:mix_flow:"))
+async def stock_mix_flow_start(callback: CallbackQuery, state: FSMContext, stock_service: StockService) -> None:
+    record_mode = _mix_record_mode_from_callback(callback.data)
+    if record_mode is None:
+        await callback.answer("Выберите режим замеса заново.", show_alert=True)
+        return
+    await state.clear()
+    await state.update_data(mix_record_mode=record_mode)
+    await _answer_mix_dashboard(callback.message, callback.from_user.id, stock_service, record_mode=record_mode)
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("stock:mix_grain:"))
 async def stock_mix_grain_base(
     callback: CallbackQuery,
+    state: FSMContext,
     stock_service: StockService,
 ) -> None:
     grain_base = str(callback.data).rsplit(":", 1)[1]
+    data = await state.get_data()
+    record_mode = _normalize_mix_record_mode(data.get("mix_record_mode"))
     try:
         get_grain_base_option(grain_base)
     except ValueError as exc:
@@ -758,13 +778,23 @@ async def stock_mix_grain_base(
         mix_count=1,
         grain_base=grain_base,
     )
-    await _answer_mix_dashboard(callback.message, callback.from_user.id, stock_service, plan=plan)
+    if record_mode is not None:
+        await state.update_data(mix_record_mode=record_mode)
+    await _answer_mix_dashboard(
+        callback.message,
+        callback.from_user.id,
+        stock_service,
+        plan=plan,
+        record_mode=record_mode,
+    )
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("stock:mix_manual:"))
 async def stock_mix_manual(callback: CallbackQuery, state: FSMContext, stock_service: StockService) -> None:
     grain_base = str(callback.data).rsplit(":", 1)[1]
+    data = await state.get_data()
+    record_mode = _normalize_mix_record_mode(data.get("mix_record_mode"))
     try:
         option = get_grain_base_option(grain_base)
     except ValueError as exc:
@@ -773,10 +803,17 @@ async def stock_mix_manual(callback: CallbackQuery, state: FSMContext, stock_ser
         return
     await state.clear()
     await state.update_data(grain_base=option.code)
+    if record_mode is not None:
+        await state.update_data(mix_record_mode=record_mode)
     await state.set_state(StockMixFlow.count)
     one_cycle = stock_service.one_chicken_mix_cycle_kg(grain_base=option.code)
+    action = (
+        "записать как уже скормленные"
+        if record_mode == MIX_RECORD_MODE_ALREADY_FED
+        else "сделать сейчас"
+    )
     await callback.message.answer(
-        f"Сколько замесов смеси сделать?\n\n"
+        f"Сколько замесов смеси {action}?\n\n"
         f"Зерновая основа: {option.label}.\n"
         f"Один замес по рецепту ≈ {one_cycle:.1f} кг готовой смеси.",
         reply_markup=stock_cancel_keyboard(),
@@ -809,16 +846,29 @@ async def stock_mix_count(
         mix_count=mix_count,
         grain_base=grain_base,
     )
+    record_mode = _normalize_mix_record_mode(data.get("mix_record_mode"))
     await state.clear()
+    if record_mode == MIX_RECORD_MODE_ALREADY_FED:
+        await _store_mix_state(state, plan, record_mode=record_mode)
+        await _send_mix_fed_date_prompt(message, state, plan)
+        return
     if not plan.can_produce:
-        await _store_mix_state(state, plan)
-        await message.answer(_format_mix_plan(plan), reply_markup=stock_mix_unavailable_keyboard(plan))
+        await _store_mix_state(state, plan, record_mode=record_mode)
+        await message.answer(
+            _format_mix_plan(plan),
+            reply_markup=stock_mix_unavailable_keyboard(plan, record_mode=record_mode),
+        )
+        return
+    if record_mode == MIX_RECORD_MODE_NOW:
+        await _send_mix_checklist(message, state, plan)
         return
     await _send_mix_mode_choice(message, state, plan)
 
 
 @router.callback_query(F.data.startswith("stock:mix_plan:"))
 async def stock_mix_plan(callback: CallbackQuery, state: FSMContext, stock_service: StockService) -> None:
+    data = await state.get_data()
+    record_mode = _normalize_mix_record_mode(data.get("mix_record_mode"))
     try:
         _, _, grain_base, mix_count_text = str(callback.data).split(":", 3)
         mix_count = float(mix_count_text)
@@ -832,14 +882,22 @@ async def stock_mix_plan(callback: CallbackQuery, state: FSMContext, stock_servi
         await callback.message.answer(str(exc), reply_markup=stock_menu_keyboard())
         await callback.answer()
         return
+    if record_mode == MIX_RECORD_MODE_ALREADY_FED:
+        await _store_mix_state(state, plan, record_mode=record_mode)
+        await _send_mix_fed_date_prompt(callback.message, state, plan)
+        await callback.answer()
+        return
     if plan.can_produce:
-        await _edit_mix_mode_choice(callback.message, state, plan)
+        if record_mode == MIX_RECORD_MODE_NOW:
+            await _edit_mix_checklist(callback.message, state, plan)
+        else:
+            await _edit_mix_mode_choice(callback.message, state, plan)
     else:
         await state.clear()
-        await _store_mix_state(state, plan)
+        await _store_mix_state(state, plan, record_mode=record_mode)
         await callback.message.answer(
             _format_mix_plan(plan),
-            reply_markup=stock_mix_unavailable_keyboard(plan),
+            reply_markup=stock_mix_unavailable_keyboard(plan, record_mode=record_mode),
         )
     await callback.answer()
 
@@ -2087,15 +2145,30 @@ async def feed_delete_confirm(callback: CallbackQuery, feed_service: FeedService
     await callback.answer()
 
 
-async def _answer_mix_dashboard(message: Message, user_id: int, stock_service: StockService, *, plan=None) -> None:
+async def _answer_mix_dashboard(
+    message: Message,
+    user_id: int,
+    stock_service: StockService,
+    *,
+    plan=None,
+    record_mode: str | None = None,
+) -> None:
     is_auto_selected = plan is None
     selected_plan = plan or stock_service.best_available_mix_plan(user_id=user_id)
-    await message.answer(
-        _format_mix_dashboard(selected_plan, auto_selected=is_auto_selected),
-        reply_markup=stock_mix_quick_keyboard(
+    text = _format_mix_dashboard(selected_plan, auto_selected=is_auto_selected)
+    if record_mode is None:
+        text += "\n\nВыберите, что нужно сделать со смесью."
+        reply_markup = stock_mix_entry_keyboard()
+    else:
+        text += "\n\n" + _format_mix_record_mode_hint(record_mode)
+        reply_markup = stock_mix_quick_keyboard(
             selected_plan.grain_base_code,
             int(selected_plan.max_mix_count),
-        ),
+            record_mode=record_mode,
+        )
+    await message.answer(
+        text,
+        reply_markup=reply_markup,
     )
 
 
@@ -2166,15 +2239,45 @@ async def _store_mix_state(
     *,
     checked_indices: set[int] | None = None,
     current_cycle: int = 1,
+    record_mode: str | None = None,
 ) -> None:
     total_cycles = _parse_mix_cycle_count(plan.mix_count)
     current = min(max(current_cycle, 1), total_cycles)
-    await state.update_data(
-        mix_grain_base=plan.grain_base_code,
-        mix_count=total_cycles,
-        mix_total_cycles=total_cycles,
-        mix_current_cycle=current,
-        mix_checked_indices=sorted(checked_indices or set()),
+    payload = {
+        "mix_grain_base": plan.grain_base_code,
+        "mix_count": total_cycles,
+        "mix_total_cycles": total_cycles,
+        "mix_current_cycle": current,
+        "mix_checked_indices": sorted(checked_indices or set()),
+    }
+    normalized_mode = _normalize_mix_record_mode(record_mode)
+    if normalized_mode is not None:
+        payload["mix_record_mode"] = normalized_mode
+    await state.update_data(**payload)
+
+
+def _normalize_mix_record_mode(value) -> str | None:
+    if value in {MIX_RECORD_MODE_NOW, MIX_RECORD_MODE_ALREADY_FED}:
+        return str(value)
+    return None
+
+
+def _mix_record_mode_from_callback(callback_data: str | None) -> str | None:
+    if not callback_data:
+        return None
+    return _normalize_mix_record_mode(str(callback_data).rsplit(":", 1)[-1])
+
+
+def _format_mix_record_mode_hint(record_mode: str) -> str:
+    if record_mode == MIX_RECORD_MODE_ALREADY_FED:
+        return (
+            "Режим: записать прошлый замес как уже скормленный.\n"
+            "Выберите зерновую основу и количество прошлых замесов. Чек-лист не откроется: после выбора даты бот "
+            "спишет ингредиенты и сразу спишет готовую смесь."
+        )
+    return (
+        "Режим: сделать новый замес сейчас.\n"
+        "Выберите зерновую основу и количество. После этого откроется чек-лист приготовления."
     )
 
 

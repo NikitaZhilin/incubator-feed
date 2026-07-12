@@ -29,6 +29,7 @@ from app.keyboards.feeds import (
     stock_cancel_keyboard,
     stock_history_keyboard,
     stock_mix_checklist_keyboard,
+    stock_mix_entry_keyboard,
     stock_mix_fed_date_keyboard,
     stock_mix_mode_keyboard,
     stock_items_keyboard,
@@ -38,6 +39,7 @@ from app.keyboards.feeds import (
 from app.keyboards.eggs import (
     egg_entry_date_keyboard,
     egg_entry_mode_keyboard,
+    egg_multi_day_collection_date_keyboard,
     egg_multi_day_confirm_keyboard,
     egg_multi_day_period_keyboard,
     eggs_history_keyboard,
@@ -414,6 +416,8 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("Сбор за несколько дней", _keyboard_texts(egg_entry_mode_keyboard()))
         self.assertIn("Сегодня", _keyboard_texts(egg_entry_date_keyboard()))
         self.assertIn("Вчера", _keyboard_texts(egg_entry_date_keyboard()))
+        self.assertIn("Сегодня", _keyboard_texts(egg_multi_day_collection_date_keyboard()))
+        self.assertIn("Ввести дату", _keyboard_texts(egg_multi_day_collection_date_keyboard()))
         self.assertIn("Указать количество дней", _keyboard_texts(egg_multi_day_period_keyboard()))
         self.assertIn("Не помню период", _keyboard_texts(egg_multi_day_period_keyboard()))
         self.assertIn("Записать", _keyboard_texts(egg_multi_day_confirm_keyboard()))
@@ -457,11 +461,21 @@ class HandlerHelpersTest(unittest.TestCase):
     def test_feed_and_stock_keyboards_have_section_back_buttons(self) -> None:
         self.assertIn("⬅️ К кормам", _keyboard_texts(feed_actions_keyboard(3)))
         self.assertIn("⬅️ К складу", _keyboard_texts(stock_mix_quick_keyboard("wheat", 3)))
+        self.assertIn("⬅️ К выбору режима", _keyboard_texts(stock_mix_quick_keyboard("wheat", 3)))
         self.assertIn("❓ FAQ", _keyboard_texts(feeds_menu_keyboard()))
         self.assertIn("❓ FAQ", _keyboard_texts(feed_history_keyboard(3)))
         self.assertIn("❓ FAQ", _keyboard_texts(stock_history_keyboard()))
         self.assertIn("❓ FAQ", _keyboard_texts(stock_mix_quick_keyboard("wheat", 3)))
         self.assertIn("Отмена", _keyboard_texts(stock_cancel_keyboard()))
+
+    def test_mix_entry_keyboard_separates_current_and_past_mix_flows(self) -> None:
+        texts = _keyboard_texts(stock_mix_entry_keyboard())
+        callbacks = _keyboard_callbacks(stock_mix_entry_keyboard())
+
+        self.assertIn("Сделать новый замес сейчас", texts)
+        self.assertIn("Записать прошлый замес как уже скормленный", texts)
+        self.assertIn("stock:mix_flow:now", callbacks)
+        self.assertIn("stock:mix_flow:already_fed", callbacks)
 
     def test_mix_checklist_keyboard_uses_recipe_parts(self) -> None:
         plan = SimpleNamespace(
@@ -545,9 +559,12 @@ class HandlerHelpersTest(unittest.TestCase):
         callbacks = _keyboard_callbacks(quick_keyboard)
         texts = _keyboard_texts(quick_keyboard)
 
-        self.assertIn("Рассчитать 1", texts)
+        self.assertIn("Сделать 1 замес", texts)
         self.assertIn("stock:mix_plan:wheat:1", callbacks)
         self.assertNotIn("stock:mix_confirm:wheat:1", callbacks)
+
+        fed_texts = _keyboard_texts(stock_mix_quick_keyboard("wheat", 3, record_mode="already_fed"))
+        self.assertIn("Списать 1 замес", fed_texts)
 
     def test_feed_menu_nests_groups_and_flocks(self) -> None:
         self.assertIn("🐔 Поголовье и стада", _keyboard_texts(feeds_menu_keyboard()))
