@@ -21,6 +21,7 @@ MIGRATIONS = (
     "013_service_heartbeats",
     "014_poultry_advisor_settings",
     "015_stock_mix_already_fed",
+    "016_daily_summary_setting",
 )
 
 

@@ -104,7 +104,7 @@ async def eggs_add_date(callback: CallbackQuery, state: FSMContext, egg_service:
 @router.message(EggEntryFlow.count)
 async def eggs_count(message: Message, state: FSMContext, egg_service: EggService) -> None:
     try:
-        count = int((message.text or "").strip())
+        count = _parse_whole_number(message.text)
         data = await state.get_data()
         entry_date = date.fromisoformat(str(data.get("entry_date") or egg_service.current_date().isoformat()))
         entry = egg_service.record_today(message.from_user.id, count, today=entry_date)
@@ -169,7 +169,7 @@ async def eggs_multi_day_collection_date_manual(
 @router.message(EggMultiDayFlow.total_count)
 async def eggs_multi_day_total(message: Message, state: FSMContext) -> None:
     try:
-        total = int((message.text or "").strip())
+        total = _parse_whole_number(message.text)
         if total <= 0:
             raise ValueError
     except ValueError:
@@ -228,7 +228,7 @@ async def eggs_multi_day_auto(callback: CallbackQuery, state: FSMContext, egg_se
 @router.message(EggMultiDayFlow.days_count)
 async def eggs_multi_day_days(message: Message, state: FSMContext, egg_service: EggService) -> None:
     try:
-        days = int((message.text or "").strip())
+        days = _parse_whole_number(message.text)
         data = await state.get_data()
         total = int(data["multi_day_total"])
         collection_date = _multi_day_collection_date_from_state(data, egg_service)
@@ -343,7 +343,7 @@ async def eggs_edit_count_start(callback: CallbackQuery, state: FSMContext, egg_
 @router.message(EggEditFlow.count)
 async def eggs_edit_count_save(message: Message, state: FSMContext, egg_service: EggService) -> None:
     try:
-        count = int((message.text or "").strip())
+        count = _parse_whole_number(message.text)
         data = await state.get_data()
         entry = egg_service.update_entry(
             user_id=message.from_user.id,
@@ -431,7 +431,7 @@ async def eggs_exclude_reason(callback: CallbackQuery, state: FSMContext) -> Non
 @router.message(EggExclusionFlow.count)
 async def eggs_exclude_count(message: Message, state: FSMContext) -> None:
     try:
-        count = int((message.text or "").strip())
+        count = _parse_whole_number(message.text)
         if count <= 0:
             raise ValueError
     except ValueError:
@@ -788,6 +788,14 @@ def _format_exclusion(exclusion: HenLayingExclusion) -> str:
 
 def _safe_stats(egg_service: EggService, user_id: int) -> EggStats:
     return egg_service.stats(user_id, refresh_weather=False)
+
+
+def _parse_whole_number(text: str | None) -> int:
+    """Parse a count typed by the user with a readable error instead of Python's."""
+    cleaned = (text or "").strip().replace(" ", "")
+    if cleaned.lstrip("-").isdigit():
+        return int(cleaned)
+    raise ValueError("Нужно целое число, например 12.")
 
 
 def _egg_entry_date_from_choice(choice: str, *, today: date | None = None) -> date:

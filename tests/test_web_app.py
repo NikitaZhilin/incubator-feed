@@ -860,8 +860,11 @@ class WebAppTest(unittest.TestCase):
         self.assertTrue(settings["notify_eggs"])
         self.assertFalse(settings["notify_post_hatch_care"])
         self.assertFalse(settings["notify_service"])
+        self.assertFalse(settings["notify_poultry_advisor"])
+        self.assertFalse(settings["notify_daily_summary"])
         self.assertEqual(page_response.status_code, 200)
         self.assertIn("Разделы Telegram-бота обновлены", page_response.text)
+        self.assertIn("Ежедневная сводка", page_response.text)
 
     def test_summary_does_not_create_default_weather_settings(self) -> None:
         UserRepository(self.database).upsert(user_id=1, first_name="Admin")

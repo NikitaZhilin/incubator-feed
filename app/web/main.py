@@ -963,6 +963,8 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             notify_feed="feeds" in section_keys,
             notify_eggs="eggs" in section_keys,
             notify_post_hatch_care="post_hatch_care" in section_keys,
+            notify_poultry_advisor="poultry_advisor" in section_keys,
+            notify_daily_summary="daily_summary" in section_keys,
             notify_service="service" in section_keys,
         )
         return _redirect_with_message(
@@ -2575,6 +2577,8 @@ def _render_about_page(config: WebConfig, payload: dict, *, auth_token: str = ""
       <tr><td>Корма</td><td>{escape(_enabled_label(sections.get("feeds", True)))}</td></tr>
       <tr><td>Яйца</td><td>{escape(_enabled_label(sections.get("eggs", True)))}</td></tr>
       <tr><td>Уход после вывода</td><td>{escape(_enabled_label(sections.get("post_hatch_care", True)))}</td></tr>
+      <tr><td>Птицевод</td><td>{escape(_enabled_label(sections.get("poultry_advisor", True)))}</td></tr>
+      <tr><td>Ежедневная сводка</td><td>{escape(_enabled_label(sections.get("daily_summary", True)))}</td></tr>
       <tr><td>Системные сообщения</td><td>{escape(_enabled_label(sections.get("service", True)))}</td></tr>
     </tbody>
   </table>
@@ -2620,6 +2624,8 @@ def _render_sections_form(sections: dict, *, selected_user, auth_token: str) -> 
         ("feeds", "Корма"),
         ("eggs", "Яйца"),
         ("post_hatch_care", "Уход после вывода"),
+        ("poultry_advisor", "Птицевод"),
+        ("daily_summary", "Ежедневная сводка"),
         ("service", "Системные сообщения"),
     )
     checkboxes = "".join(

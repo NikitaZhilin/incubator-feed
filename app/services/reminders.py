@@ -282,7 +282,7 @@ class ReminderRunner:
                 metadata={
                     "interval_seconds": self.interval_seconds,
                     "timezone": str(self.timezone),
-                    "daily_summary_time": "12:00",
+                    "daily_summary_time": "per-user notification_time",
                 },
             )
         except Exception:
@@ -306,7 +306,8 @@ class ReminderRunner:
             "",
         ]
 
-        if self.egg_service is not None:
+        sections = settings or {}
+        if self.egg_service is not None and sections.get("notify_eggs", True):
             stats = self.egg_service.stats(user_id, today=local_now.date())
             lines.extend(
                 [
@@ -317,14 +318,15 @@ class ReminderRunner:
                 ]
             )
 
-        lines.append("Готовая смесь:")
-        lines.extend(
-            self._finished_mix_summary_lines(
-                user_id=user_id,
-                now=now,
-                local_now=local_now,
+        if sections.get("notify_feed", True):
+            lines.append("Готовая смесь:")
+            lines.extend(
+                self._finished_mix_summary_lines(
+                    user_id=user_id,
+                    now=now,
+                    local_now=local_now,
+                )
             )
-        )
         if self.poultry_advisor_service is not None:
             advice_lines = self.poultry_advisor_service.build_daily_summary_advice_lines(
                 user_id,
@@ -463,8 +465,14 @@ def _settings_allow_notification(settings: dict, flag: str, now_utc: datetime) -
 def _settings_allow_daily_summary(settings: dict, now_utc: datetime) -> bool:
     if not settings or not settings.get("is_active", True):
         return False
+    if not settings.get("notify_daily_summary", True):
+        return False
     local_now = _local_now_for_settings(settings, now_utc)
-    return (local_now.hour, local_now.minute) >= (12, 0)
+    try:
+        hour, minute = (int(part) for part in str(settings.get("notification_time", "09:00")).split(":", 1))
+    except ValueError:
+        hour, minute = 9, 0
+    return (local_now.hour, local_now.minute) >= (hour, minute)
 
 
 def _local_now_for_settings(settings: dict, now_utc: datetime) -> datetime:
