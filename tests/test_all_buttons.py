@@ -227,6 +227,10 @@ class AllButtonsTest(unittest.IsolatedAsyncioTestCase):
         self.update_id = 0
 
     async def asyncTearDown(self) -> None:
+        # Routers are module-level objects: detach them so other tests can attach again.
+        for router in list(self.dp.sub_routers):
+            router._parent_router = None
+        self.dp.sub_routers.clear()
         self.temp_dir.cleanup()
 
     # --- helpers -------------------------------------------------------------
@@ -368,7 +372,8 @@ class AllButtonsTest(unittest.IsolatedAsyncioTestCase):
         for name, items in problems.items():
             if items:
                 lines.append(f"{name} ({len(items)}): " + " | ".join(items[:40]))
-        REPORT_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with REPORT_PATH.open("a", encoding="utf-8") as report:
+            report.write("Бот: " + "\n".join(lines) + "\n")
 
         self.assertGreater(presses, 100, "обход кнопок почти ничего не нажал")
         failures = {name: items for name, items in problems.items() if items}
