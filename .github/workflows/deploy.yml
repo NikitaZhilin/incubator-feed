@@ -305,7 +305,6 @@ jobs:
           path.write_text('\n'.join(new_lines) + '\n', encoding='utf-8')
           os.chmod(path, 0o600)
           PY
-          sed -i 's/^          //' update_env_release.py
           scp -i ~/.ssh/deploy_key -P "$VPS_PORT" update_env_release.py "$VPS_USER@$VPS_HOST:$DEPLOY_PATH/.update_env_release.py"
           rm -f update_env_release.py
           ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "
