@@ -87,6 +87,7 @@ python -B scripts\smoke_start.py
 - `MIN_FREE_DISK_MB` - минимальный свободный объем для проверки диска.
 - `RELEASE_VERSION` - текущая beta-версия, например `0.1.42-beta`.
 - `RELEASE_NOTES` - краткое описание изменений для экрана `О боте` и важных release notice.
+- После деплоя через GitHub Actions администратор получает список изменений и сам решает, рассылать ли уведомление пользователям (кнопки `Разослать` / `Изменить текст` / `Не рассылать`), см. `docs/DEPLOYMENT.md`.
 - `RELEASE_NOTICE_ENABLED` и `RELEASE_IMPORTANCE` - явное включение release notice. `minor` не отправляет сообщение пользователям, `medium` отправляет короткое сообщение о перезапуске, `major` и `critical` добавляют подробности.
 - `RELEASE_CHANNEL`, `GITHUB_URL`, `CHANGELOG_URL` - данные для `Настройки -> О боте`.
 - `DOCS_URL` - ссылка на документацию для `Настройки -> О боте`.

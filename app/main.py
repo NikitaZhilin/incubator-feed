@@ -13,6 +13,7 @@ from aiogram.types import MenuButtonCommands, MenuButtonWebApp, WebAppInfo
 
 from app.config import load_config, should_send_admin_startup_notice, should_send_release_notice
 from app.handlers import register_handlers
+from app.keyboards.admin import release_offer_keyboard
 from app.middlewares.callbacks import StaleCallbackMiddleware
 from app.middlewares.users import UserTrackingMiddleware
 from app.services.incubation import IncubationService
@@ -219,6 +220,8 @@ async def main() -> None:
                             or config.release_version
                         ),
                         commit=config.release_commit,
+                        notes=config.release_notes,
+                        reply_markup=_release_offer_markup(config),
                     )
                     logging.info(
                         "Admin startup notice completed: sent=%s skipped=%s failed=%s",
@@ -270,6 +273,13 @@ async def notify_admins_about_failure(bot: Bot, admin_ids: frozenset[int], exc: 
             await bot.send_message(admin_id, message)
         except Exception:
             logging.exception("Failed to notify admin %s about failure", admin_id)
+
+
+def _release_offer_markup(config):
+    """Offer the admin to broadcast the release unless it was already sent automatically."""
+    if not config.release_version or should_send_release_notice(config):
+        return None
+    return release_offer_keyboard(config.release_version)
 
 
 def build_bot_session(config) -> AiohttpSession:

@@ -65,15 +65,33 @@ release_version=0.1.42-beta
 release_notes=Добавлен раздел Яйца; Добавлен прогноз яйценоскости
 ```
 
-The current GitHub Actions workflow does not expose `release_importance` as an
-input. It is suitable for updating the code, version and `О боте` notes. For a
-user-visible notice, use `scripts/deploy-vps.ps1 -AnnounceRelease` or run
-`scripts/notify_release.py` from the VPS/container after deploy.
+`release_notes` is optional. When it is empty, the workflow collects the
+change list from the lines added to `docs/CHANGELOG.md` since the previously
+deployed commit (`RELEASE_COMMIT` in `.env.prod` on the VPS), falling back to
+commit subjects or the top CHANGELOG section.
 
-The main bot process sends this notice on startup only when
-`RELEASE_NOTICE_ENABLED=1` and `RELEASE_IMPORTANCE` is `medium`, `major`, or
-`critical`. The version should be a numeric beta version, for example
-`0.1.42-beta`.
+The GitHub Actions deploy never notifies users automatically
+(`RELEASE_NOTICE_ENABLED=0`). After the bot restarts, every admin from
+`ADMIN_IDS` receives the startup notice with the change list and three buttons:
+
+- `Разослать пользователям` - shows a preview of the user message and the
+  number of recipients, then `Отправить` sends it;
+- `Изменить текст` - the admin sends a new change list (one item per line),
+  the preview is shown again;
+- `Не рассылать` - nothing is sent.
+
+Each user gets a given version at most once (deduplicated via
+`notification_log`). Buttons from a previous deploy are rejected.
+
+The legacy automatic notice still works for manual deploys: the bot sends it on
+startup only when `RELEASE_NOTICE_ENABLED=1` and `RELEASE_IMPORTANCE` is
+`medium`, `major`, or `critical` (then no buttons are offered).
+
+Secrets used by the workflow: `VPS_SSH_KEY` and `VPS_HOST` are required;
+`VPS_USER`, `VPS_PORT`, `NGROK_AUTHTOKEN`, `BOT_TOKEN`, `ADMIN_IDS`,
+`TELEGRAM_PROXY_URL`, `WEB_ADMIN_TOKEN`, `WEB_PUBLIC_URL`, `WEB_LINK_TOKEN` are
+optional. An optional secret overrides the value in `.env.prod` on the VPS only
+when it is set; otherwise the server value is kept.
 
 ## Manual VPS deploy
 

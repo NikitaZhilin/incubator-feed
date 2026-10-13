@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       release_version:
@@ -11,14 +14,9 @@ on:
         required: false
         type: string
       release_notes:
-        description: "Short release notes. Use semicolons for several items."
+        description: "What changed, for the admin broadcast offer. Use semicolons for several items. Empty = taken from docs/CHANGELOG.md"
         required: false
         type: string
-      skip_release_notice:
-        description: "Do not notify bot users after deploy"
-        required: false
-        default: false
-        type: boolean
 
 jobs:
   test:
@@ -44,7 +42,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: test
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
 
     env:
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/incubator-feed' }}
@@ -59,6 +57,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Check deployment secrets
         id: deploy-secrets
@@ -124,22 +124,74 @@ jobs:
           WEB_LINK_TOKEN: ${{ secrets.WEB_LINK_TOKEN }}
           RELEASE_VERSION_INPUT: ${{ github.event.inputs.release_version || '' }}
           RELEASE_NOTES_INPUT: ${{ github.event.inputs.release_notes || '' }}
-          SKIP_RELEASE_NOTICE: ${{ github.event.inputs.skip_release_notice || 'false' }}
         run: |
           RELEASE_VERSION="$RELEASE_VERSION_INPUT"
+          if [ -z "$RELEASE_VERSION" ]; then
+            RELEASE_VERSION="0.1.${GITHUB_RUN_NUMBER}-beta"
+          fi
+          # Users are never notified automatically: the admin gets the change list
+          # in Telegram with "send / edit / skip" buttons and decides.
+          RELEASE_NOTICE_ENABLED="0"
           RELEASE_NOTES="$RELEASE_NOTES_INPUT"
-          if [ "$SKIP_RELEASE_NOTICE" = "true" ]; then
-            RELEASE_NOTICE_ENABLED="0"
-            RELEASE_VERSION=""
-            RELEASE_NOTES=""
-          else
-            RELEASE_NOTICE_ENABLED="1"
-            if [ -z "$RELEASE_VERSION" ]; then
-              RELEASE_VERSION="0.1.${GITHUB_RUN_NUMBER}-beta"
-            fi
-            if [ -z "$RELEASE_NOTES" ]; then
-              RELEASE_NOTES="Русифицирован вывод погоды в разделе Яйца; Английские погодные состояния переводятся; Названия областей приводятся к русскому виду"
-            fi
+          if [ -z "$RELEASE_NOTES" ]; then
+            PREV_COMMIT="$(ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "
+              if [ -s '$DEPLOY_PATH/.env.prod' ]; then
+                grep -E '^RELEASE_COMMIT=' '$DEPLOY_PATH/.env.prod' | tail -n 1 | cut -d= -f2-
+              fi
+            " | tr -d '\r' || true)"
+            RELEASE_NOTES="$(PREV_COMMIT="$PREV_COMMIT" python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+
+          MAX_ITEMS = 15
+
+
+          def git(*args):
+              result = subprocess.run(['git', *args], capture_output=True, text=True)
+              return result.stdout if result.returncode == 0 else ''
+
+
+          def clean(item):
+              item = item.replace('`', '').replace(';', ',').strip()
+              return re.sub(r'\s+', ' ', item)
+
+
+          def top_changelog_section():
+              items, in_section = [], False
+              try:
+                  lines = open('docs/CHANGELOG.md', encoding='utf-8').read().splitlines()
+              except OSError:
+                  return []
+              for line in lines:
+                  if line.startswith('## '):
+                      if in_section:
+                          break
+                      in_section = True
+                  elif in_section and line.startswith('- '):
+                      items.append(line[2:])
+              return items
+
+
+          prev = os.environ.get('PREV_COMMIT', '').strip()
+          items = []
+          known = prev and subprocess.run(
+              ['git', 'cat-file', '-e', f'{prev}^{{commit}}'], capture_output=True
+          ).returncode == 0
+          if known:
+              diff = git('diff', '--unified=0', prev, 'HEAD', '--', 'docs/CHANGELOG.md')
+              items = [line[3:] for line in diff.splitlines() if line.startswith('+- ')]
+              if not items:
+                  items = git('log', '--no-merges', '--format=%s', f'{prev}..HEAD').splitlines()
+          if not items:
+              items = top_changelog_section()
+          items = [clean(item) for item in items if clean(item)]
+          if len(items) > MAX_ITEMS:
+              rest = len(items) - MAX_ITEMS
+              items = items[:MAX_ITEMS] + [f'и ещё {rest} изменений, см. CHANGELOG']
+          print('; '.join(items))
+          PY
+          )"
           fi
           export RELEASE_VERSION RELEASE_NOTES RELEASE_NOTICE_ENABLED
           export RELEASE_COMMIT="${GITHUB_SHA::12}"
