@@ -42,3 +42,6 @@ backups/
 .vscode/
 Thumbs.db
 Desktop.ini
+
+# Test reports
+button_report.txt

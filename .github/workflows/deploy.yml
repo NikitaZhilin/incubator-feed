@@ -45,6 +45,9 @@ jobs:
           grep -E "^(FAILED|ERROR) |^/.*:[0-9]+: " pytest.log | head -30 | while IFS= read -r line; do
             echo "::error::${line}"
           done
+          if [ -f button_report.txt ]; then
+            while IFS= read -r line; do echo "::notice::${line}"; done < button_report.txt
+          fi
           exit $status
 
   deploy:
