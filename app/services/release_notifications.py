@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from html import escape
 import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.keyboards.menu import main_menu_keyboard
-from app.services.reminders import classify_telegram_error
+from app.services.reminders import classify_telegram_error, respect_rate_limit
 from app.storage.repositories.notifications import NotificationRepository
 from app.storage.repositories.users import UserRepository
 
@@ -18,6 +18,7 @@ DEFAULT_TESTING_DISCLAIMER = (
 
 # Telegram limits a message to 4096 characters; keep the change list well below that.
 MAX_NOTES_CHARS = 2500
+BROADCAST_PAUSE_SECONDS = 0.05
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,7 @@ def build_release_notice(version: str, notes: str = "", *, importance: str = "ma
         )
 
     lines = [
-        f"Важное обновление бота: {escape(version, quote=False)}.",
+        f"Важное обновление бота: {version}.",
     ]
     note_lines = format_notes_list(notes)
     if note_lines:
@@ -96,10 +97,10 @@ def build_admin_startup_notice(
         "🔧 Служебное уведомление",
         "",
         "Обновление выкатилось, бот перезапущен и доступен.",
-        f"Версия: {escape(version, quote=False)}",
+        f"Версия: {version}",
     ]
     if commit.strip():
-        lines.append(f"Коммит: {escape(commit.strip()[:12], quote=False)}")
+        lines.append(f"Коммит: {commit.strip()[:12]}")
     lines.append(f"Запуск: {_format_notice_time(started_at, timezone_name)}")
     if offer_release_notice:
         note_lines = format_notes_list(notes)
@@ -136,12 +137,12 @@ def build_release_preview(version: str, notes: str, *, recipients: int) -> str:
 
 
 def format_notes_list(notes: str, *, max_chars: int = MAX_NOTES_CHARS) -> list[str]:
-    """Return escaped "- item" lines, trimmed to fit into one Telegram message."""
+    """Return "- item" lines, trimmed to fit into one Telegram message."""
     items = _normalize_notes(notes)
     lines: list[str] = []
     used = 0
     for index, item in enumerate(items):
-        line = f"- {escape(item, quote=False)}"
+        line = f"- {item}"
         if used + len(line) > max_chars:
             lines.append(f"…и ещё {len(items) - index} пункт(ов)")
             break
@@ -209,6 +210,7 @@ class ReleaseNotificationService:
                 )
             except Exception as exc:
                 error_code = classify_telegram_error(exc)
+                await respect_rate_limit(exc)
                 self.notifications.mark_failed(
                     event_key,
                     error_code=error_code,
@@ -221,6 +223,8 @@ class ReleaseNotificationService:
 
             self.notifications.mark_sent(event_key, scheduled_for)
             sent += 1
+            # Stay well below Telegram's ~30 messages per second limit.
+            await asyncio.sleep(BROADCAST_PAUSE_SECONDS)
 
         return ReleaseNoticeResult(sent=sent, skipped=skipped, failed=failed)
 
@@ -280,6 +284,7 @@ class AdminStartupNotificationService:
                 await self.bot.send_message(admin_id, text, reply_markup=reply_markup)
             except Exception as exc:
                 error_code = classify_telegram_error(exc)
+                await respect_rate_limit(exc)
                 self.notifications.mark_failed(
                     event_key,
                     error_code=error_code,

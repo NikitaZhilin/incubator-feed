@@ -7,7 +7,12 @@ from math import floor
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramNetworkError
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramForbiddenError,
+    TelegramNetworkError,
+    TelegramRetryAfter,
+)
 
 from app.keyboards.menu import daily_summary_keyboard
 from app.services.eggs import EggService
@@ -89,7 +94,7 @@ class ReminderRunner:
     async def _send_incubation_reminders(self, now: datetime) -> None:
         due_by_user = defaultdict(list)
         for item in self.incubation_service.list_due_incubation_notifications(now):
-            if self.notifications and self.notifications.was_sent(item.event_key):
+            if self.notifications and not self.notifications.can_attempt(item.event_key, now=now):
                 continue
             due_by_user[item.user_id].append(item)
 
@@ -117,6 +122,7 @@ class ReminderRunner:
             except Exception as exc:
                 logger.exception("Failed to send incubation reminder to user %s", user_id)
                 error_code = classify_telegram_error(exc)
+                await respect_rate_limit(exc)
                 if self.notifications:
                     for item in items:
                         self.notifications.mark_failed(
@@ -134,7 +140,7 @@ class ReminderRunner:
 
     async def _send_post_hatch_reminders(self, now: datetime) -> None:
         for item in self.incubation_service.list_due_post_hatch_notifications(now):
-            if self.notifications and self.notifications.was_sent(item.event_key):
+            if self.notifications and not self.notifications.can_attempt(item.event_key, now=now):
                 continue
             status = item.status
             try:
@@ -155,6 +161,7 @@ class ReminderRunner:
             except Exception as exc:
                 logger.exception("Failed to send post-hatch reminder for batch %s", status.batch.id)
                 error_code = classify_telegram_error(exc)
+                await respect_rate_limit(exc)
                 if self.notifications:
                     self.notifications.mark_failed(
                         item.event_key,
@@ -177,7 +184,7 @@ class ReminderRunner:
                 continue
             local_now = _local_now_for_settings(settings, now)
             event_key = f"daily_summary:user_{user_id}:{local_now.date().isoformat()}"
-            if self.notifications and self.notifications.was_sent(event_key):
+            if self.notifications and not self.notifications.can_attempt(event_key, now=now):
                 continue
             try:
                 message = self.build_daily_summary_message(
@@ -197,6 +204,7 @@ class ReminderRunner:
             except Exception as exc:
                 logger.exception("Failed to send daily summary to user %s", user_id)
                 error_code = classify_telegram_error(exc)
+                await respect_rate_limit(exc)
                 if self.notifications:
                     self.notifications.mark_failed(
                         event_key,
@@ -223,6 +231,8 @@ class ReminderRunner:
             if self.notifications and self.notifications.was_sent(event_key):
                 self.feed_service.mark_purchase_reminded(feed.id, now)
                 continue
+            if self.notifications and not self.notifications.can_attempt(event_key, now=now):
+                continue
             try:
                 if self.notifications:
                     self.notifications.record_attempt(
@@ -244,6 +254,7 @@ class ReminderRunner:
             except Exception as exc:
                 logger.exception("Failed to send feed reminder for feed %s", feed.id)
                 error_code = classify_telegram_error(exc)
+                await respect_rate_limit(exc)
                 if self.notifications:
                     self.notifications.mark_failed(
                         event_key,
@@ -409,8 +420,19 @@ class ReminderRunner:
         return max(exhausted_dates) if exhausted_dates else None
 
 
+MAX_RATE_LIMIT_SLEEP_SECONDS = 60
+
+
+async def respect_rate_limit(exc: Exception) -> None:
+    """Telegram asks to slow down (HTTP 429): wait before the next message."""
+    if isinstance(exc, TelegramRetryAfter):
+        await asyncio.sleep(min(float(exc.retry_after), MAX_RATE_LIMIT_SLEEP_SECONDS))
+
+
 def classify_telegram_error(exc: Exception) -> str:
     text = str(exc).lower()
+    if isinstance(exc, TelegramRetryAfter):
+        return "rate_limited"
     if isinstance(exc, TelegramForbiddenError):
         return "blocked"
     if isinstance(exc, TelegramBadRequest) and (

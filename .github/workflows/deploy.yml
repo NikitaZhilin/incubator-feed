@@ -345,6 +345,12 @@ jobs:
               fi
             }
             docker build -t '$IMAGE_NAME' .
+            # Safety copy before migrations touch the database.
+            docker run --rm --env-file .env.prod \
+              -v '$DEPLOY_PATH/data:/app/data' \
+              -v '$DEPLOY_PATH/logs:/app/logs' \
+              -v '$DEPLOY_PATH/backups:/app/backups' \
+              '$IMAGE_NAME' python -B scripts/backup.py --label pre-deploy --keep 5
             docker run --rm --env-file .env.prod \
               -v '$DEPLOY_PATH/data:/app/data' \
               -v '$DEPLOY_PATH/logs:/app/logs' \

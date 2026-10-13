@@ -1,4 +1,4 @@
-from html import escape
+import asyncio
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -19,7 +19,7 @@ from app.services.release_notifications import (
     build_release_preview,
     count_release_recipients,
 )
-from app.services.reminders import classify_telegram_error
+from app.services.reminders import classify_telegram_error, respect_rate_limit
 
 
 router = Router()
@@ -34,6 +34,7 @@ class AdminReleaseNotes(StatesGroup):
 
 
 RELEASE_DRAFT_KEY = "release_notes_draft"
+BROADCAST_PAUSE_SECONDS = 0.05
 MAX_RELEASE_NOTES_INPUT = 3000
 # Versions whose broadcast is running right now (guards against double taps).
 _release_sends_in_progress: set[str] = set()
@@ -111,6 +112,7 @@ async def admin_broadcast_confirm(
             sent += 1
         except Exception as exc:
             error_code = classify_telegram_error(exc)
+            await respect_rate_limit(exc)
             admin_service.notifications.mark_failed(
                 event_key,
                 error_code=error_code,
@@ -119,6 +121,8 @@ async def admin_broadcast_confirm(
             if error_code in {"blocked", "deactivated"}:
                 admin_service.users.mark_inactive(user_id, error_code)
             failed += 1
+        # Stay well below Telegram's ~30 messages per second limit.
+        await asyncio.sleep(BROADCAST_PAUSE_SECONDS)
     await message.answer(f"Рассылка завершена. Отправлено: {sent}, ошибок: {failed}.")
 
 
@@ -156,14 +160,14 @@ async def admin_release_action(
         await state.set_state(AdminReleaseNotes.waiting_text)
         await callback.answer()
         await callback.message.answer(
-            f"Пришлите одним сообщением, что изменилось в версии {escape(current_version)}.\n"
+            f"Пришлите одним сообщением, что изменилось в версии {current_version}.\n"
             "Каждый пункт с новой строки.\n"
             "Отмена: /cancel"
         )
     elif action == "skip":
         await callback.answer("Рассылка отменена")
         await callback.message.edit_text(
-            f"🚫 Уведомление о версии {escape(current_version)} пользователям не отправлялось.",
+            f"🚫 Уведомление о версии {current_version} пользователям не отправлялось.",
             reply_markup=None,
         )
     elif action == "send":
@@ -214,7 +218,7 @@ async def _send_release(
     await callback.answer("Рассылаю…")
     # Remove the buttons first so a second tap cannot start another run.
     await callback.message.edit_text(
-        f"⏳ Рассылаю уведомление о версии {escape(current_version)}…",
+        f"⏳ Рассылаю уведомление о версии {current_version}…",
         reply_markup=None,
     )
     notes = await _release_notes(state, admin_service)
@@ -229,7 +233,7 @@ async def _send_release(
     )
     await state.update_data(**{RELEASE_DRAFT_KEY: None})
     await callback.message.edit_text(
-        f"✅ Уведомление о версии {escape(current_version)} разослано.\n"
+        f"✅ Уведомление о версии {current_version} разослано.\n"
         f"Отправлено: {result.sent}, пропущено: {result.skipped}, ошибок: {result.failed}.",
         reply_markup=None,
     )

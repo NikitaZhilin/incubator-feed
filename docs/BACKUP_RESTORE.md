@@ -2,10 +2,16 @@
 
 ## Backup
 
+Автоматически:
+
+- Бот сам делает проверенную копию базы раз в сутки (проверка каждый час, `DailyBackupLoop`), хранит 7 последних в `BACKUP_DIR` (на VPS: `/opt/incubator-feed/backups/prod`). Если копия не создалась, администраторы получают сообщение в Telegram.
+- Деплой через GitHub Actions перед миграциями делает отдельную копию в `BACKUP_DIR/pre-deploy` (хранятся 5 последних).
+
 Ручной бэкап:
 
 ```bash
 python -B scripts/backup.py
+python -B scripts/backup.py --label manual --keep 10
 ```
 
 Скрипт использует SQLite backup API, проверяет `PRAGMA integrity_check` и хранит несколько последних копий.

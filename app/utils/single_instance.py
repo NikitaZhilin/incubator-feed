@@ -37,12 +37,10 @@ class SingleInstanceLock:
         try:
             self._unlock()
         finally:
+            # Keep the file: deleting it would let a waiting process lock an
+            # orphaned inode while a new one locks a fresh file at the same path.
             self._handle.close()
             self._handle = None
-            try:
-                self.path.unlink()
-            except FileNotFoundError:
-                pass
 
     def _lock(self) -> None:
         if os.name == "nt":

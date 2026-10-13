@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
 
 from app.config import load_config
 from app.services.release_notifications import ReleaseNotificationService
@@ -47,7 +46,7 @@ async def async_main() -> None:
     database.initialize()
     bot = Bot(
         token=config.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        default=DefaultBotProperties(parse_mode=None),
     )
     try:
         service = ReleaseNotificationService(

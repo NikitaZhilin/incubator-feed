@@ -5,7 +5,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.config import load_config
@@ -66,7 +65,7 @@ def main() -> None:
     dispatcher["analytics"] = analytics
     dispatcher["config"] = config
     register_handlers(dispatcher)
-    Bot(token=config.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    Bot(token=config.bot_token, default=DefaultBotProperties(parse_mode=None))
     print("Smoke start OK: config, migrations, services and handlers initialized without polling.")
 
 

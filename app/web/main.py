@@ -34,8 +34,24 @@ from app.web.summary import (
 
 def create_app(config: WebConfig | None = None) -> FastAPI:
     web_config = config or load_web_config()
-    app = FastAPI(title="tg_bot_inkubator web", version=web_config.release_version)
+    # No public API docs: /docs and /openapi.json would list every route without a token.
+    app = FastAPI(
+        title="tg_bot_inkubator web",
+        version=web_config.release_version,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.state.web_config = web_config
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        # Pages carry the access token in the URL; never leak it via Referer.
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Cache-Control", "no-store")
+        return response
 
     def require_web_access(
         authorization: str | None = Header(default=None),

@@ -60,6 +60,17 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
 
+    def test_api_docs_are_not_public(self) -> None:
+        self.assertEqual(self.client.get("/docs").status_code, 404)
+        self.assertEqual(self.client.get("/redoc").status_code, 404)
+        self.assertEqual(self.client.get("/openapi.json").status_code, 404)
+
+    def test_responses_do_not_leak_token_via_referer(self) -> None:
+        response = self.client.get("/health")
+
+        self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+
     def test_protected_pages_require_token(self) -> None:
         self.assertEqual(self.client.get("/status").status_code, 401)
         self.assertEqual(self.client.get("/version").status_code, 401)

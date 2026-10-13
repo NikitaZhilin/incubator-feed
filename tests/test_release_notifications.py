@@ -207,7 +207,7 @@ class ReleaseOfferTextTest(unittest.TestCase):
 
         self.assertIn("Что обновлено:", text)
         self.assertIn("- Новый раздел", text)
-        self.assertIn("- Исправлен &lt;баг&gt; &amp; прочее", text)
+        self.assertIn("- Исправлен <баг> & прочее", text)
         self.assertIn("Разослать пользователям уведомление о новой версии?", text)
 
     def test_admin_notice_without_offer_keeps_old_shape(self) -> None:
