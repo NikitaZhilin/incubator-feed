@@ -1671,7 +1671,7 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>tg_bot_inkubator</title>
+  <title>{escape(str(settings.get("farm_name") or "Хозяйство"))}</title>
   {_page_style()}
 </head>
 <body>
