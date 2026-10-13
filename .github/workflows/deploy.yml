@@ -37,7 +37,15 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run tests
-        run: python -B -m pytest -q
+        run: |
+          set +e
+          python -B -m pytest -q -rfE --tb=line 2>&1 | tee pytest.log
+          status=${PIPESTATUS[0]}
+          # Surface failures as annotations so they are visible without opening the log.
+          grep -E "^(FAILED|ERROR) |^/.*:[0-9]+: " pytest.log | head -30 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
+          exit $status
 
   deploy:
     runs-on: ubuntu-latest
