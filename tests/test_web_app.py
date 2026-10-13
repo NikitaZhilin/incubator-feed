@@ -397,6 +397,23 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("Создать замес", page_response.text)
         self.assertIn("Зерновая смесь для кур несушек", page_response.text)
 
+    def test_repeated_mix_submit_creates_one_mix(self) -> None:
+        self._create_household_data()
+        form = {
+            "user_id": "1",
+            "mix_count": "1",
+            "grain_base": "layer_grain_mix",
+            "request_id": "same-page-id",
+        }
+
+        first = self.client.post("/feeds/mixes?auth=link-token", data=form, follow_redirects=False)
+        second = self.client.post("/feeds/mixes?auth=link-token", data=form, follow_redirects=False)
+        history = self.client.get("/mix/data", headers=self._auth()).json()["history"]
+
+        self.assertEqual(first.status_code, 303)
+        self.assertEqual(second.status_code, 303)
+        self.assertEqual(len(history), 1)
+
     def test_mix_can_be_confirmed_and_created_from_web_form(self) -> None:
         self._create_household_data()
 

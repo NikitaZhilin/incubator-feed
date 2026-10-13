@@ -327,6 +327,7 @@ class ReminderRunner:
                     local_now=local_now,
                 )
             )
+            lines.extend(self._low_ingredient_lines(user_id=user_id, now=now))
         if self.poultry_advisor_service is not None:
             advice_lines = self.poultry_advisor_service.build_daily_summary_advice_lines(
                 user_id,
@@ -338,6 +339,22 @@ class ReminderRunner:
                 lines.extend(["", "Совет птицевода:"])
                 lines.extend(f"- {line}" for line in advice_lines)
         return "\n".join(lines)
+
+    def _low_ingredient_lines(self, *, user_id: int, now: datetime) -> list[str]:
+        if self.stock_service is None:
+            return []
+        try:
+            low = self.stock_service.low_mix_ingredients(user_id=user_id, now=now)
+        except Exception:
+            logger.exception("Failed to check low ingredients for user %s", user_id)
+            return []
+        if not low:
+            return []
+        parts = [
+            f"{name} — {'нет на замес' if mixes == 0 else f'хватит на {mixes} замес(а)'}"
+            for name, mixes in low[:5]
+        ]
+        return ["- Заканчиваются ингредиенты: " + "; ".join(parts) + "."]
 
     def _finished_mix_summary_lines(
         self,

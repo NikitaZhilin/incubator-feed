@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from datetime import date
 from html import escape
 from math import isfinite
@@ -44,6 +45,8 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
         openapi_url=None,
     )
     app.state.web_config = web_config
+    # Recently used mix confirmation ids: a repeated submit must not mix twice.
+    app.state.processed_mix_requests = deque(maxlen=200)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -305,6 +308,10 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
         user_id = int(raw_user_id) if raw_user_id.strip().isdigit() else None
         mix_count = form.get("mix_count", "1")
         grain_base = form.get("grain_base", "wheat")
+        request_id = form.get("request_id", "").strip()[:64]
+        if request_id and request_id in app.state.processed_mix_requests:
+            # Second submit of the same confirmation page (double click, refresh).
+            return _redirect_with_message(redirect_base, notice="Этот замес уже записан.")
         if not current.db_path.exists():
             return _redirect_with_message(
                 redirect_base,
@@ -325,6 +332,8 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             )
         except ValueError as exc:
             return _redirect_with_message(redirect_base, error=str(exc))
+        if request_id:
+            app.state.processed_mix_requests.append(request_id)
         return _redirect_with_message(
             redirect_base,
             notice=f"Замес создан: {plan.mix_count:g} повт., получено {_kg(plan.output_kg)}.",
@@ -2008,8 +2017,17 @@ def _render_mix_confirm_page(
     <input type="hidden" name="user_id" value="{escape(str(selected_user_id))}">
     <input type="hidden" name="mix_count" value="{escape(str(plan.mix_count))}">
     <input type="hidden" name="grain_base" value="{escape(str(plan.grain_base_code))}">
+    <input type="hidden" name="request_id" value="{escape(secrets.token_urlsafe(16))}">
     <button type="submit">Создать замес и обновить склад</button>
-  </form>"""
+  </form>
+  <script>
+    document.querySelectorAll('form[action*="/feeds/mixes"]').forEach(function (form) {{
+      form.addEventListener('submit', function () {{
+        var button = form.querySelector('button');
+        if (button) {{ button.disabled = true; button.textContent = 'Создаю замес…'; }}
+      }});
+    }});
+  </script>"""
     else:
         confirm_button = (
             '<div class="message error">Ингредиентов недостаточно. '

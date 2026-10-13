@@ -268,6 +268,28 @@ class StockService:
             ingredients=tuple(ingredients),
         )
 
+    def low_mix_ingredients(
+        self,
+        *,
+        user_id: int,
+        min_mixes: float = 2,
+        now: datetime | None = None,
+    ) -> list[tuple[str, int]]:
+        """Purchased recipe ingredients that are enough for fewer than ``min_mixes`` mixes.
+
+        Measured in mixes, not kilograms: a mix needs ~75 g of premix but ~2.5 kg of corn,
+        so one kilogram threshold cannot fit every ingredient.
+        """
+        plan = self.best_available_mix_plan(user_id=user_id, now=now)
+        low: list[tuple[str, int]] = []
+        for ingredient in plan.ingredients:
+            if ingredient.stock_item_id is None or ingredient.required_kg <= 0:
+                continue
+            mixes_left = ingredient.available_kg / ingredient.required_kg
+            if mixes_left < min_mixes:
+                low.append((ingredient.name, floor(mixes_left)))
+        return sorted(low, key=lambda item: item[1])
+
     def best_available_mix_plan(
         self,
         *,

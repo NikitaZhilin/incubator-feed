@@ -123,5 +123,34 @@ class StockConsistencyTest(unittest.TestCase):
         self.assertAlmostEqual(FeedService.estimate(feed, now=day20).remaining_kg, 51.0, delta=0.01)
 
 
+
+
+class LowIngredientsTest(unittest.TestCase):
+    def test_low_ingredients_are_measured_in_mixes(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        from app.services.stock import StockService
+        from app.storage.database import Database
+        from app.storage.repositories.feeds import FeedRepository
+        from app.storage.repositories.stock import StockRepository
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Database(Path(temp_dir) / "t.db")
+            database.initialize()
+            service = StockService(StockRepository(database), FeedRepository(database))
+            # Corn: 3.5 parts * 0.72 = 2.52 kg per mix -> 3 kg is 1 mix.
+            service.add_purchase(user_id=1, name="Кукуруза", kind="ingredient", amount_kg=3)
+            # Premix: 0.1 * 0.75 = 0.075 kg per mix -> 1 kg is 13 mixes, not "low".
+            service.add_purchase(user_id=1, name="Премикс", kind="ingredient", amount_kg=1)
+
+            low = dict(service.low_mix_ingredients(user_id=1))
+
+        self.assertEqual(low.get("Кукуруза"), 1)
+        self.assertNotIn("Премикс", low)
+        # Never purchased ingredients are not reported as "running out".
+        self.assertNotIn("Рыбная мука", low)
+
+
 if __name__ == "__main__":
     unittest.main()
