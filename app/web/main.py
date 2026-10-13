@@ -30,6 +30,8 @@ from app.web.parity import (
     batch_edit_form,
     eggs_extra_forms,
     exclusion_finish_form,
+    group_ration_form,
+    incubation_reference,
     profile_form,
     register_parity_routes,
 )
@@ -2313,6 +2315,7 @@ def _render_livestock_page(config: WebConfig, payload: dict, *, auth_token: str 
   </details>
 
   {assignment_form}
+  {group_ration_form(groups, stock_items, selected_user=selected_user, auth_token=auth_token)}
 
   <h2>Назначенная смесь</h2>
   <table>
@@ -2517,6 +2520,8 @@ def _render_incubation_page(config: WebConfig, payload: dict, *, auth_token: str
     </thead>
     <tbody>{completed_rows}</tbody>
   </table>
+
+  {incubation_reference()}
 </main>
 </body>
 </html>"""

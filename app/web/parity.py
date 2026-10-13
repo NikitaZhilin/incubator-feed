@@ -21,6 +21,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from app.domain import PROFILES
 from app.services.eggs import EXCLUSION_REASON_LABELS, EggService
 from app.services.feeds import FeedService
+from app.services.guides import incubation_calendar, post_hatch_care
 from app.services.help_content import HELP_TOPICS, format_help_topic
 from app.services.incubation import IncubationService
 from app.services.poultry_advisor import PoultryAdvisorService
@@ -295,6 +296,29 @@ def register_parity_routes(app: FastAPI, require_web_access) -> None:
         if not service.archive_flock(flock_id, user_id):
             return web._redirect_with_message(redirect_base, error="Стадо не найдено.")
         return web._redirect_with_message(redirect_base, notice="Стадо перенесено в архив.")
+
+    @app.post("/feeding-assignments", dependencies=access)
+    async def assign_group_feed(request: Request, auth: str | None = Query(default=None)):
+        form = await _form(request)
+        redirect_base = web._link("/livestock", auth or "")
+        user_id, failed = _guard(form, redirect_base, "Назначение рациона")
+        if failed:
+            return failed
+        try:
+            database = Database(app.state.web_config.db_path)
+            stock = StockService(StockRepository(database), FeedRepository(database))
+            assignment = stock.assign_feed(
+                user_id=user_id,
+                bird_group_id=_parse_int(form.get("bird_group_id", ""), "Поголовье"),
+                stock_item_id=_parse_int(form.get("stock_item_id", ""), "Корм"),
+                daily_per_bird_g=web._parse_positive_float(form.get("daily_per_bird_g", "120")),
+            )
+        except ValueError as exc:
+            return web._redirect_with_message(redirect_base, error=str(exc))
+        return web._redirect_with_message(
+            redirect_base,
+            notice=f"Рацион назначен: {assignment.daily_per_bird_g:g} г на птицу в день.",
+        )
 
     # ----- Incubation: edit batch ----------------------------------------------
 
@@ -640,3 +664,49 @@ def _zone(name: str) -> ZoneInfo:
 
 def _local_today(name: str) -> date:
     return datetime.now(timezone.utc).astimezone(_zone(name)).date()
+
+
+def group_ration_form(groups: list[dict], stock_items: list[dict], *, selected_user, auth_token: str) -> str:
+    """Bot «Рационы»: feed a single bird group from any stock item."""
+    from app.web.main import _link
+
+    active_groups = [group for group in groups if group.get("is_active", True)]
+    if not active_groups or not stock_items:
+        return ""
+    group_options = "".join(
+        f'<option value="{escape(str(group.get("id")))}">{escape(str(group.get("name") or ""))}</option>'
+        for group in active_groups
+    )
+    item_options = "".join(
+        f'<option value="{escape(str(item.get("id")))}">{escape(str(item.get("name") or ""))}</option>'
+        for item in stock_items
+    )
+    return f"""
+  <details>
+    <summary>Рацион для отдельной группы (как «Рационы» в боте)</summary>
+    <p class="small">Обычно смесь назначают стаду. Здесь можно кормить одну группу любым кормом со склада.</p>
+    <form class="note" method="post" action="{escape(_link('/feeding-assignments', auth_token))}">
+      <input type="hidden" name="user_id" value="{escape(str(selected_user or ''))}">
+      <label><span class="label">Группа</span><select name="bird_group_id">{group_options}</select></label>
+      <label><span class="label">Корм со склада</span><select name="stock_item_id">{item_options}</select></label>
+      <label><span class="label">Грамм на птицу в день</span>
+        <input name="daily_per_bird_g" type="number" min="1" step="1" value="120" required></label>
+      <button type="submit">Назначить рацион</button>
+    </form>
+  </details>"""
+
+
+def incubation_reference() -> str:
+    """Bot «Календарь», «Профили» и «Уход после вывода» in one collapsible block."""
+    parts = []
+    for profile in PROFILES.values():
+        text = incubation_calendar(profile) + "\n\n" + post_hatch_care(profile.title)
+        parts.append(
+            f"<details><summary>{escape(profile.title)}: {profile.hatch_days} дн.</summary>"
+            f'<div class="pre note">{escape(_plain(text))}</div></details>'
+        )
+    return (
+        "<h2>Справочник: календарь и уход после вывода</h2>"
+        '<style>.pre { white-space: pre-wrap; line-height: 1.45; }</style>'
+        + "".join(parts)
+    )

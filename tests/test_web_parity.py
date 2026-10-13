@@ -213,6 +213,27 @@ class WebParityTest(unittest.TestCase):
         self.assertEqual(faq.status_code, 200)
         self.assertIn("FAQ", faq.text)
 
+    def test_group_ration_can_be_assigned(self) -> None:
+        stock = StockService(StockRepository(self.database), FeedRepository(self.database))
+        item = stock.add_purchase(user_id=1, name="Комбикорм", kind="commercial_feed", amount_kg=25).item
+
+        page = self.client.get(f"/livestock{AUTH}").text
+        response = self._post(
+            "/feeding-assignments",
+            {"bird_group_id": str(self.hens.id), "stock_item_id": str(item.id), "daily_per_bird_g": "110"},
+        )
+
+        self.assertIn("Назначить рацион", page)
+        self.assertEqual(response.status_code, 303)
+        # 10 hens * 110 g = 1.1 kg per day, the same number the bot shows.
+        self.assertAlmostEqual(stock.estimate_item(item).daily_usage_kg, 1.1, places=3)
+
+    def test_incubation_page_has_calendar_and_care_reference(self) -> None:
+        page = self.client.get(f"/incubation{AUTH}").text
+
+        self.assertIn("Справочник: календарь и уход после вывода", page)
+        self.assertIn("Уход после вывода", page)
+
     def test_new_pages_require_token(self) -> None:
         self.assertEqual(self.client.get("/advisor").status_code, 401)
         self.assertEqual(self.client.get("/help").status_code, 401)
