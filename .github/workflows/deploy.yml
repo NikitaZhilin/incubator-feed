@@ -61,6 +61,7 @@ jobs:
       CONTAINER_NAME: incubator-feed-bot
       WEB_CONTAINER_NAME: incubator-feed-web
       NGROK_CONTAINER_NAME: incubator-feed-ngrok
+      CADDY_CONTAINER_NAME: incubator-feed-caddy
 
     steps:
       - name: Check out repository
@@ -381,7 +382,48 @@ jobs:
               '$IMAGE_NAME' python -B scripts/web_app.py
             sleep 3
             curl -fsS http://127.0.0.1:8080/health
-            if [ -n \"\$NGROK_AUTHTOKEN\" ]; then
+            # Public HTTPS for the web panel and the Telegram Mini App.
+            # Preferred: Caddy on the VPS with a free <ip>.sslip.io name and an automatic
+            # Let's Encrypt certificate (no ngrok warning page, stable address).
+            # Fallback: ngrok, when ports 80/443 are not reachable.
+            WEB_URL=''
+            PUBLIC_HOST=''
+            case '$VPS_HOST' in
+              ''|*[!0-9.]*) ;;
+              *) PUBLIC_HOST=\"\$(printf '%s' '$VPS_HOST' | tr . -).sslip.io\" ;;
+            esac
+            docker rm -f '$CADDY_CONTAINER_NAME' >/dev/null 2>&1 || true
+            if [ -n \"\$PUBLIC_HOST\" ]; then
+              if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then
+                ufw allow 80/tcp >/dev/null || true
+                ufw allow 443/tcp >/dev/null || true
+              fi
+              mkdir -p caddy/data caddy/config
+              printf '%s {\n\tencode gzip\n\treverse_proxy incubator-feed-web:8080\n}\n' \"\$PUBLIC_HOST\" > caddy/Caddyfile
+              if docker run -d --name '$CADDY_CONTAINER_NAME' --restart unless-stopped \
+                  --network incubator_feed_network \
+                  -p 80:80 -p 443:443 \
+                  -v '$DEPLOY_PATH/caddy/Caddyfile:/etc/caddy/Caddyfile:ro' \
+                  -v '$DEPLOY_PATH/caddy/data:/data' \
+                  -v '$DEPLOY_PATH/caddy/config:/config' \
+                  caddy:2.8.4 >/dev/null; then
+                # A verified TLS answer means the certificate was issued, i.e. ports
+                # 80/443 are reachable from the internet.
+                for attempt in \$(seq 1 40); do
+                  if curl -fsS --max-time 5 --resolve \"\$PUBLIC_HOST:443:127.0.0.1\" \"https://\$PUBLIC_HOST/health\" >/dev/null 2>&1; then
+                    WEB_URL=\"https://\$PUBLIC_HOST\"
+                    break
+                  fi
+                  sleep 3
+                done
+              fi
+              if [ -z \"\$WEB_URL\" ]; then
+                echo 'Caddy HTTPS is not available; falling back to ngrok.' >&2
+                docker logs --tail=60 '$CADDY_CONTAINER_NAME' >&2 || true
+                docker rm -f '$CADDY_CONTAINER_NAME' >/dev/null 2>&1 || true
+              fi
+            fi
+            if [ -z \"\$WEB_URL\" ] && [ -n \"\$NGROK_AUTHTOKEN\" ]; then
               docker run -d --name '$NGROK_CONTAINER_NAME' --restart unless-stopped \
                 --network incubator_feed_network \
                 -p 127.0.0.1:4041:4040 \
@@ -405,8 +447,11 @@ jobs:
                 docker logs --tail=80 '$NGROK_CONTAINER_NAME' >&2 || true
                 exit 1
               fi
-              update_env_var WEB_PUBLIC_URL \"\$NGROK_PUBLIC_URL\"
-              echo \"WEB_PUBLIC_URL=\$NGROK_PUBLIC_URL\"
+              WEB_URL=\"\$NGROK_PUBLIC_URL\"
+            fi
+            if [ -n \"\$WEB_URL\" ]; then
+              update_env_var WEB_PUBLIC_URL \"\$WEB_URL\"
+              echo \"WEB_PUBLIC_URL=\$WEB_URL\"
             fi
             docker run -d --name '$CONTAINER_NAME' --restart unless-stopped \
               --network incubator_feed_network \

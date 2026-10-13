@@ -223,3 +223,15 @@ Check it with:
 systemctl list-timers incubator-feed-auto-deploy.timer
 journalctl -u incubator-feed-auto-deploy.service -n 100 --no-pager
 ```
+
+## Public HTTPS for the web panel
+
+The deploy starts Caddy (`incubator-feed-caddy`) on ports 80/443 of the VPS with
+the free host name `<ip-with-dashes>.sslip.io` (for `72.56.116.237` it is
+`72-56-116-237.sslip.io`). Caddy obtains a Let's Encrypt certificate
+automatically and keeps it in `caddy/data` inside the deploy path. The URL is
+written to `WEB_PUBLIC_URL`, so the bot's "АПП" menu button and site links use it.
+
+If `ufw` is active, the deploy opens ports 80 and 443. If HTTPS through Caddy
+does not come up (ports blocked by the hosting provider, `VPS_HOST` is not an
+IPv4 address), the deploy falls back to ngrok when `NGROK_AUTHTOKEN` is set.
