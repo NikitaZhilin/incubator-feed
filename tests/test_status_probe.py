@@ -87,6 +87,21 @@ class StatusProbeTest(unittest.TestCase):
         self.assertEqual(report["status"], "degraded")
         self.assertEqual(report["errors"]["critical_total"], 1)
 
+    def test_old_critical_errors_do_not_keep_report_degraded(self) -> None:
+        self._write_ok("polling_bot")
+        self._write_ok("reminder_runner")
+        with self.database.connect() as connection:
+            connection.execute(
+                "INSERT INTO critical_errors (source, message, created_at) VALUES (?, ?, ?)",
+                ("polling", "DNS failure long ago", "2026-01-10 10:00:00"),
+            )
+
+        report = build_status_report(self.db_path, now=self.now)
+
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(report["errors"]["critical_total"], 1)
+        self.assertEqual(report["errors"]["critical_last_24h"], 0)
+
     def test_unavailable_database_returns_probe_error_exit_code(self) -> None:
         report = build_status_report(Path(self.temp_dir.name) / "missing.db", now=self.now)
 

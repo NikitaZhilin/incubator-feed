@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from contextlib import closing
 import json
 from pathlib import Path
@@ -28,6 +28,7 @@ def build_status_report(
             heartbeats = _read_heartbeats(connection, generated_at, heartbeat_down_after_seconds)
             users_total = _count_rows(connection, "users")
             critical_total, recent_errors = _read_critical_errors(connection)
+            critical_last_day = _count_recent_critical_errors(connection, generated_at)
     except Exception as exc:
         return {
             "status": "probe_error",
@@ -39,12 +40,14 @@ def build_status_report(
                 "last_error": str(exc),
             },
             "users": {"total": 0},
-            "errors": {"critical_total": 0, "recent": []},
+            "errors": {"critical_total": 0, "critical_last_24h": 0, "recent": []},
             "heartbeat_down_after_seconds": heartbeat_down_after_seconds,
             "heartbeats": [],
         }
 
-    overall_status = _overall_status(heartbeats, critical_total)
+    # Only fresh errors affect the status: an outage months ago must not keep the
+    # report "degraded" forever. The total stays visible for reference.
+    overall_status = _overall_status(heartbeats, critical_last_day)
     return {
         "status": overall_status,
         "version": _report_version(heartbeats),
@@ -57,6 +60,7 @@ def build_status_report(
         "users": {"total": users_total},
         "errors": {
             "critical_total": critical_total,
+            "critical_last_24h": critical_last_day,
             "recent": recent_errors,
         },
         "heartbeat_down_after_seconds": heartbeat_down_after_seconds,
@@ -148,6 +152,15 @@ def _read_critical_errors(connection: sqlite3.Connection) -> tuple[int, list[dic
         """
     ).fetchall()
     return total, [dict(row) for row in rows]
+
+
+def _count_recent_critical_errors(connection: sqlite3.Connection, now: datetime) -> int:
+    since = (now.astimezone(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+    row = connection.execute(
+        "SELECT COUNT(*) AS c FROM critical_errors WHERE created_at >= ?",
+        (since,),
+    ).fetchone()
+    return int(row["c"] or 0)
 
 
 def _count_rows(connection: sqlite3.Connection, table_name: str) -> int:

@@ -24,6 +24,17 @@ from app.storage.repositories.stock import StockRepository
 from app.storage.repositories.users import UserRepository
 from app.utils.dates import local_today, validate_incubation_start_date
 from app.web.config import WebConfig, load_web_config
+from app.web.parity import (
+    already_fed_mix_form,
+    archive_form,
+    batch_edit_form,
+    eggs_extra_forms,
+    exclusion_finish_form,
+    group_ration_form,
+    incubation_reference,
+    profile_form,
+    register_parity_routes,
+)
 from app.web.summary import (
     build_web_eggs,
     build_web_feeds,
@@ -76,6 +87,8 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
                 detail="Authentication required.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+
+    register_parity_routes(app, require_web_access)
 
     @app.get("/health")
     def health() -> dict:
@@ -1563,7 +1576,9 @@ def _nav_links(auth_token: str, *, active_path: str) -> str:
         ("/livestock", "Поголовье и стада"),
         ("/eggs", "Яйца"),
         ("/incubation", "Инкубация"),
-        ("/about", "О боте"),
+        ("/advisor", "Птицевод"),
+        ("/help", "FAQ"),
+        ("/about", "Настройки и о боте"),
     )
     rendered = []
     for path, label in links:
@@ -1735,9 +1750,10 @@ def _status_reason(report: dict) -> str:
     db = report.get("db") or {}
     if db.get("status") != "ok":
         return f"База данных: {db.get('last_error') or 'ошибка проверки'}"
-    critical_total = int((report.get("errors") or {}).get("critical_total") or 0)
-    if critical_total:
-        return f"Есть критичные ошибки: {critical_total}"
+    errors = report.get("errors") or {}
+    critical_recent = int(errors.get("critical_last_24h") or 0)
+    if critical_recent:
+        return f"Критичные ошибки за последние сутки: {critical_recent}"
     for item in report.get("heartbeats", []):
         service = str(item.get("service_name") or "service")
         if item.get("stale"):
@@ -1987,6 +2003,7 @@ def _render_mix_page(config: WebConfig, payload: dict, *, auth_token: str = "") 
     </label>
     <button type="submit">Рассчитать и подтвердить</button>
   </form>
+  {already_fed_mix_form(selected_user=selected_user, auth_token=auth_token, base_options=base_options, today_value=local_today(config.timezone_name).isoformat())}
 
   <h2>Последние замесы</h2>
   <table>
@@ -2298,6 +2315,7 @@ def _render_livestock_page(config: WebConfig, payload: dict, *, auth_token: str 
   </details>
 
   {assignment_form}
+  {group_ration_form(groups, stock_items, selected_user=selected_user, auth_token=auth_token)}
 
   <h2>Назначенная смесь</h2>
   <table>
@@ -2322,9 +2340,12 @@ def _render_eggs_page(config: WebConfig, payload: dict, *, auth_token: str = "")
     )
     if not history_rows:
         history_rows = "<tr><td colspan=\"6\">Записей по яйцам пока нет.</td></tr>"
-    exclusion_rows = "\n".join(_render_exclusion_row(item) for item in payload.get("open_exclusions", []))
+    exclusion_rows = "\n".join(
+        _render_exclusion_row(item, selected_user=selected_user, auth_token=auth_token)
+        for item in payload.get("open_exclusions", [])
+    )
     if not exclusion_rows:
-        exclusion_rows = "<tr><td colspan=\"4\">Активных исключений нет.</td></tr>"
+        exclusion_rows = "<tr><td colspan=\"5\">Активных исключений нет.</td></tr>"
     selected_user_label = "не выбран" if selected_user is None else str(selected_user)
     today_value = str(eggs.get("today") or "")
     return f"""<!doctype html>
@@ -2371,6 +2392,7 @@ def _render_eggs_page(config: WebConfig, payload: dict, *, auth_token: str = "")
     </label>
     <button type="submit">Добавить запись</button>
   </form>
+  {eggs_extra_forms(selected_user=selected_user, auth_token=auth_token, today_value=today_value)}
 
   <h2>Погода</h2>
   <p>{escape(weather_text)}</p>
@@ -2394,7 +2416,7 @@ def _render_eggs_page(config: WebConfig, payload: dict, *, auth_token: str = "")
   <h2>Не несутся</h2>
   <table>
     <thead>
-      <tr><th>Кур</th><th>Причина</th><th>С</th><th>Ожидаемо до</th></tr>
+      <tr><th>Кур</th><th>Причина</th><th>С</th><th>Ожидаемо до</th><th>Действия</th></tr>
     </thead>
     <tbody>{exclusion_rows}</tbody>
   </table>
@@ -2498,6 +2520,8 @@ def _render_incubation_page(config: WebConfig, payload: dict, *, auth_token: str
     </thead>
     <tbody>{completed_rows}</tbody>
   </table>
+
+  {incubation_reference()}
 </main>
 </body>
 </html>"""
@@ -2524,7 +2548,11 @@ def _render_about_page(config: WebConfig, payload: dict, *, auth_token: str = ""
     release_enabled = "включены" if release.get("release_notice_enabled") else "выключены"
     commit = str(release.get("commit") or "не указан")
     short_commit = commit[:12] if commit != "не указан" else commit
-    sections_form = _render_sections_form(
+    sections_form = profile_form(
+        settings,
+        selected_user=selected_user,
+        auth_token=auth_token,
+    ) + _render_sections_form(
         sections,
         selected_user=selected_user,
         auth_token=auth_token,
@@ -2948,7 +2976,7 @@ def _render_bird_group_edit_form(item: dict, *, selected_user, auth_token: str) 
           <input name="reserve_percent" type="number" min="0" step="1" value="{escape(str(item.get('reserve_percent') or 0))}">
         </label>
         <button type="submit">Сохранить поголовье</button>
-      </form>"""
+      </form>{archive_form(f"/bird-groups/{group_id}/archive", selected_user=selected_user, auth_token=auth_token, label="В архив")}"""
 
 
 def _render_livestock_flock_row(item: dict) -> str:
@@ -3026,7 +3054,7 @@ def _render_flock_edit_form(
           <div class="checkbox-list">{member_options}</div>
         </div>
         <button type="submit">Сохранить стадо</button>
-      </form>"""
+      </form>{archive_form(f"/flocks/{flock_id}/archive", selected_user=selected_user, auth_token=auth_token, label="Стадо в архив")}"""
 
 
 def _render_flock_assignment_row(flock: dict, assignment: dict) -> str:
@@ -3097,13 +3125,14 @@ def _render_egg_history_row(item: dict, *, selected_user, auth_token: str) -> st
     )
 
 
-def _render_exclusion_row(item: dict) -> str:
+def _render_exclusion_row(item: dict, *, selected_user=None, auth_token: str = "") -> str:
     return (
         "<tr>"
         f"<td>{escape(str(item.get('hens_count', 0)))}</td>"
         f"<td>{escape(str(item.get('reason', '')))}</td>"
         f"<td>{escape(str(item.get('started_at') or ''))}</td>"
         f"<td>{escape(str(item.get('expected_until') or 'не указано'))}</td>"
+        f"<td>{exclusion_finish_form(item, selected_user=selected_user, auth_token=auth_token)}</td>"
         "</tr>"
     )
 
@@ -3131,7 +3160,7 @@ def _render_active_incubation_row(item: dict, *, selected_user, auth_token: str)
           </label>
           <button type="submit">Завершить вывод</button>
         </form>
-      </details>"""
+      </details>{batch_edit_form(item, selected_user=selected_user, auth_token=auth_token)}"""
     return (
         "<tr>"
         f"<td>{escape(str(item.get('title', '')))}</td>"
