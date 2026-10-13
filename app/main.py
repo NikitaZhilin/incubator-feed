@@ -117,6 +117,7 @@ async def main() -> None:
             timezone_name=config.timezone,
         )
         stock_service = StockService(StockRepository(database), feed_repository, analytics)
+        feed_service.before_ration_change = stock_service.checkpoint_user
         poultry_advisor_service = PoultryAdvisorService(
             incubation_service=incubation_service,
             feed_service=feed_service,

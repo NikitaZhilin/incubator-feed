@@ -29,15 +29,7 @@ class StockRepository:
     ) -> StockItem:
         clean_name = name.strip()[:255]
         with self.database.connect() as connection:
-            row = connection.execute(
-                """
-                SELECT id, user_id, name, kind, unit, low_threshold_kg, is_active,
-                       created_at, updated_at
-                FROM stock_items
-                WHERE user_id = ? AND lower(name) = lower(?)
-                """,
-                (user_id, clean_name),
-            ).fetchone()
+            row = _find_row_by_name(connection, user_id, clean_name)
             if row:
                 return self._item_from_row(row)
             now = datetime.now(timezone.utc).isoformat()
@@ -55,15 +47,7 @@ class StockRepository:
 
     def find_item_by_name(self, *, user_id: int, name: str) -> StockItem | None:
         with self.database.connect() as connection:
-            row = connection.execute(
-                """
-                SELECT id, user_id, name, kind, unit, low_threshold_kg, is_active,
-                       created_at, updated_at
-                FROM stock_items
-                WHERE user_id = ? AND lower(name) = lower(?)
-                """,
-                (user_id, name.strip()),
-            ).fetchone()
+            row = _find_row_by_name(connection, user_id, name.strip())
         return self._item_from_row(row) if row else None
 
     def get_item(self, item_id: int, user_id: int) -> StockItem | None:
@@ -586,3 +570,26 @@ class StockRepository:
             flock_name=str(row["flock_name"]) if row["flock_name"] else None,
             stock_item_name=str(row["stock_item_name"]) if row["stock_item_name"] else None,
         )
+
+
+def _name_key(value: str) -> str:
+    # SQLite lower() only folds ASCII, so "Пшеница" and "пшеница" would differ there.
+    return " ".join(value.casefold().replace("ё", "е").split())
+
+
+def _find_row_by_name(connection, user_id: int, name: str):
+    key = _name_key(name)
+    rows = connection.execute(
+        """
+        SELECT id, user_id, name, kind, unit, low_threshold_kg, is_active,
+               created_at, updated_at
+        FROM stock_items
+        WHERE user_id = ?
+        ORDER BY is_active DESC, id
+        """,
+        (user_id,),
+    ).fetchall()
+    for row in rows:
+        if _name_key(str(row["name"])) == key:
+            return row
+    return None

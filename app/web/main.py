@@ -690,7 +690,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             joined_at = _parse_optional_date(form.get("joined_at", ""), "Дата подсадки")
             reserve_percent = _parse_optional_float(form.get("reserve_percent", ""), default=0.0)
             database = Database(current.db_path)
-            group = FeedService(FeedRepository(database)).create_bird_group(
+            group = _feed_service_for_writes(database).create_bird_group(
                 user_id=selected_user_id,
                 name=name,
                 bird_count=bird_count,
@@ -742,7 +742,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             joined_at = _parse_optional_date(form.get("joined_at", ""), "Дата подсадки")
             reserve_percent = _parse_optional_float(form.get("reserve_percent", ""), default=0.0)
             database = Database(current.db_path)
-            group = FeedService(FeedRepository(database)).update_bird_group(
+            group = _feed_service_for_writes(database).update_bird_group(
                 group_id=group_id,
                 user_id=selected_user_id,
                 name=form.get("name", "").strip(),
@@ -792,7 +792,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
                 empty_message="Выберите хотя бы одну группу поголовья для стада.",
             )
             database = Database(current.db_path)
-            flock = FeedService(FeedRepository(database)).create_flock(
+            flock = _feed_service_for_writes(database).create_flock(
                 user_id=selected_user_id,
                 name=name,
                 member_group_ids=member_group_ids,
@@ -836,7 +836,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
                 empty_message="Выберите хотя бы одну группу поголовья для стада.",
             )
             database = Database(current.db_path)
-            flock = FeedService(FeedRepository(database)).update_flock(
+            flock = _feed_service_for_writes(database).update_flock(
                 flock_id=flock_id,
                 user_id=selected_user_id,
                 name=form.get("name", "").strip(),
@@ -1060,6 +1060,13 @@ def _selected_user_for_write(config: WebConfig, *, user_id: int | None = None) -
     )
     selected = summary.get("selected_user_id")
     return int(selected) if selected is not None else None
+
+
+def _feed_service_for_writes(database: Database) -> FeedService:
+    """FeedService that records stock consumption before flocks or bird counts change."""
+    feeds = FeedRepository(database)
+    stock_service = StockService(StockRepository(database), feeds)
+    return FeedService(feeds, before_ration_change=stock_service.checkpoint_user)
 
 
 def _stock_service(config: WebConfig) -> StockService:
