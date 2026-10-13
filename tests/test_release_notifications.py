@@ -3,12 +3,19 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from app.keyboards.admin import (
+    parse_release_callback,
+    release_callback,
+    release_offer_keyboard,
+)
 from app.services.release_notifications import (
     AdminStartupNotificationService,
     ReleaseNotificationService,
     admin_startup_event_key,
     build_admin_startup_notice,
     build_release_notice,
+    build_release_preview,
+    format_notes_list,
     release_event_key,
 )
 from app.storage.database import Database
@@ -186,3 +193,73 @@ class ReleaseNotificationTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReleaseOfferTextTest(unittest.TestCase):
+    def test_admin_notice_lists_changes_and_offers_broadcast(self) -> None:
+        text = build_admin_startup_notice(
+            version="0.1.50-beta",
+            started_at=datetime(2026, 10, 13, 16, 0, tzinfo=timezone.utc),
+            timezone_name="Europe/Moscow",
+            notes="Новый раздел; Исправлен <баг> & прочее",
+            offer_release_notice=True,
+        )
+
+        self.assertIn("Что обновлено:", text)
+        self.assertIn("- Новый раздел", text)
+        self.assertIn("- Исправлен <баг> & прочее", text)
+        self.assertIn("Разослать пользователям уведомление о новой версии?", text)
+
+    def test_admin_notice_without_offer_keeps_old_shape(self) -> None:
+        text = build_admin_startup_notice(
+            version="0.1.50-beta",
+            started_at=datetime(2026, 10, 13, 16, 0, tzinfo=timezone.utc),
+            timezone_name="Europe/Moscow",
+            notes="Новый раздел",
+        )
+
+        self.assertNotIn("Что обновлено", text)
+        self.assertNotIn("Разослать", text)
+
+    def test_admin_notice_without_notes_asks_to_edit(self) -> None:
+        text = build_admin_startup_notice(
+            version="0.1.50-beta",
+            started_at=datetime(2026, 10, 13, 16, 0, tzinfo=timezone.utc),
+            timezone_name="Europe/Moscow",
+            offer_release_notice=True,
+        )
+
+        self.assertIn("Изменить текст", text)
+
+    def test_long_notes_are_trimmed_to_fit_telegram(self) -> None:
+        notes = ";".join(f"Пункт номер {i} " + "x" * 200 for i in range(60))
+
+        lines = format_notes_list(notes)
+        text = build_release_notice("0.1.50-beta", notes)
+
+        self.assertTrue(lines[-1].startswith("…и ещё"))
+        self.assertLess(len(text), 4096)
+
+    def test_preview_shows_user_text_and_recipient_count(self) -> None:
+        text = build_release_preview("0.1.50-beta", "Новый раздел", recipients=7)
+
+        self.assertIn("Важное обновление бота: 0.1.50-beta.", text)
+        self.assertIn("- Новый раздел", text)
+        self.assertIn("Получателей: 7", text)
+
+
+class ReleaseCallbackTest(unittest.TestCase):
+    def test_callback_round_trip_and_length_limit(self) -> None:
+        data = release_callback("send", "0.1.50-beta")
+        self.assertEqual(parse_release_callback(data), ("send", "0.1.50-beta"))
+
+        long_data = release_callback("preview", "v" * 200)
+        self.assertLessEqual(len(long_data.encode("utf-8")), 64)
+
+    def test_offer_keyboard_has_send_edit_skip(self) -> None:
+        keyboard = release_offer_keyboard("0.1.50-beta")
+        actions = [
+            parse_release_callback(row[0].callback_data)[0]
+            for row in keyboard.inline_keyboard
+        ]
+        self.assertEqual(actions, ["preview", "edit", "skip"])

@@ -241,7 +241,9 @@ class FeedRepository:
         transaction_type: str,
         note: str = "",
         created_at: datetime | None = None,
+        base_kg: float | None = None,
     ) -> FeedStock | None:
+        """Apply delta to base_kg (the estimated remaining stock) or the stored amount."""
         timestamp = created_at or datetime.now(timezone.utc)
         with self.database.connect() as connection:
             row = connection.execute(
@@ -254,7 +256,8 @@ class FeedRepository:
             ).fetchone()
             if row is None:
                 return None
-            balance_after = max(float(row["amount_kg"]) + delta_kg, 0)
+            base = float(row["amount_kg"]) if base_kg is None else float(base_kg)
+            balance_after = max(base + delta_kg, 0)
             connection.execute(
                 """
                 UPDATE feed_stocks

@@ -7,6 +7,7 @@ from math import floor
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.utils.dates import local_today
 from app.domain import StockEstimate
 from app.services.eggs import EggService, EXCLUSION_REASON_LABELS
 from app.services.feeds import FeedService
@@ -254,7 +255,7 @@ class PoultryAdvisorService:
         *,
         today: date | None = None,
     ) -> str:
-        current_date = today or date.today()
+        current_date = today or local_today()
         lines = ["Инкубация сегодня:", ""]
         statuses = self.incubation_service.get_user_statuses(user_id, today=current_date)
         if not statuses:

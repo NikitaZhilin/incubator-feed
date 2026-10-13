@@ -6,13 +6,13 @@ import traceback
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError, TelegramServerError
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import MenuButtonCommands, MenuButtonWebApp, WebAppInfo
 
 from app.config import load_config, should_send_admin_startup_notice, should_send_release_notice
 from app.handlers import register_handlers
+from app.keyboards.admin import release_offer_keyboard
 from app.middlewares.callbacks import StaleCallbackMiddleware
 from app.middlewares.users import UserTrackingMiddleware
 from app.services.incubation import IncubationService
@@ -21,6 +21,7 @@ from app.services.feeds import FeedService
 from app.services.heartbeats import HeartbeatLoop
 from app.services.stock import StockService
 from app.services.admin import AdminService
+from app.services.backups import DailyBackupLoop
 from app.services.poultry_advisor import PoultryAdvisorService
 from app.services.release_notifications import AdminStartupNotificationService, ReleaseNotificationService
 from app.services.reminders import ReminderRunner
@@ -81,8 +82,9 @@ def setup_logging(log_file, level: int) -> None:
 async def main() -> None:
     config = load_config()
     setup_logging(config.log_file, config.log_level)
-    runtime_root = config.db_path.parent.parent
-    lock_path = runtime_root / "bot.lock"
+    # Lock next to the database: data/ is a shared volume, so a second bot container
+    # using the same database is refused too (Telegram allows one polling instance per token).
+    lock_path = config.db_path.with_suffix(".lock")
 
     try:
         lock = SingleInstanceLock(lock_path)
@@ -115,6 +117,7 @@ async def main() -> None:
             timezone_name=config.timezone,
         )
         stock_service = StockService(StockRepository(database), feed_repository, analytics)
+        feed_service.before_ration_change = stock_service.checkpoint_user
         poultry_advisor_service = PoultryAdvisorService(
             incubation_service=incubation_service,
             feed_service=feed_service,
@@ -132,7 +135,8 @@ async def main() -> None:
 
         bot = Bot(
             token=config.bot_token,
-            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+            # Plain text: user-entered names may contain <, > or & and must never break a message.
+            default=DefaultBotProperties(parse_mode=None),
             session=build_bot_session(config),
         )
         await configure_telegram_menu_button(bot, config)
@@ -176,8 +180,14 @@ async def main() -> None:
                 "handlers_registered": True,
             },
         )
+        backup_loop = DailyBackupLoop(
+            db_path=config.db_path,
+            backup_dir=config.backup_dir,
+            on_failure=lambda exc: notify_admins_about_backup_failure(bot, config.admin_ids, exc),
+        )
         polling_heartbeat.start()
         reminder_runner.start()
+        backup_loop.start()
         if should_send_release_notice(config):
             try:
                 result = await ReleaseNotificationService(
@@ -219,6 +229,8 @@ async def main() -> None:
                             or config.release_version
                         ),
                         commit=config.release_commit,
+                        notes=config.release_notes,
+                        reply_markup=_release_offer_markup(config),
                     )
                     logging.info(
                         "Admin startup notice completed: sent=%s skipped=%s failed=%s",
@@ -250,6 +262,7 @@ async def main() -> None:
                     await notify_admins_about_failure(bot, config.admin_ids, exc)
                     raise
         finally:
+            await backup_loop.stop()
             await polling_heartbeat.stop()
             await reminder_runner.stop()
             await bot.session.close()
@@ -260,16 +273,41 @@ async def main() -> None:
 async def notify_admins_about_failure(bot: Bot, admin_ids: frozenset[int], exc: BaseException) -> None:
     if not admin_ids:
         return
+    # Telegram rejects messages longer than 4096 characters.
     message = (
         "Критическая ошибка бота.\n\n"
-        f"{type(exc).__name__}: {exc}\n\n"
+        f"{type(exc).__name__}: {str(exc)[:500]}\n\n"
         f"{traceback.format_exc()[-2500:]}"
-    )
+    )[:4000]
     for admin_id in admin_ids:
         try:
             await bot.send_message(admin_id, message)
         except Exception:
             logging.exception("Failed to notify admin %s about failure", admin_id)
+
+
+async def notify_admins_about_backup_failure(
+    bot: Bot,
+    admin_ids: frozenset[int],
+    exc: BaseException,
+) -> None:
+    for admin_id in admin_ids:
+        try:
+            await bot.send_message(
+                admin_id,
+                "⚠️ Ежедневная резервная копия базы не создана.\n\n"
+                f"{type(exc).__name__}: {str(exc)[:500]}\n\n"
+                "Бот продолжает работать, следующая попытка через час.",
+            )
+        except Exception:
+            logging.exception("Failed to notify admin %s about backup failure", admin_id)
+
+
+def _release_offer_markup(config):
+    """Offer the admin to broadcast the release unless it was already sent automatically."""
+    if not config.release_version or should_send_release_notice(config):
+        return None
+    return release_offer_keyboard(config.release_version)
 
 
 def build_bot_session(config) -> AiohttpSession:

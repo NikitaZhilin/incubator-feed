@@ -138,6 +138,12 @@ def settings_sections_keyboard(settings: dict) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
+                    text=f"📊 Ежедневная сводка: {_status_label(settings, 'notify_daily_summary')}",
+                    callback_data="settings:toggle:notify_daily_summary",
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text=f"🔔 Системные сообщения: {_status_label(settings, 'notify_service')}",
                     callback_data="settings:toggle:notify_service",
                 )

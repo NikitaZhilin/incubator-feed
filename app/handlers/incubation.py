@@ -27,7 +27,7 @@ from app.keyboards.menu import (
 )
 from app.services.guides import incubation_calendar, post_hatch_care
 from app.services.incubation import IncubationService, to_user_local_time
-from app.utils.dates import DATE_FORMAT_HINT, parse_user_date
+from app.utils.dates import DATE_FORMAT_HINT, parse_user_date, validate_incubation_start_date
 
 
 router = Router()
@@ -315,6 +315,10 @@ async def enter_start_date(
 
     try:
         start_date = parse_user_date(message.text)
+        validate_incubation_start_date(
+            start_date,
+            today=_user_today(message.from_user.id, incubation_service),
+        )
     except ValueError as exc:
         incubation_service.track_scenario_error(
             user_id=message.from_user.id,
@@ -951,7 +955,7 @@ async def finish_hatched_count(
             batch_id=batch_id,
             user_id=callback.from_user.id,
             hatched_count=hatched_count,
-            completed_at=callback.message.date.date(),
+            completed_at=_user_today(callback.from_user.id, incubation_service),
         )
     except ValueError as exc:
         await _answer_callback_message(callback, str(exc))
@@ -965,7 +969,12 @@ async def finish_hatched_count(
         await _answer_callback_message(
             callback,
             "Партия завершена и перенесена в историю.\n\n"
-            + _format_status(incubation_service.get_status(batch, today=callback.message.date.date())),
+            + _format_status(
+                incubation_service.get_status(
+                    batch,
+                    today=_user_today(callback.from_user.id, incubation_service),
+                )
+            ),
             reply_markup=batch_actions_keyboard(batch.id, batch.is_active),
         )
     await callback.answer()
@@ -999,7 +1008,7 @@ async def complete_batch_finish(
             batch_id=batch_id,
             user_id=message.from_user.id,
             hatched_count=int(message.text.strip()),
-            completed_at=message.date.date(),
+            completed_at=_user_today(message.from_user.id, incubation_service),
         )
     except ValueError as exc:
         await message.answer(str(exc))
@@ -1012,7 +1021,12 @@ async def complete_batch_finish(
 
     await message.answer(
         "Партия завершена и перенесена в историю.\n\n"
-        + _format_status(incubation_service.get_status(batch, today=message.date.date())),
+        + _format_status(
+            incubation_service.get_status(
+                batch,
+                today=_user_today(message.from_user.id, incubation_service),
+            )
+        ),
         reply_markup=batch_actions_keyboard(batch.id, batch.is_active),
     )
 
@@ -1174,7 +1188,7 @@ async def _apply_edit(
         return incubation_service.update_batch(
             batch_id=batch_id,
             user_id=user_id,
-            start_date=parse_user_date(value),
+            start_date=_checked_start_date(value, user_id, incubation_service),
         )
     if field in {"title", "name", "название"}:
         return incubation_service.update_batch(
@@ -1229,6 +1243,12 @@ def _format_status(status) -> str:
         f"{note}\n\n"
         f"Рекомендации:\n{recommendations}"
     )
+
+
+def _checked_start_date(value: str, user_id: int, incubation_service: IncubationService) -> date:
+    start_date = parse_user_date(value)
+    validate_incubation_start_date(start_date, today=_user_today(user_id, incubation_service))
+    return start_date
 
 
 def _user_today(

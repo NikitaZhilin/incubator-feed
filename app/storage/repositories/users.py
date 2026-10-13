@@ -80,7 +80,7 @@ class UserRepository:
                 """
                 SELECT user_id, timezone, notification_time, notify_incubation,
                        notify_feed, notify_eggs, notify_post_hatch_care,
-                       notify_poultry_advisor, notify_service, units, farm_name, is_active
+                       notify_poultry_advisor, notify_daily_summary, notify_service, units, farm_name, is_active
                 FROM users
                 ORDER BY user_id
                 """
@@ -106,7 +106,7 @@ class UserRepository:
                 """
                 SELECT user_id, timezone, notification_time, notify_incubation,
                        notify_feed, notify_eggs, notify_post_hatch_care,
-                       notify_poultry_advisor, notify_service, units, farm_name, is_active
+                       notify_poultry_advisor, notify_daily_summary, notify_service, units, farm_name, is_active
                 FROM users
                 WHERE user_id = ?
                 """,
@@ -122,6 +122,7 @@ class UserRepository:
                 "notify_eggs": True,
                 "notify_post_hatch_care": True,
                 "notify_poultry_advisor": True,
+                "notify_daily_summary": True,
                 "notify_service": True,
                 "units": "metric",
                 "farm_name": "",
@@ -138,6 +139,7 @@ class UserRepository:
             "notify_eggs",
             "notify_post_hatch_care",
             "notify_poultry_advisor",
+            "notify_daily_summary",
             "notify_service",
             "units",
             "farm_name",
@@ -171,6 +173,11 @@ class UserRepository:
             "notify_poultry_advisor": (
                 bool(row["notify_poultry_advisor"])
                 if "notify_poultry_advisor" in row.keys()
+                else True
+            ),
+            "notify_daily_summary": (
+                bool(row["notify_daily_summary"])
+                if "notify_daily_summary" in row.keys()
                 else True
             ),
             "notify_service": bool(row["notify_service"]),

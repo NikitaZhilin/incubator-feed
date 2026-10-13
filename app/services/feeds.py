@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import datetime, time, timedelta, timezone
 from math import floor, isfinite
 
@@ -17,9 +18,21 @@ CHICK_DAILY_G_RANGES = (
 
 
 class FeedService:
-    def __init__(self, feeds: FeedRepository, analytics: AnalyticsRepository | None = None) -> None:
+    def __init__(
+        self,
+        feeds: FeedRepository,
+        analytics: AnalyticsRepository | None = None,
+        before_ration_change: Callable[[int], object] | None = None,
+    ) -> None:
         self.feeds = feeds
         self.analytics = analytics
+        # Called with user_id before bird counts or flock membership change, so the
+        # stock records consumption at the old ration first (StockService.checkpoint_user).
+        self.before_ration_change = before_ration_change
+
+    def _ration_will_change(self, user_id: int) -> None:
+        if self.before_ration_change is not None:
+            self.before_ration_change(user_id)
 
     def create_feed(
         self,
@@ -176,6 +189,20 @@ class FeedService:
         if daily_per_bird_g is not None:
             hen_daily_g = daily_per_bird_g if hen_daily_g is None else hen_daily_g
             rooster_daily_g = daily_per_bird_g if rooster_daily_g is None else rooster_daily_g
+        usage_changes = any(
+            value is not None
+            for value in (bird_count, daily_per_bird_g, hen_count, rooster_count, hen_daily_g, rooster_daily_g, bird_group_id)
+        ) or clear_bird_group
+        if usage_changes:
+            # Fix what was eaten so far at the old rate; the new rate applies from now on.
+            self.feeds.change_stock(
+                feed_id=feed_id,
+                user_id=user_id,
+                delta_kg=0,
+                transaction_type="adjustment",
+                note="Расход до изменения поголовья или нормы",
+                base_kg=round(self.estimate(current).remaining_kg, 3),
+            )
         feed = self.feeds.update(
             feed_id=feed_id,
             user_id=user_id,
@@ -238,6 +265,7 @@ class FeedService:
             delta_kg=amount_kg,
             transaction_type="restock",
             note=note,
+            base_kg=self._estimated_remaining(feed_id, user_id),
         )
         if feed is not None:
             self._track("feed_restocked", user_id=user_id, feed_id=feed_id)
@@ -259,10 +287,18 @@ class FeedService:
             delta_kg=-amount_kg,
             transaction_type="write_off",
             note=note,
+            base_kg=self._estimated_remaining(feed_id, user_id),
         )
         if feed is not None:
             self._track("feed_written_off", user_id=user_id, feed_id=feed_id)
         return feed
+
+    def _estimated_remaining(self, feed_id: int, user_id: int) -> float | None:
+        feed = self.feeds.get(feed_id, user_id)
+        if feed is None:
+            return None
+        # Gram precision: avoid fractions eaten in the milliseconds between operations.
+        return round(self.estimate(feed).remaining_kg, 3)
 
     def list_transactions(self, feed_id: int, user_id: int) -> list[FeedTransaction]:
         return self.feeds.list_transactions(feed_id, user_id)
@@ -353,6 +389,7 @@ class FeedService:
             raise ValueError("Дата подсадки не может быть раньше даты вывода.")
         if reserve_percent is not None and reserve_percent < 0:
             raise ValueError("Запас не может быть отрицательным.")
+        self._ration_will_change(user_id)
         return self.feeds.update_bird_group(
             group_id=group_id,
             user_id=user_id,
@@ -365,6 +402,7 @@ class FeedService:
         )
 
     def archive_bird_group(self, group_id: int, user_id: int) -> bool:
+        self._ration_will_change(user_id)
         return self.feeds.archive_bird_group(group_id, user_id)
 
     def create_flock(self, *, user_id: int, name: str, member_group_ids: list[int]) -> Flock:
@@ -379,6 +417,8 @@ class FeedService:
             group = self.feeds.get_bird_group(group_id, user_id)
             if group is None or not group.is_active:
                 raise ValueError("Поголовье для стада не найдено.")
+            self._ensure_not_in_other_flock(user_id=user_id, bird_group_id=group_id)
+        self._ration_will_change(user_id)
         flock = self.feeds.create_flock(user_id=user_id, name=clean_name)
         for group_id in member_group_ids:
             self.add_flock_member(user_id=user_id, flock_id=flock.id, bird_group_id=group_id)
@@ -391,6 +431,7 @@ class FeedService:
         return self.feeds.get_flock(flock_id, user_id)
 
     def archive_flock(self, flock_id: int, user_id: int) -> bool:
+        self._ration_will_change(user_id)
         return self.feeds.archive_flock(flock_id, user_id)
 
     def update_flock(
@@ -417,6 +458,11 @@ class FeedService:
                 group = self.feeds.get_bird_group(group_id, user_id)
                 if group is None or not group.is_active:
                     raise ValueError("Поголовье для стада не найдено.")
+                self._ensure_not_in_other_flock(
+                    user_id=user_id,
+                    bird_group_id=group_id,
+                    flock_id=flock_id,
+                )
         flock = self.feeds.update_flock(flock_id=flock_id, user_id=user_id, name=name)
         if flock is None:
             return None
@@ -441,6 +487,8 @@ class FeedService:
         return self.feeds.get_flock(flock_id, user_id)
 
     def add_flock_member(self, *, user_id: int, flock_id: int, bird_group_id: int) -> FlockMember:
+        self._ensure_not_in_other_flock(user_id=user_id, bird_group_id=bird_group_id, flock_id=flock_id)
+        self._ration_will_change(user_id)
         member = self.feeds.add_flock_member(
             user_id=user_id,
             flock_id=flock_id,
@@ -451,6 +499,7 @@ class FeedService:
         return member
 
     def remove_flock_member(self, *, user_id: int, flock_id: int, bird_group_id: int) -> bool:
+        self._ration_will_change(user_id)
         return self.feeds.remove_flock_member(
             user_id=user_id,
             flock_id=flock_id,
@@ -459,6 +508,26 @@ class FeedService:
 
     def list_flock_members(self, flock_id: int, user_id: int) -> list[FlockMember]:
         return self.feeds.list_flock_members(flock_id, user_id)
+
+    def _ensure_not_in_other_flock(
+        self,
+        *,
+        user_id: int,
+        bird_group_id: int,
+        flock_id: int | None = None,
+    ) -> None:
+        """A bird group eats from one flock ration; being in two would double its usage."""
+        for flock in self.feeds.list_flocks(user_id):
+            if not flock.is_active or flock.id == flock_id:
+                continue
+            if any(
+                member.bird_group_id == bird_group_id
+                for member in self.feeds.list_flock_members(flock.id, user_id)
+            ):
+                raise ValueError(
+                    f"Эта группа уже в стаде «{flock.name}». "
+                    "Сначала уберите ее оттуда, иначе расход корма посчитается дважды."
+                )
 
     def _active_flock_name_exists(
         self,

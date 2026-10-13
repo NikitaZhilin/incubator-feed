@@ -1,12 +1,25 @@
+import asyncio
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
+from app.keyboards.admin import (
+    MAX_CALLBACK_VERSION_LENGTH,
+    RELEASE_CALLBACK_PREFIX,
+    parse_release_callback,
+    release_confirm_keyboard,
+)
 from app.keyboards.menu import back_to_menu_keyboard
 from app.services.admin import AdminService
-from app.services.reminders import classify_telegram_error
+from app.services.release_notifications import (
+    ReleaseNotificationService,
+    build_release_preview,
+    count_release_recipients,
+)
+from app.services.reminders import classify_telegram_error, respect_rate_limit
 
 
 router = Router()
@@ -14,6 +27,17 @@ router = Router()
 
 class AdminBroadcast(StatesGroup):
     confirm = State()
+
+
+class AdminReleaseNotes(StatesGroup):
+    waiting_text = State()
+
+
+RELEASE_DRAFT_KEY = "release_notes_draft"
+BROADCAST_PAUSE_SECONDS = 0.05
+MAX_RELEASE_NOTES_INPUT = 3000
+# Versions whose broadcast is running right now (guards against double taps).
+_release_sends_in_progress: set[str] = set()
 
 
 @router.message(Command("admin"))
@@ -88,6 +112,7 @@ async def admin_broadcast_confirm(
             sent += 1
         except Exception as exc:
             error_code = classify_telegram_error(exc)
+            await respect_rate_limit(exc)
             admin_service.notifications.mark_failed(
                 event_key,
                 error_code=error_code,
@@ -96,6 +121,8 @@ async def admin_broadcast_confirm(
             if error_code in {"blocked", "deactivated"}:
                 admin_service.users.mark_inactive(user_id, error_code)
             failed += 1
+        # Stay well below Telegram's ~30 messages per second limit.
+        await asyncio.sleep(BROADCAST_PAUSE_SECONDS)
     await message.answer(f"Рассылка завершена. Отправлено: {sent}, ошибок: {failed}.")
 
 
@@ -106,6 +133,141 @@ async def admin_refresh(callback: CallbackQuery, admin_service: AdminService) ->
         return
     await callback.message.answer(_format_admin_stats(admin_service), reply_markup=back_to_menu_keyboard())
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith(RELEASE_CALLBACK_PREFIX))
+async def admin_release_action(
+    callback: CallbackQuery,
+    state: FSMContext,
+    admin_service: AdminService,
+) -> None:
+    if not admin_service.is_admin(callback.from_user.id):
+        await callback.answer("Недоступно", show_alert=True)
+        return
+    action, version = parse_release_callback(callback.data or "")
+    current_version = _current_release_version(admin_service)
+    if not current_version or version != current_version[:MAX_CALLBACK_VERSION_LENGTH]:
+        await callback.answer(
+            f"Это уведомление от прошлой версии. Сейчас работает: {current_version or 'не указана'}.",
+            show_alert=True,
+        )
+        return
+
+    if action == "preview":
+        await callback.answer()
+        await _show_release_preview(callback.message, state, admin_service, edit=True)
+    elif action == "edit":
+        await state.set_state(AdminReleaseNotes.waiting_text)
+        await callback.answer()
+        await callback.message.answer(
+            f"Пришлите одним сообщением, что изменилось в версии {current_version}.\n"
+            "Каждый пункт с новой строки.\n"
+            "Отмена: /cancel"
+        )
+    elif action == "skip":
+        await callback.answer("Рассылка отменена")
+        await callback.message.edit_text(
+            f"🚫 Уведомление о версии {current_version} пользователям не отправлялось.",
+            reply_markup=None,
+        )
+    elif action == "send":
+        if current_version in _release_sends_in_progress:
+            await callback.answer("Рассылка уже идёт", show_alert=True)
+            return
+        _release_sends_in_progress.add(current_version)
+        try:
+            await _send_release(callback, state, admin_service, current_version)
+        finally:
+            _release_sends_in_progress.discard(current_version)
+    else:
+        await callback.answer("Неизвестное действие", show_alert=True)
+
+
+@router.message(AdminReleaseNotes.waiting_text)
+async def admin_release_notes_input(
+    message: Message,
+    state: FSMContext,
+    admin_service: AdminService,
+) -> None:
+    if not _is_admin_message(message, admin_service):
+        await state.clear()
+        await message.answer("Команда недоступна.")
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Нужен текст. Пришлите список изменений или /cancel.")
+        return
+    if len(text) > MAX_RELEASE_NOTES_INPUT:
+        await message.answer(
+            f"Слишком длинно ({len(text)} символов). Сократите до {MAX_RELEASE_NOTES_INPUT}."
+        )
+        return
+    await state.set_state(None)
+    await state.update_data(
+        **{RELEASE_DRAFT_KEY: {"version": _current_release_version(admin_service), "notes": text}}
+    )
+    await _show_release_preview(message, state, admin_service, edit=False)
+
+
+async def _send_release(
+    callback: CallbackQuery,
+    state: FSMContext,
+    admin_service: AdminService,
+    current_version: str,
+) -> None:
+    await callback.answer("Рассылаю…")
+    # Remove the buttons first so a second tap cannot start another run.
+    await callback.message.edit_text(
+        f"⏳ Рассылаю уведомление о версии {current_version}…",
+        reply_markup=None,
+    )
+    notes = await _release_notes(state, admin_service)
+    result = await ReleaseNotificationService(
+        bot=callback.bot,
+        users=admin_service.users,
+        notifications=admin_service.notifications,
+    ).send_release_notice(
+        version=current_version,
+        notes=notes,
+        importance="major",
+    )
+    await state.update_data(**{RELEASE_DRAFT_KEY: None})
+    await callback.message.edit_text(
+        f"✅ Уведомление о версии {current_version} разослано.\n"
+        f"Отправлено: {result.sent}, пропущено: {result.skipped}, ошибок: {result.failed}.",
+        reply_markup=None,
+    )
+
+
+async def _show_release_preview(
+    message: Message,
+    state: FSMContext,
+    admin_service: AdminService,
+    *,
+    edit: bool,
+) -> None:
+    version = _current_release_version(admin_service)
+    notes = await _release_notes(state, admin_service)
+    recipients = count_release_recipients(admin_service.users)
+    text = build_release_preview(version, notes, recipients=recipients)
+    keyboard = release_confirm_keyboard(version, recipients)
+    if edit:
+        await message.edit_text(text, reply_markup=keyboard)
+    else:
+        await message.answer(text, reply_markup=keyboard)
+
+
+async def _release_notes(state: FSMContext, admin_service: AdminService) -> str:
+    """Admin-edited notes for the current version win over the deploy notes."""
+    data = await state.get_data()
+    draft = data.get(RELEASE_DRAFT_KEY)
+    if isinstance(draft, dict) and draft.get("version") == _current_release_version(admin_service):
+        return str(draft.get("notes") or "")
+    return admin_service.config.release_notes
+
+
+def _current_release_version(admin_service: AdminService) -> str:
+    return (admin_service.config.release_version or "").strip()
 
 
 def _is_admin_message(message: Message, admin_service: AdminService) -> bool:

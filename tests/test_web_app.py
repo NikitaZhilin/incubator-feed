@@ -60,6 +60,17 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
 
+    def test_api_docs_are_not_public(self) -> None:
+        self.assertEqual(self.client.get("/docs").status_code, 404)
+        self.assertEqual(self.client.get("/redoc").status_code, 404)
+        self.assertEqual(self.client.get("/openapi.json").status_code, 404)
+
+    def test_responses_do_not_leak_token_via_referer(self) -> None:
+        response = self.client.get("/health")
+
+        self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+
     def test_protected_pages_require_token(self) -> None:
         self.assertEqual(self.client.get("/status").status_code, 401)
         self.assertEqual(self.client.get("/version").status_code, 401)
@@ -386,6 +397,25 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("Создать замес", page_response.text)
         self.assertIn("Зерновая смесь для кур несушек", page_response.text)
 
+    def test_repeated_mix_submit_creates_one_mix(self) -> None:
+        self._create_household_data()
+        form = {
+            "user_id": "1",
+            "mix_count": "1",
+            "grain_base": "layer_grain_mix",
+            "request_id": "same-page-id",
+        }
+
+        before = len(self.client.get("/mix/data", headers=self._auth()).json()["history"])
+
+        first = self.client.post("/feeds/mixes?auth=link-token", data=form, follow_redirects=False)
+        second = self.client.post("/feeds/mixes?auth=link-token", data=form, follow_redirects=False)
+        history = self.client.get("/mix/data", headers=self._auth()).json()["history"]
+
+        self.assertEqual(first.status_code, 303)
+        self.assertEqual(second.status_code, 303)
+        self.assertEqual(len(history), before + 1)
+
     def test_mix_can_be_confirmed_and_created_from_web_form(self) -> None:
         self._create_household_data()
 
@@ -506,8 +536,14 @@ class WebAppTest(unittest.TestCase):
 
     def test_flock_can_be_created_from_web_form(self) -> None:
         self._create_household_data()
-        data_before = self.client.get("/livestock/data", headers=self._auth()).json()
-        group_id = data_before["bird_groups"][0]["id"]
+        # A group can belong to one flock only, so use a group that is not in a flock yet.
+        group_id = FeedService(FeedRepository(self.database)).create_bird_group(
+            user_id=1,
+            name="Молодки",
+            bird_count=5,
+            species="chicken",
+            role="hens",
+        ).id
 
         post_response = self.client.post(
             "/flocks?auth=link-token",
@@ -849,8 +885,11 @@ class WebAppTest(unittest.TestCase):
         self.assertTrue(settings["notify_eggs"])
         self.assertFalse(settings["notify_post_hatch_care"])
         self.assertFalse(settings["notify_service"])
+        self.assertFalse(settings["notify_poultry_advisor"])
+        self.assertFalse(settings["notify_daily_summary"])
         self.assertEqual(page_response.status_code, 200)
         self.assertIn("Разделы Telegram-бота обновлены", page_response.text)
+        self.assertIn("Ежедневная сводка", page_response.text)
 
     def test_summary_does_not_create_default_weather_settings(self) -> None:
         UserRepository(self.database).upsert(user_id=1, first_name="Admin")

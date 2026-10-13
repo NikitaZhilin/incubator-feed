@@ -37,6 +37,7 @@ DEFAULT_ROOSTER_DAILY_G = 150
 DEFAULT_ADULT_DAILY_G = 120
 MIX_MODE_TO_STOCK = "to_stock"
 MIX_MODE_ALREADY_FED = "already_fed"
+CONSUMPTION_CHECKPOINT_NOTE = "Расход по рациону до изменения"
 
 
 @dataclass(frozen=True)
@@ -194,6 +195,36 @@ class StockService:
         self._track("stock_adjusted", user_id=user_id, entity_id=item.id)
         return self.estimate_item(item, now=transaction.created_at)
 
+    def checkpoint_user(self, user_id: int, *, now: datetime | None = None) -> int:
+        """Record what has been eaten so far before rations, flocks or bird counts change.
+
+        Consumption is estimated from the current ration since the last stock
+        transaction. Without this checkpoint a change of ration would either
+        erase the consumption (old assignment is deactivated) or recalculate it
+        retroactively with the new numbers.
+        """
+        current = now or datetime.now(timezone.utc)
+        recorded = 0
+        for item in self.stock.list_items(user_id):
+            last = self.stock.last_transaction(item.id, item.user_id)
+            if last is None or self._daily_usage_kg(item, current) <= 0:
+                continue
+            remaining_kg = self.estimate_item(item, now=current).remaining_kg
+            eaten_kg = last.balance_after_kg - remaining_kg
+            if eaten_kg < 0.001:
+                continue
+            self.stock.add_transaction(
+                user_id=user_id,
+                stock_item_id=item.id,
+                transaction_type="write_off",
+                amount_kg=-eaten_kg,
+                balance_after_kg=remaining_kg,
+                note=CONSUMPTION_CHECKPOINT_NOTE,
+                created_at=current,
+            )
+            recorded += 1
+        return recorded
+
     def plan_mix(
         self,
         *,
@@ -236,6 +267,28 @@ class StockService:
             output_kg=one_cycle_kg * mix_count,
             ingredients=tuple(ingredients),
         )
+
+    def low_mix_ingredients(
+        self,
+        *,
+        user_id: int,
+        min_mixes: float = 2,
+        now: datetime | None = None,
+    ) -> list[tuple[str, int]]:
+        """Purchased recipe ingredients that are enough for fewer than ``min_mixes`` mixes.
+
+        Measured in mixes, not kilograms: a mix needs ~75 g of premix but ~2.5 kg of corn,
+        so one kilogram threshold cannot fit every ingredient.
+        """
+        plan = self.best_available_mix_plan(user_id=user_id, now=now)
+        low: list[tuple[str, int]] = []
+        for ingredient in plan.ingredients:
+            if ingredient.stock_item_id is None or ingredient.required_kg <= 0:
+                continue
+            mixes_left = ingredient.available_kg / ingredient.required_kg
+            if mixes_left < min_mixes:
+                low.append((ingredient.name, floor(mixes_left)))
+        return sorted(low, key=lambda item: item[1])
 
     def best_available_mix_plan(
         self,
@@ -361,6 +414,7 @@ class StockService:
             raise ValueError("Позиция склада не найдена.")
         self._validate_amount(daily_per_bird_g)
         self._validate_amount(reserve_percent, allow_zero=True)
+        self.checkpoint_user(user_id)
         assignment = self.stock.create_assignment(
             user_id=user_id,
             bird_group_id=bird_group_id,
@@ -406,6 +460,7 @@ class StockService:
         )
         if active_share + share_percent > 100:
             raise ValueError("Сумма долей рациона стада не может быть больше 100%.")
+        self.checkpoint_user(user_id)
         members = self.feeds.list_flock_members(flock_id, user_id)
         self.stock.deactivate_assignments_for_groups(
             user_id=user_id,
@@ -539,7 +594,9 @@ class StockService:
         )
 
     def _find_stock_item_by_names(self, *, user_id: int, names: tuple[str, ...]) -> StockItem | None:
-        items = self.stock.list_items(user_id)
+        # Finished mix is the product of a mix, never its ingredient: "Смесь для кур"
+        # would otherwise match the grain base "Зерновая смесь для кур несушек".
+        items = [item for item in self.stock.list_items(user_id) if item.kind != "finished_mix"]
         normalized_names = set()
         for name in names:
             cleaned = name.strip()
@@ -548,7 +605,7 @@ class StockService:
                 continue
             normalized_names.add(normalized)
             item = self.stock.find_item_by_name(user_id=user_id, name=cleaned)
-            if item is not None:
+            if item is not None and item.is_active and item.kind != "finished_mix":
                 return item
         for item in items:
             stock_name = _normalize_stock_name(item.name)

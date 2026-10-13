@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.keyboards.menu import main_menu_keyboard
-from app.services.reminders import classify_telegram_error
+from app.services.reminders import classify_telegram_error, respect_rate_limit
 from app.storage.repositories.notifications import NotificationRepository
 from app.storage.repositories.users import UserRepository
 
@@ -14,6 +15,10 @@ from app.storage.repositories.users import UserRepository
 DEFAULT_TESTING_DISCLAIMER = (
     "⚠️ Бот находится в тестировании. Данные могут быть изменены или утеряны."
 )
+
+# Telegram limits a message to 4096 characters; keep the change list well below that.
+MAX_NOTES_CHARS = 2500
+BROADCAST_PAUSE_SECONDS = 0.05
 
 
 @dataclass(frozen=True)
@@ -45,13 +50,13 @@ def build_release_notice(version: str, notes: str = "", *, importance: str = "ma
             ]
         )
 
-    note_items = _normalize_notes(notes)
     lines = [
         f"Важное обновление бота: {version}.",
     ]
-    if note_items:
+    note_lines = format_notes_list(notes)
+    if note_lines:
         lines.extend(["", "Что изменилось:"])
-        lines.extend(f"- {item}" for item in note_items)
+        lines.extend(note_lines)
     lines.extend(
         [
             "",
@@ -84,6 +89,8 @@ def build_admin_startup_notice(
     started_at: datetime,
     timezone_name: str,
     commit: str = "",
+    notes: str = "",
+    offer_release_notice: bool = False,
 ) -> str:
     version = version.strip() or "не указана"
     lines = [
@@ -94,14 +101,62 @@ def build_admin_startup_notice(
     ]
     if commit.strip():
         lines.append(f"Коммит: {commit.strip()[:12]}")
-    lines.extend(
+    lines.append(f"Запуск: {_format_notice_time(started_at, timezone_name)}")
+    if offer_release_notice:
+        note_lines = format_notes_list(notes)
+        lines.append("")
+        if note_lines:
+            lines.append("Что обновлено:")
+            lines.extend(note_lines)
+        else:
+            lines.append("Список изменений не найден: допишите его кнопкой «Изменить текст».")
+        lines.extend(
+            [
+                "",
+                "Разослать пользователям уведомление о новой версии?",
+                "Перед отправкой будет показан текст сообщения.",
+            ]
+        )
+    lines.extend(["", "Сообщение только для администраторов."])
+    return "\n".join(lines)
+
+
+def build_release_preview(version: str, notes: str, *, recipients: int) -> str:
+    return "\n".join(
         [
-            f"Запуск: {_format_notice_time(started_at, timezone_name)}",
+            "👀 Так пользователи увидят уведомление:",
             "",
-            "Сообщение только для администраторов.",
+            "━━━━━━━━━━",
+            build_release_notice(version, notes, importance="major"),
+            "━━━━━━━━━━",
+            "",
+            f"Получателей: {recipients}",
+            "Отправить?",
         ]
     )
-    return "\n".join(lines)
+
+
+def format_notes_list(notes: str, *, max_chars: int = MAX_NOTES_CHARS) -> list[str]:
+    """Return "- item" lines, trimmed to fit into one Telegram message."""
+    items = _normalize_notes(notes)
+    lines: list[str] = []
+    used = 0
+    for index, item in enumerate(items):
+        line = f"- {item}"
+        if used + len(line) > max_chars:
+            lines.append(f"…и ещё {len(items) - index} пункт(ов)")
+            break
+        lines.append(line)
+        used += len(line) + 1
+    return lines
+
+
+def count_release_recipients(users: UserRepository) -> int:
+    return sum(
+        1
+        for settings in users.list_users_with_settings()
+        if settings.get("is_active", True) and settings.get("notify_service", True)
+    )
 
 
 class ReleaseNotificationService:
@@ -155,6 +210,7 @@ class ReleaseNotificationService:
                 )
             except Exception as exc:
                 error_code = classify_telegram_error(exc)
+                await respect_rate_limit(exc)
                 self.notifications.mark_failed(
                     event_key,
                     error_code=error_code,
@@ -167,6 +223,8 @@ class ReleaseNotificationService:
 
             self.notifications.mark_sent(event_key, scheduled_for)
             sent += 1
+            # Stay well below Telegram's ~30 messages per second limit.
+            await asyncio.sleep(BROADCAST_PAUSE_SECONDS)
 
         return ReleaseNoticeResult(sent=sent, skipped=skipped, failed=failed)
 
@@ -192,6 +250,8 @@ class AdminStartupNotificationService:
         mode: str = "once_per_deploy",
         deployment_id: str = "",
         commit: str = "",
+        notes: str = "",
+        reply_markup=None,
         now: datetime | None = None,
     ) -> AdminStartupNoticeResult:
         sent = 0
@@ -204,6 +264,8 @@ class AdminStartupNotificationService:
             started_at=started_at,
             timezone_name=timezone_name,
             commit=commit,
+            notes=notes,
+            offer_release_notice=reply_markup is not None,
         )
 
         for admin_id in sorted(self.admin_ids):
@@ -219,9 +281,10 @@ class AdminStartupNotificationService:
                 scheduled_for=scheduled_for,
             )
             try:
-                await self.bot.send_message(admin_id, text)
+                await self.bot.send_message(admin_id, text, reply_markup=reply_markup)
             except Exception as exc:
                 error_code = classify_telegram_error(exc)
+                await respect_rate_limit(exc)
                 self.notifications.mark_failed(
                     event_key,
                     error_code=error_code,

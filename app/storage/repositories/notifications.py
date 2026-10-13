@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from app.storage.database import Database
 
@@ -18,6 +18,42 @@ class NotificationRepository:
                 (event_key,),
             ).fetchone()
         return row is not None
+
+    def can_attempt(
+        self,
+        event_key: str,
+        *,
+        max_attempts: int = 5,
+        retry_delay: timedelta = timedelta(minutes=10),
+        now: datetime | None = None,
+    ) -> bool:
+        """False when the event was sent, failed too often, or failed too recently.
+
+        Keeps a permanently failing message (bad text, rate limit) from being
+        retried on every reminder tick.
+        """
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT status, attempts, updated_at
+                FROM notification_log
+                WHERE event_key = ?
+                """,
+                (event_key,),
+            ).fetchone()
+        if row is None:
+            return True
+        if row["status"] == "sent":
+            return False
+        if row["status"] != "failed":
+            return True
+        if int(row["attempts"] or 0) >= max_attempts:
+            return False
+        last_try = _parse_sqlite_timestamp(row["updated_at"])
+        if last_try is None:
+            return True
+        current = now or datetime.now(timezone.utc)
+        return current - last_try >= retry_delay
 
     def record_attempt(
         self,
@@ -106,3 +142,16 @@ class NotificationRepository:
                 (limit,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+
+def _parse_sqlite_timestamp(value) -> datetime | None:
+    """Parse CURRENT_TIMESTAMP ('YYYY-MM-DD HH:MM:SS', UTC) or an ISO string."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace(" ", "T"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed

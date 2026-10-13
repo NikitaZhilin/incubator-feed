@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from datetime import date
 from html import escape
 from math import isfinite
@@ -21,6 +22,7 @@ from app.storage.repositories.eggs import EggRepository
 from app.storage.repositories.feeds import FeedRepository
 from app.storage.repositories.stock import StockRepository
 from app.storage.repositories.users import UserRepository
+from app.utils.dates import local_today, validate_incubation_start_date
 from app.web.config import WebConfig, load_web_config
 from app.web.summary import (
     build_web_eggs,
@@ -34,8 +36,26 @@ from app.web.summary import (
 
 def create_app(config: WebConfig | None = None) -> FastAPI:
     web_config = config or load_web_config()
-    app = FastAPI(title="tg_bot_inkubator web", version=web_config.release_version)
+    # No public API docs: /docs and /openapi.json would list every route without a token.
+    app = FastAPI(
+        title="tg_bot_inkubator web",
+        version=web_config.release_version,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.state.web_config = web_config
+    # Recently used mix confirmation ids: a repeated submit must not mix twice.
+    app.state.processed_mix_requests = deque(maxlen=200)
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        # Pages carry the access token in the URL; never leak it via Referer.
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Cache-Control", "no-store")
+        return response
 
     def require_web_access(
         authorization: str | None = Header(default=None),
@@ -288,6 +308,10 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
         user_id = int(raw_user_id) if raw_user_id.strip().isdigit() else None
         mix_count = form.get("mix_count", "1")
         grain_base = form.get("grain_base", "wheat")
+        request_id = form.get("request_id", "").strip()[:64]
+        if request_id and request_id in app.state.processed_mix_requests:
+            # Second submit of the same confirmation page (double click, refresh).
+            return _redirect_with_message(redirect_base, notice="Этот замес уже записан.")
         if not current.db_path.exists():
             return _redirect_with_message(
                 redirect_base,
@@ -308,6 +332,8 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             )
         except ValueError as exc:
             return _redirect_with_message(redirect_base, error=str(exc))
+        if request_id:
+            app.state.processed_mix_requests.append(request_id)
         return _redirect_with_message(
             redirect_base,
             notice=f"Замес создан: {plan.mix_count:g} повт., получено {_kg(plan.output_kg)}.",
@@ -531,7 +557,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
                     empty_message="Укажите количество яиц.",
                     positive_message="Количество яиц должно быть больше нуля.",
                 ),
-                start_date=_parse_required_date(form.get("start_date", ""), "Дата закладки"),
+                start_date=_checked_start_date(form.get("start_date", ""), current.timezone_name),
                 title=str(form.get("title", "")).strip() or None,
                 note=str(form.get("note", "")).strip(),
             )
@@ -674,7 +700,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             joined_at = _parse_optional_date(form.get("joined_at", ""), "Дата подсадки")
             reserve_percent = _parse_optional_float(form.get("reserve_percent", ""), default=0.0)
             database = Database(current.db_path)
-            group = FeedService(FeedRepository(database)).create_bird_group(
+            group = _feed_service_for_writes(database).create_bird_group(
                 user_id=selected_user_id,
                 name=name,
                 bird_count=bird_count,
@@ -726,7 +752,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             joined_at = _parse_optional_date(form.get("joined_at", ""), "Дата подсадки")
             reserve_percent = _parse_optional_float(form.get("reserve_percent", ""), default=0.0)
             database = Database(current.db_path)
-            group = FeedService(FeedRepository(database)).update_bird_group(
+            group = _feed_service_for_writes(database).update_bird_group(
                 group_id=group_id,
                 user_id=selected_user_id,
                 name=form.get("name", "").strip(),
@@ -776,7 +802,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
                 empty_message="Выберите хотя бы одну группу поголовья для стада.",
             )
             database = Database(current.db_path)
-            flock = FeedService(FeedRepository(database)).create_flock(
+            flock = _feed_service_for_writes(database).create_flock(
                 user_id=selected_user_id,
                 name=name,
                 member_group_ids=member_group_ids,
@@ -820,7 +846,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
                 empty_message="Выберите хотя бы одну группу поголовья для стада.",
             )
             database = Database(current.db_path)
-            flock = FeedService(FeedRepository(database)).update_flock(
+            flock = _feed_service_for_writes(database).update_flock(
                 flock_id=flock_id,
                 user_id=selected_user_id,
                 name=form.get("name", "").strip(),
@@ -946,6 +972,8 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             notify_feed="feeds" in section_keys,
             notify_eggs="eggs" in section_keys,
             notify_post_hatch_care="post_hatch_care" in section_keys,
+            notify_poultry_advisor="poultry_advisor" in section_keys,
+            notify_daily_summary="daily_summary" in section_keys,
             notify_service="service" in section_keys,
         )
         return _redirect_with_message(
@@ -1044,6 +1072,13 @@ def _selected_user_for_write(config: WebConfig, *, user_id: int | None = None) -
     )
     selected = summary.get("selected_user_id")
     return int(selected) if selected is not None else None
+
+
+def _feed_service_for_writes(database: Database) -> FeedService:
+    """FeedService that records stock consumption before flocks or bird counts change."""
+    feeds = FeedRepository(database)
+    stock_service = StockService(StockRepository(database), feeds)
+    return FeedService(feeds, before_ration_change=stock_service.checkpoint_user)
 
 
 def _stock_service(config: WebConfig) -> StockService:
@@ -1177,10 +1212,19 @@ def _parse_required_date(value: str, label: str) -> date:
     return parsed
 
 
+def _checked_start_date(value: str, timezone_name: str) -> date:
+    start_date = _parse_required_date(value, "Дата закладки")
+    validate_incubation_start_date(start_date, today=local_today(timezone_name))
+    return start_date
+
+
 def _parse_egg_entry_date(value: str, *, entry_day: str, service: EggService) -> date:
-    if str(value).strip():
-        return _parse_required_date(value, "Дата сбора")
     current = service.current_date()
+    if str(value).strip():
+        entry_date = _parse_required_date(value, "Дата сбора")
+        if entry_date > current:
+            raise ValueError("Нельзя записать сбор на будущую дату.")
+        return entry_date
     if entry_day == "today":
         return current
     if entry_day == "yesterday":
@@ -1973,8 +2017,17 @@ def _render_mix_confirm_page(
     <input type="hidden" name="user_id" value="{escape(str(selected_user_id))}">
     <input type="hidden" name="mix_count" value="{escape(str(plan.mix_count))}">
     <input type="hidden" name="grain_base" value="{escape(str(plan.grain_base_code))}">
+    <input type="hidden" name="request_id" value="{escape(secrets.token_urlsafe(16))}">
     <button type="submit">Создать замес и обновить склад</button>
-  </form>"""
+  </form>
+  <script>
+    document.querySelectorAll('form[action*="/feeds/mixes"]').forEach(function (form) {{
+      form.addEventListener('submit', function () {{
+        var button = form.querySelector('button');
+        if (button) {{ button.disabled = true; button.textContent = 'Создаю замес…'; }}
+      }});
+    }});
+  </script>"""
     else:
         confirm_button = (
             '<div class="message error">Ингредиентов недостаточно. '
@@ -2378,7 +2431,7 @@ def _render_incubation_page(config: WebConfig, payload: dict, *, auth_token: str
         _option(code, label, selected=code == "chicken")
         for code, label in _incubation_service(config).available_species()
     )
-    today_value = date.today().isoformat()
+    today_value = local_today().isoformat()
     return f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -2542,6 +2595,8 @@ def _render_about_page(config: WebConfig, payload: dict, *, auth_token: str = ""
       <tr><td>Корма</td><td>{escape(_enabled_label(sections.get("feeds", True)))}</td></tr>
       <tr><td>Яйца</td><td>{escape(_enabled_label(sections.get("eggs", True)))}</td></tr>
       <tr><td>Уход после вывода</td><td>{escape(_enabled_label(sections.get("post_hatch_care", True)))}</td></tr>
+      <tr><td>Птицевод</td><td>{escape(_enabled_label(sections.get("poultry_advisor", True)))}</td></tr>
+      <tr><td>Ежедневная сводка</td><td>{escape(_enabled_label(sections.get("daily_summary", True)))}</td></tr>
       <tr><td>Системные сообщения</td><td>{escape(_enabled_label(sections.get("service", True)))}</td></tr>
     </tbody>
   </table>
@@ -2587,6 +2642,8 @@ def _render_sections_form(sections: dict, *, selected_user, auth_token: str) -> 
         ("feeds", "Корма"),
         ("eggs", "Яйца"),
         ("post_hatch_care", "Уход после вывода"),
+        ("poultry_advisor", "Птицевод"),
+        ("daily_summary", "Ежедневная сводка"),
         ("service", "Системные сообщения"),
     )
     checkboxes = "".join(
@@ -3070,7 +3127,7 @@ def _render_active_incubation_row(item: dict, *, selected_user, auth_token: str)
           </label>
           <label>
             <span class="label">Дата завершения</span>
-            <input name="completed_at" type="date" required value="{escape(date.today().isoformat())}">
+            <input name="completed_at" type="date" required value="{escape(local_today().isoformat())}">
           </label>
           <button type="submit">Завершить вывод</button>
         </form>
