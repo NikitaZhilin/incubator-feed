@@ -256,7 +256,8 @@ class ReminderRunnerTest(unittest.IsolatedAsyncioTestCase):
             stock_service = StockService(StockRepository(database), feed_repository, analytics)
             notifications = NotificationRepository(database)
             users.upsert(user_id=10)
-            users.update_settings(10, timezone="Europe/Moscow")
+            # The summary follows the user's notification time (12:00 Moscow = 09:00 UTC).
+            users.update_settings(10, timezone="Europe/Moscow", notification_time="12:00")
             group = feed_service.create_bird_group(
                 user_id=10,
                 name="Несушки",

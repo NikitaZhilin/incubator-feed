@@ -406,13 +406,15 @@ class WebAppTest(unittest.TestCase):
             "request_id": "same-page-id",
         }
 
+        before = len(self.client.get("/mix/data", headers=self._auth()).json()["history"])
+
         first = self.client.post("/feeds/mixes?auth=link-token", data=form, follow_redirects=False)
         second = self.client.post("/feeds/mixes?auth=link-token", data=form, follow_redirects=False)
         history = self.client.get("/mix/data", headers=self._auth()).json()["history"]
 
         self.assertEqual(first.status_code, 303)
         self.assertEqual(second.status_code, 303)
-        self.assertEqual(len(history), 1)
+        self.assertEqual(len(history), before + 1)
 
     def test_mix_can_be_confirmed_and_created_from_web_form(self) -> None:
         self._create_household_data()
@@ -534,8 +536,14 @@ class WebAppTest(unittest.TestCase):
 
     def test_flock_can_be_created_from_web_form(self) -> None:
         self._create_household_data()
-        data_before = self.client.get("/livestock/data", headers=self._auth()).json()
-        group_id = data_before["bird_groups"][0]["id"]
+        # A group can belong to one flock only, so use a group that is not in a flock yet.
+        group_id = FeedService(FeedRepository(self.database)).create_bird_group(
+            user_id=1,
+            name="Молодки",
+            bird_count=5,
+            species="chicken",
+            role="hens",
+        ).id
 
         post_response = self.client.post(
             "/flocks?auth=link-token",
