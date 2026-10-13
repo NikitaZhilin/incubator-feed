@@ -25,7 +25,7 @@ from app.keyboards.eggs import (
     weather_keyboard,
 )
 from app.services.eggs import EXCLUSION_REASON_LABELS, EggService
-from app.utils.dates import DATE_FORMAT_HINT, parse_user_date
+from app.utils.dates import DATE_FORMAT_HINT, parse_user_date, local_today
 
 
 router = Router()
@@ -791,7 +791,7 @@ def _safe_stats(egg_service: EggService, user_id: int) -> EggStats:
 
 
 def _egg_entry_date_from_choice(choice: str, *, today: date | None = None) -> date:
-    current = today or date.today()
+    current = today or local_today()
     if choice == "today":
         return current
     if choice == "yesterday":

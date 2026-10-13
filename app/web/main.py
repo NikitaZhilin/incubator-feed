@@ -21,6 +21,7 @@ from app.storage.repositories.eggs import EggRepository
 from app.storage.repositories.feeds import FeedRepository
 from app.storage.repositories.stock import StockRepository
 from app.storage.repositories.users import UserRepository
+from app.utils.dates import local_today, validate_incubation_start_date
 from app.web.config import WebConfig, load_web_config
 from app.web.summary import (
     build_web_eggs,
@@ -547,7 +548,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
                     empty_message="Укажите количество яиц.",
                     positive_message="Количество яиц должно быть больше нуля.",
                 ),
-                start_date=_parse_required_date(form.get("start_date", ""), "Дата закладки"),
+                start_date=_checked_start_date(form.get("start_date", ""), current.timezone_name),
                 title=str(form.get("title", "")).strip() or None,
                 note=str(form.get("note", "")).strip(),
             )
@@ -1200,10 +1201,19 @@ def _parse_required_date(value: str, label: str) -> date:
     return parsed
 
 
+def _checked_start_date(value: str, timezone_name: str) -> date:
+    start_date = _parse_required_date(value, "Дата закладки")
+    validate_incubation_start_date(start_date, today=local_today(timezone_name))
+    return start_date
+
+
 def _parse_egg_entry_date(value: str, *, entry_day: str, service: EggService) -> date:
-    if str(value).strip():
-        return _parse_required_date(value, "Дата сбора")
     current = service.current_date()
+    if str(value).strip():
+        entry_date = _parse_required_date(value, "Дата сбора")
+        if entry_date > current:
+            raise ValueError("Нельзя записать сбор на будущую дату.")
+        return entry_date
     if entry_day == "today":
         return current
     if entry_day == "yesterday":
@@ -2401,7 +2411,7 @@ def _render_incubation_page(config: WebConfig, payload: dict, *, auth_token: str
         _option(code, label, selected=code == "chicken")
         for code, label in _incubation_service(config).available_species()
     )
-    today_value = date.today().isoformat()
+    today_value = local_today().isoformat()
     return f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -3093,7 +3103,7 @@ def _render_active_incubation_row(item: dict, *, selected_user, auth_token: str)
           </label>
           <label>
             <span class="label">Дата завершения</span>
-            <input name="completed_at" type="date" required value="{escape(date.today().isoformat())}">
+            <input name="completed_at" type="date" required value="{escape(local_today().isoformat())}">
           </label>
           <button type="submit">Завершить вывод</button>
         </form>

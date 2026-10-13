@@ -14,6 +14,11 @@ from app.storage.repositories.batches import BatchRepository
 from app.storage.repositories.reminders import ReminderRepository
 from app.storage.repositories.analytics import AnalyticsRepository
 from app.storage.repositories.users import UserRepository
+from app.utils.dates import local_today
+
+
+# The care memo is useful right after hatching; older batches are skipped.
+POST_HATCH_NOTICE_WINDOW_DAYS = 3
 
 
 @dataclass(frozen=True)
@@ -153,7 +158,7 @@ class IncubationService:
         return batch
 
     def get_status(self, batch: IncubationBatch, today: date | None = None) -> BatchStatus:
-        current_date = today or date.today()
+        current_date = today or local_today()
         profile = get_profile(batch.species)
         hatch_date = calculate_hatch_date(batch.start_date, profile)
         day = (current_date - batch.start_date).days + 1
@@ -217,7 +222,7 @@ class IncubationService:
         return recommendations
 
     def get_user_statuses(self, user_id: int, today: date | None = None) -> list[BatchStatus]:
-        current_date = today or date.today()
+        current_date = today or local_today()
         return [self.get_status(batch, today=current_date) for batch in self.list_active(user_id)]
 
     def get_stats(self, user_id: int) -> IncubationStats:
@@ -309,6 +314,8 @@ class IncubationService:
         due: list[DueBatchNotification] = []
         for user_id, settings, local_now in self._iter_users_due_for("notify_post_hatch_care", now_utc):
             for batch in self.batches.list_all_for_user(user_id):
+                if not batch.is_active and batch.hatched_count == 0:
+                    continue  # nothing hatched, no chicks to care for
                 status = self.get_status(batch, today=local_now.date())
                 if batch.completed_at is not None:
                     due_date = batch.completed_at
@@ -316,6 +323,8 @@ class IncubationService:
                     due_date = status.hatch_date
                 if local_now.date() < due_date:
                     continue
+                if (local_now.date() - due_date).days > POST_HATCH_NOTICE_WINDOW_DAYS:
+                    continue  # old batches from history must not get a memo
                 event_key = f"post_hatch_care:batch_{batch.id}:{due_date.isoformat()}"
                 due.append(
                     DueBatchNotification(

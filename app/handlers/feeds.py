@@ -48,7 +48,7 @@ from app.services.feed_recipes import (
     get_grain_base_option,
     parse_feed_amount,
 )
-from app.utils.dates import DATE_FORMAT_HINT, parse_user_date
+from app.utils.dates import DATE_FORMAT_HINT, parse_user_date, local_today
 
 
 router = Router()
@@ -2435,7 +2435,7 @@ def _format_flock_reports(reports) -> str:
             days = "неизвестно" if usage.days_left is None else f"{usage.days_left} дн."
             lines.extend(["", f"Смесь: {assignment.stock_item_name}"])
             if usage.days_left is not None:
-                mix_date = date.today() + timedelta(days=usage.days_left)
+                mix_date = local_today() + timedelta(days=usage.days_left)
                 lines.append(
                     f"- готовой смеси {usage.remaining_kg:.1f} кг, хватит на {days}"
                 )
@@ -2450,7 +2450,7 @@ def _format_flock_reports(reports) -> str:
                     f"{usage.producible_mix_count} замесов, около {usage.producible_mix_kg:.1f} кг."
                 )
                 if usage.total_days_left is not None:
-                    total_date = date.today() + timedelta(days=usage.total_days_left)
+                    total_date = local_today() + timedelta(days=usage.total_days_left)
                     lines.append(
                         f"- всего с учетом склада ингредиентов хватит примерно на "
                         f"{usage.total_days_left} дн., до {total_date.isoformat()}."
@@ -2482,13 +2482,13 @@ def _format_flock_reports(reports) -> str:
 def _purchase_notice_date(days_left: int | None) -> str:
     if days_left is None:
         return "неизвестно"
-    return (date.today() + timedelta(days=max(days_left - 7, 0))).isoformat()
+    return (local_today() + timedelta(days=max(days_left - 7, 0))).isoformat()
 
 
 def _end_date(days_left: int | None) -> str:
     if days_left is None:
         return "неизвестно"
-    return (date.today() + timedelta(days=days_left)).isoformat()
+    return (local_today() + timedelta(days=days_left)).isoformat()
 
 
 def _format_feed_stock_summary(stock_estimates, plan) -> str:
