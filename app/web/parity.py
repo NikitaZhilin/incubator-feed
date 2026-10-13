@@ -483,11 +483,6 @@ def eggs_extra_forms(*, selected_user, auth_token: str, today_value: str) -> str
     </form>
   </details>
 
-  <form class="note" method="post" action="{escape(_link('/eggs/weather/refresh', auth_token))}">
-    <input type="hidden" name="user_id" value="{user}">
-    <button type="submit">Обновить погоду сейчас</button>
-  </form>
-
   <details>
     <summary>Отметить, что куры временно не несутся</summary>
     <form class="note" method="post" action="{escape(_link('/eggs/exclusions', auth_token))}">
@@ -710,3 +705,13 @@ def incubation_reference() -> str:
         '<style>.pre { white-space: pre-wrap; line-height: 1.45; }</style>'
         + "".join(parts)
     )
+
+
+def weather_refresh_form(*, selected_user, auth_token: str) -> str:
+    from app.web.main import _link
+
+    return f"""
+  <form class="quiet" method="post" action="{escape(_link('/eggs/weather/refresh', auth_token))}">
+    <input type="hidden" name="user_id" value="{escape(str(selected_user or ''))}">
+    <button type="submit">Обновить погоду сейчас</button>
+  </form>"""

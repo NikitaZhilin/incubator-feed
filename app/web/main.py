@@ -34,6 +34,7 @@ from app.web.parity import (
     incubation_reference,
     profile_form,
     register_parity_routes,
+    weather_refresh_form,
 )
 from app.web.summary import (
     build_web_eggs,
@@ -1267,134 +1268,203 @@ def _extract_access_token(
 
 
 def _page_style() -> str:
-    return """<style>
+    # Farm book palette: pale pasture background, field-green actions, yolk for
+    # attention. Golos Text is drawn for Russian and has even, tabular figures.
+    return """<link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
     :root {
       color-scheme: light dark;
-      font-family: Arial, sans-serif;
+      --bg: #eef1ea;
+      --surface: #ffffff;
+      --surface-2: #f6f8f4;
+      --ink: #1d2620;
+      --muted: #5b675f;
+      --line: #d6ddd3;
+      --accent: #2d6a4f;
+      --accent-ink: #ffffff;
+      --accent-soft: #e2eee6;
+      --yolk: #e6a817;
+      --yolk-soft: #fff4d6;
+      --danger: #a63d2f;
+      --danger-soft: #fbe9e5;
+      --ok-soft: #e4f2e8;
+      --radius: 10px;
+      font-family: "Golos Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      font-size: 16px;
     }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #121614;
+        --surface: #1a201c;
+        --surface-2: #161b18;
+        --ink: #e4e9e3;
+        --muted: #9ba69e;
+        --line: #2b332e;
+        --accent: #74b893;
+        --accent-ink: #0f1a14;
+        --accent-soft: #1f3328;
+        --yolk: #f0c04a;
+        --yolk-soft: #33290f;
+        --danger: #e08a7c;
+        --danger-soft: #3a1f1a;
+        --ok-soft: #1c3025;
+      }
+    }
+    * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: #f4f1ea;
-      color: #222;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.5;
+      -webkit-text-size-adjust: 100%;
     }
     main {
-      max-width: 1120px;
+      max-width: 1080px;
       margin: 0 auto;
-      padding: 28px 18px 48px;
+      padding: 0 20px 56px;
     }
-    header {
-      margin-bottom: 24px;
-    }
+    header { padding-top: 22px; }
     h1 {
-      margin: 0 0 8px;
+      margin: 0;
       font-size: 28px;
+      line-height: 1.15;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    header > .subtitle {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 15px;
+      max-width: 62ch;
     }
     h2 {
-      margin: 28px 0 12px;
-      font-size: 18px;
+      margin: 32px 0 12px;
+      font-size: 19px;
+      font-weight: 600;
+      line-height: 1.25;
     }
+    p { max-width: 72ch; }
+    a { color: var(--accent); text-underline-offset: 2px; }
+    strong { font-weight: 600; }
+
+    /* Section bar: stays on top while scrolling long pages. */
     .nav-shell {
-      position: relative;
-      margin-top: 16px;
-    }
-    .nav-shell::after {
-      content: "";
-      position: absolute;
+      position: sticky;
       top: 0;
-      right: 0;
-      bottom: 0;
-      width: 34px;
-      pointer-events: none;
-      background: linear-gradient(90deg, rgba(244, 241, 234, 0), #f4f1ea 80%);
+      z-index: 10;
+      margin: 16px -20px 0;
+      padding: 10px 20px;
+      background: color-mix(in srgb, var(--bg) 88%, transparent);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--line);
     }
     .nav {
       display: flex;
-      flex-wrap: nowrap;
-      gap: 8px;
+      gap: 6px;
       overflow-x: auto;
-      overflow-y: hidden;
-      padding: 0 34px 6px 0;
-      scrollbar-width: thin;
-      scroll-snap-type: x proximity;
+      scrollbar-width: none;
       -webkit-overflow-scrolling: touch;
     }
+    .nav::-webkit-scrollbar { display: none; }
     .nav a {
-      border: 1px solid #cfc5b4;
-      border-radius: 6px;
       flex: 0 0 auto;
-      padding: 7px 10px;
-      background: #fffaf2;
+      padding: 7px 13px;
+      border-radius: 999px;
+      color: var(--ink);
       text-decoration: none;
-      color: #245b78;
       font-size: 14px;
-      line-height: 1.25;
-      scroll-snap-align: start;
+      font-weight: 500;
       white-space: nowrap;
+      border: 1px solid transparent;
     }
+    .nav a:hover { background: var(--surface); border-color: var(--line); }
     .nav a.active {
-      background: #e6f1f5;
-      border-color: #8bb8ca;
-      color: #153d52;
-      font-weight: 700;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-weight: 600;
     }
+
+    /* Figures */
     .summary, .wide-summary {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-      gap: 12px;
-      margin: 20px 0;
+      grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+      gap: 10px;
+      margin: 18px 0;
     }
-    .metric, .note {
-      border: 1px solid #d5cec1;
-      border-radius: 8px;
-      padding: 14px;
-      background: #fffaf2;
+    .metric {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      min-width: 0;
     }
     .label {
       display: block;
-      color: #665f54;
+      color: var(--muted);
       font-size: 13px;
-      margin-bottom: 6px;
+      margin-bottom: 2px;
     }
     .value {
-      font-size: 22px;
-      font-weight: 700;
+      display: block;
+      font-size: 24px;
+      font-weight: 600;
+      line-height: 1.2;
+      font-variant-numeric: tabular-nums;
+      overflow-wrap: anywhere;
     }
     .small {
-      color: #665f54;
+      color: var(--muted);
       font-size: 13px;
       line-height: 1.45;
+      margin-top: 4px;
     }
-    table {
-      display: block;
-      overflow-x: auto;
-      width: 100%;
-      border-collapse: collapse;
-      background: #fffaf2;
-      border: 1px solid #d5cec1;
+
+    /* Panels, forms and collapsible blocks */
+    .note, details {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin: 12px 0;
     }
-    th, td {
-      text-align: left;
-      padding: 10px 12px;
-      border-bottom: 1px solid #ddd4c5;
-      vertical-align: top;
+    details > .note, details form.note { border: 0; padding: 12px 0 0; margin: 0; background: transparent; }
+    td details, .inline-form { margin: 0; }
+    td details { padding: 6px 10px; background: var(--surface-2); }
+    summary {
+      cursor: pointer;
+      font-weight: 600;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
-    th {
-      color: #4d463d;
-      font-size: 13px;
+    summary::-webkit-details-marker { display: none; }
+    summary::before {
+      content: "+";
+      display: inline-grid;
+      place-items: center;
+      width: 22px;
+      height: 22px;
+      flex: 0 0 22px;
+      border-radius: 6px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 700;
+      line-height: 1;
     }
-    ul {
-      margin: 8px 0 0 18px;
-      padding: 0;
-    }
-    li {
-      margin: 4px 0;
-    }
+    details[open] > summary::before { content: "−"; }
+    details[open] > summary { margin-bottom: 8px; }
     form.note {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
       gap: 12px;
       align-items: end;
     }
+    form.note > button { align-self: end; }
+    label .label { margin-bottom: 4px; }
     .inline-form {
       display: grid;
       grid-template-columns: minmax(120px, 1fr);
@@ -1402,50 +1472,46 @@ def _page_style() -> str:
       margin-top: 10px;
       min-width: 220px;
     }
-    .danger-zone {
-      border-top: 1px solid #ddd4c5;
-      padding-top: 10px;
+    input, select, button, textarea {
+      width: 100%;
+      min-height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 11px;
+      background: var(--surface);
+      color: var(--ink);
+      font: inherit;
+      font-size: 16px;
+    }
+    input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+      outline-offset: 2px;
+    }
+    input[type="checkbox"] { width: 18px; min-height: 18px; accent-color: var(--accent); margin: 2px 0 0; }
+    button {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--accent-ink);
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.06); }
+    button:disabled { cursor: not-allowed; opacity: 0.55; }
+    .danger-zone { border-top: 1px dashed var(--line); padding-top: 10px; }
+    form.quiet { background: none; border: 0; padding: 0; margin: 8px 0 0; display: block; }
+    form.quiet button, button.secondary {
+      width: auto;
+      background: transparent;
+      color: var(--accent);
+      border-color: color-mix(in srgb, var(--accent) 45%, transparent);
     }
     .danger-zone button {
-      background: #8a2f24;
-      border-color: #8a2f24;
+      background: transparent;
+      color: var(--danger);
+      border-color: var(--danger);
     }
-    input, select, button {
-      box-sizing: border-box;
-      width: 100%;
-      border: 1px solid #cfc5b4;
-      border-radius: 6px;
-      padding: 9px 10px;
-      background: #fff;
-      color: #222;
-      font: inherit;
-    }
-    input[type="checkbox"] {
-      width: auto;
-    }
-    button {
-      background: #245b78;
-      border-color: #245b78;
-      color: #fff;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    button:disabled {
-      cursor: not-allowed;
-      opacity: 0.55;
-    }
-    summary {
-      cursor: pointer;
-      font-weight: 700;
-    }
-    .form-wide {
-      grid-column: 1 / -1;
-    }
-    .stack {
-      display: grid;
-      gap: 12px;
-      margin-top: 12px;
-    }
+    .form-wide { grid-column: 1 / -1; }
+    .stack { display: grid; gap: 12px; margin-top: 12px; }
     .checkbox-list {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1454,115 +1520,97 @@ def _page_style() -> str:
     .checkbox-list label {
       display: flex;
       align-items: flex-start;
-      gap: 8px;
-      border: 1px solid #d5cec1;
-      border-radius: 6px;
-      padding: 9px 10px;
-      background: rgba(255, 255, 255, 0.45);
-    }
-    .message {
+      gap: 10px;
+      border: 1px solid var(--line);
       border-radius: 8px;
+      padding: 10px 12px;
+      background: var(--surface-2);
+    }
+
+    /* Tables scroll inside themselves on narrow screens. */
+    table {
+      display: block;
+      overflow-x: auto;
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      font-variant-numeric: tabular-nums;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    tbody tr:last-child td { border-bottom: 0; }
+    /* Keep dates and amounts whole; the table scrolls sideways instead. */
+    td { white-space: nowrap; }
+    td:first-child, td:has(details), td:has(form) { white-space: normal; min-width: 8em; }
+    th {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+      background: var(--surface-2);
+    }
+    ul { margin: 8px 0 0 18px; padding: 0; }
+    li { margin: 4px 0; }
+
+    .message {
+      border-radius: var(--radius);
       padding: 12px 14px;
       margin: 14px 0;
-      border: 1px solid #b6cfbc;
-      background: #eef8f0;
-      color: #23482a;
+      border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+      background: var(--ok-soft);
     }
     .message.error {
-      border-color: #e2b7b0;
-      background: #fff0ee;
-      color: #6b241b;
+      border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+      background: var(--danger-soft);
     }
-    a {
-      color: #245b78;
+    .status-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 16px 0 0;
+      font-size: 14px;
+      color: var(--muted);
     }
-    @media (prefers-color-scheme: dark) {
-      body {
-        background: #111820;
-        color: #f1f4f7;
-      }
-      .metric, .note, table, .nav a {
-        background: #1b2835;
-        border-color: #2d3f50;
-      }
-      .nav-shell::after {
-        background: linear-gradient(90deg, rgba(17, 24, 32, 0), #111820 80%);
-      }
-      .nav a.active {
-        background: #254050;
-        border-color: #44718a;
-        color: #d9f1ff;
-      }
-      th, td {
-        border-color: #2d3f50;
-      }
-      th, .label, .small {
-        color: #b8c2ca;
-      }
-      input, select {
-        background: #111820;
-        border-color: #2d3f50;
-        color: #f1f4f7;
-      }
-      .checkbox-list label {
-        background: rgba(17, 24, 32, 0.35);
-        border-color: #2d3f50;
-      }
-      .message {
-        background: #183222;
-        border-color: #315f3f;
-        color: #d9f4df;
-      }
-      .message.error {
-        background: #3a1d1a;
-        border-color: #70372f;
-        color: #ffd8d2;
-      }
-      a, .nav a {
-        color: #88c7ef;
-      }
+    .status-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--accent);
+      flex: 0 0 9px;
     }
-    @media (max-width: 900px) {
-      main {
-        padding: 22px 12px 42px;
-      }
-      header {
-        margin-bottom: 18px;
-      }
-      h1 {
-        font-size: 24px;
-      }
-      .nav-shell {
-        margin-left: -12px;
-        margin-right: -12px;
-        padding-left: 12px;
-      }
-      .nav a {
-        min-height: 38px;
-        display: inline-flex;
-        align-items: center;
-      }
+    .status-line.warn .status-dot { background: var(--yolk); }
+    .status-line.bad .status-dot { background: var(--danger); }
+
+    @media (max-width: 600px) {
+      :root { font-size: 15px; }
+      main { padding: 0 14px 44px; }
+      header { padding-top: 16px; }
+      h1 { font-size: 23px; }
+      .nav-shell { margin: 12px -14px 0; padding: 8px 14px; }
+      .summary, .wide-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .metric { padding: 10px 12px; }
+      .value { font-size: 20px; }
+      .note, details { padding: 12px; }
+      form.note { grid-template-columns: 1fr; }
     }
-    @media (max-width: 520px) {
-      h1 {
-        font-size: 22px;
-      }
-      .summary, .wide-summary {
-        grid-template-columns: 1fr;
-      }
-      .nav a {
-        font-size: 13px;
-        padding: 8px 10px;
-      }
+    @media (prefers-reduced-motion: reduce) {
+      * { scroll-behavior: auto !important; transition: none !important; }
     }
   </style>"""
+
 
 
 def _page_header(title: str, subtitle: str, auth_token: str, *, active_path: str) -> str:
     return (
         "  <header>\n"
         f"    <h1>{escape(title)}</h1>\n"
-        f"    <div>{escape(subtitle)}</div>\n"
+        f"    <div class=\"subtitle\">{escape(subtitle)}</div>\n"
         f"    {_nav_links(auth_token, active_path=active_path)}\n"
         "  </header>"
     )
@@ -1628,26 +1676,10 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
 </head>
 <body>
 <main>
-{_page_header("tg_bot_inkubator", "Web-сводка хозяйства и технического состояния.", auth_token, active_path="/")}
+{_page_header(str(settings.get("farm_name") or "Хозяйство"), "Сегодня в хозяйстве: яйца, корм, птица и инкубация.", auth_token, active_path="/")}
 
-  <section class="summary" aria-label="Сводка">
-    <div class="metric">
-      <span class="label">Техническое состояние</span>
-      <span class="value">{status_value}</span>
-      <div class="small">{escape(status_reason)}</div>
-    </div>
-    <div class="metric"><span class="label">База данных</span><span class="value">{db_status}</span></div>
-    <div class="metric"><span class="label">Пользователей</span><span class="value">{users_total}</span></div>
-    <div class="metric"><span class="label">Критичных ошибок</span><span class="value">{critical_total}</span></div>
-  </section>
-
-  <h2>Хозяйство</h2>
+  <div class="status-line {_status_tone(report)}"><span class="status-dot"></span>{escape(_status_headline(report))}</div>
   <section class="wide-summary" aria-label="Хозяйственная сводка">
-    <div class="metric">
-      <span class="label">Пользователь</span>
-      <span class="value">{escape(selected_user_label)}</span>
-      <div class="small">Хозяйство: {escape(str(settings.get("farm_name") or "не указано"))}</div>
-    </div>
     <div class="metric">
       <span class="label">Яйца сегодня</span>
       <span class="value">{escape(str(eggs.get("today_eggs", 0)))}</span>
@@ -1712,7 +1744,19 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
     </tbody>
   </table>
 
-  <h2>Версия</h2>
+  <details>
+  <summary>Техническое состояние: {status_value}</summary>
+  <section class="summary" aria-label="Техническое состояние">
+    <div class="metric">
+      <span class="label">Состояние</span>
+      <span class="value">{status_value}</span>
+      <div class="small">{escape(status_reason)}</div>
+    </div>
+    <div class="metric"><span class="label">База данных</span><span class="value">{db_status}</span></div>
+    <div class="metric"><span class="label">Пользователей</span><span class="value">{users_total}</span></div>
+    <div class="metric"><span class="label">Критичных ошибок</span><span class="value">{critical_total}</span></div>
+  </section>
+  <h2>Версия tg_bot_inkubator</h2>
   <p>
     Версия: <strong>{escape(config.release_version)}</strong><br>
     Канал: {escape(config.release_channel)}<br>
@@ -1741,9 +1785,23 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
       {heartbeat_rows}
     </tbody>
   </table>
+  </details>
 </main>
 </body>
 </html>"""
+
+
+def _status_tone(report: dict) -> str:
+    status = str(report.get("status") or "")
+    if status == "ok":
+        return "ok"
+    return "warn" if status == "degraded" else "bad"
+
+
+def _status_headline(report: dict) -> str:
+    if report.get("status") == "ok":
+        return "Бот и напоминания работают."
+    return f"Бот: {_status_reason(report)}"
 
 
 def _status_reason(report: dict) -> str:
@@ -1820,7 +1878,6 @@ def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = ""
 {_page_header("Корма и склад", "Запасы, смесь, стада и последние операции.", auth_token, active_path="/feeds")}
 
   <section class="summary">
-    <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
     <div class="metric"><span class="label">Готовая смесь</span><span class="value">{escape(_kg(ready_mix.get("remaining_kg")))}</span></div>
     <div class="metric"><span class="label">Хватит готовой смеси</span><span class="value">{escape(_days(ready_mix.get("days_left")))}</span><div class="small">До: {escape(_date_text(ready_mix.get("ends_at")))}. Докупить до: {escape(_date_text(ready_mix.get("purchase_by")))}</div></div>
     <div class="metric"><span class="label">Возможные замесы</span><span class="value">{escape(str(possible_mix.get("mix_count", 0)))}</span></div>
@@ -1943,7 +2000,6 @@ def _render_mix_page(config: WebConfig, payload: dict, *, auth_token: str = "") 
 {_page_header("Смесь", "Read-only просмотр формулы замеса, доступных повторов и истории готовой смеси.", auth_token, active_path="/mix")}
 
   <section class="summary">
-    <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
     <div class="metric"><span class="label">Основа</span><span class="value">{escape(str(mix.get("grain_base_label") or "не выбрана"))}</span></div>
     <div class="metric"><span class="label">Один замес</span><span class="value">{escape(_kg(mix.get("one_cycle_kg")))}</span><div class="small">{escape(str(mix.get("one_cycle_parts", 0)))} частей</div></div>
     <div class="metric"><span class="label">Можно сделать</span><span class="value">{escape(str(mix.get("possible_mix_count", 0)))}</span><div class="small">полных замесов</div></div>
@@ -2191,7 +2247,6 @@ def _render_livestock_page(config: WebConfig, payload: dict, *, auth_token: str 
 {_page_header("Поголовье и стада", "Группы птиц, состав стад, назначенная смесь, добавление поголовья и создание стад.", auth_token, active_path="/livestock")}
 
   <section class="summary">
-    <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
     <div class="metric"><span class="label">Всего птиц</span><span class="value">{escape(str(bird_groups.get("birds_total", 0)))}</span></div>
     <div class="metric"><span class="label">Групп поголовья</span><span class="value">{escape(str(bird_groups.get("total", len(groups))))}</span></div>
     <div class="metric"><span class="label">Стад</span><span class="value">{escape(str(len(flocks)))}</span></div>
@@ -2361,7 +2416,6 @@ def _render_eggs_page(config: WebConfig, payload: dict, *, auth_token: str = "")
 {_page_header("Яйца", "Сбор, прогноз, исключения несушек и сохраненная погода.", auth_token, active_path="/eggs")}
 
   <section class="summary">
-    <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
     <div class="metric"><span class="label">Сегодня</span><span class="value">{escape(str(eggs.get("today_eggs", 0)))} шт.</span></div>
     <div class="metric"><span class="label">За 7 дней</span><span class="value">{escape(str(eggs.get("week_eggs", 0)))} шт.</span></div>
     <div class="metric"><span class="label">За 30 дней</span><span class="value">{escape(str(eggs.get("month_eggs", 0)))} шт.</span></div>
@@ -2404,6 +2458,7 @@ def _render_eggs_page(config: WebConfig, payload: dict, *, auth_token: str = "")
     </label>
     <button type="submit">Сохранить город</button>
   </form>
+  {weather_refresh_form(selected_user=selected_user, auth_token=auth_token)}
 
   <h2>История сбора</h2>
   <table>
@@ -2469,7 +2524,6 @@ def _render_incubation_page(config: WebConfig, payload: dict, *, auth_token: str
   {notice_html}
 
   <section class="summary">
-    <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
     <div class="metric"><span class="label">Активных партий</span><span class="value">{escape(str(incubation.get("active_batches", 0)))}</span></div>
     <div class="metric"><span class="label">Завершенных</span><span class="value">{escape(str(incubation.get("completed_batches", 0)))}</span></div>
     <div class="metric"><span class="label">Всего партий</span><span class="value">{escape(str(incubation.get("total_batches", 0)))}</span></div>
@@ -2606,7 +2660,6 @@ def _render_about_page(config: WebConfig, payload: dict, *, auth_token: str = ""
 
   <h2>Настройки хозяйства</h2>
   <section class="summary">
-    <div class="metric"><span class="label">Пользователь</span><span class="value">{escape(selected_user_label)}</span></div>
     <div class="metric"><span class="label">Хозяйство</span><span class="value">{escape(str(settings.get("farm_name") or "не указано"))}</span></div>
     <div class="metric"><span class="label">Часовой пояс</span><span class="value">{escape(str(settings.get("timezone") or config.timezone_name))}</span></div>
     <div class="metric"><span class="label">Уведомления</span><span class="value">{escape(str(settings.get("notification_time") or "09:00"))}</span></div>
@@ -2823,7 +2876,7 @@ def _render_feeding_norms(norms: dict) -> str:
     notes = norms.get("notes") or []
     notes_html = "<ul>" + "".join(f"<li>{escape(str(note))}</li>" for note in notes) + "</ul>"
     return f"""
-  <details class="note" open>
+  <details class="note">
     <summary>Нормы расхода и формула</summary>
     <p class="small">{escape(str(norms.get('formula') or ''))}</p>
     <section class="wide-summary">
