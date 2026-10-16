@@ -36,6 +36,7 @@ from app.middlewares.callbacks import StaleCallbackMiddleware
 from app.middlewares.users import UserTrackingMiddleware
 from app.services.admin import AdminService
 from app.services.eggs import EggService
+from app.services.feeding import FeedingService
 from app.services.feeds import FeedService
 from app.services.incubation import IncubationService
 from app.services.poultry_advisor import PoultryAdvisorService
@@ -44,6 +45,7 @@ from app.storage.database import Database
 from app.storage.repositories.analytics import AnalyticsRepository
 from app.storage.repositories.batches import BatchRepository
 from app.storage.repositories.eggs import EggRepository
+from app.storage.repositories.feeding import FeedingRepository
 from app.storage.repositories.feeds import FeedRepository
 from app.storage.repositories.notifications import NotificationRepository
 from app.storage.repositories.reminders import ReminderRepository
@@ -207,6 +209,9 @@ class AllButtonsTest(unittest.IsolatedAsyncioTestCase):
         self.dp["feed_service"] = feed_service
         self.dp["egg_service"] = egg_service
         self.dp["stock_service"] = stock_service
+        self.dp["feeding_service"] = FeedingService(
+            FeedingRepository(self.database), feeds, timezone_name="Europe/Moscow"
+        )
         self.dp["poultry_advisor_service"] = PoultryAdvisorService(
             incubation_service=incubation,
             feed_service=feed_service,

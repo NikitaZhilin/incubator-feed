@@ -331,6 +331,25 @@ def register_parity_routes(app: FastAPI, require_web_access) -> None:
             notice=f"Рацион назначен: {assignment.daily_per_bird_g:g} г на птицу в день.",
         )
 
+    # ----- Feeding: «Покормил» ------------------------------------------------
+
+    @app.post("/feeding", dependencies=access)
+    async def mark_fed(request: Request, auth: str | None = Query(default=None)):
+        form = await _form(request)
+        back = form.get("back", "/")
+        redirect_base = web._link(back if back in {"/", "/feeds"} else "/", auth or "")
+        user_id, failed = _guard(form, redirect_base, "Отметка кормления")
+        if failed:
+            return failed
+        service = feeding_service_for(Database(app.state.web_config.db_path), app.state.web_config.timezone_name)
+        result = service.record(user_id)
+        at = service.format_time(result.event)
+        if result.duplicate:
+            return web._redirect_with_message(redirect_base, notice=f"Уже отмечено в {at}.")
+        norm = result.event.daily_norm_kg
+        tail = f" По норме это около {norm:.1f} кг смеси в день." if norm > 0 else ""
+        return web._redirect_with_message(redirect_base, notice=f"Отмечено: покормили в {at}.{tail}")
+
     # ----- Incubation: edit batch ----------------------------------------------
 
     @app.post("/incubation/batches/{batch_id}/edit", dependencies=access)
@@ -725,4 +744,36 @@ def weather_refresh_form(*, selected_user, auth_token: str) -> str:
   <form class="quiet" method="post" action="{escape(_link('/eggs/weather/refresh', auth_token))}">
     <input type="hidden" name="user_id" value="{escape(str(selected_user or ''))}">
     <button type="submit">Обновить погоду сейчас</button>
+  </form>"""
+
+
+def feeding_service_for(database: Database, timezone_name: str):
+    from app.services.feeding import FeedingService
+    from app.storage.repositories.feeding import FeedingRepository
+
+    return FeedingService(FeedingRepository(database), FeedRepository(database), timezone_name=timezone_name)
+
+
+def fed_block(db_path, *, selected_user, auth_token: str, back: str, timezone_name: str) -> str:
+    """Status line and the «✅ Покормил» button, same as in the bot."""
+    from app.services.feeding import format_feeding_status
+    from app.web.main import _link
+
+    if selected_user is None or not db_path.exists():
+        return ""
+    service = feeding_service_for(Database(db_path), timezone_name)
+    try:
+        status = format_feeding_status(service, int(selected_user))
+        week = service.week(int(selected_user))
+    except Exception:
+        return ""
+    return f"""
+  <form class="note fed" method="post" action="{escape(_link('/feeding', auth_token))}">
+    <input type="hidden" name="user_id" value="{escape(str(selected_user))}">
+    <input type="hidden" name="back" value="{escape(back)}">
+    <div>
+      <strong>{escape(status)}</strong>
+      <div class="small">За 7 дней кормили {week.fed_days} из {week.days} дн., около {week.estimated_kg:.1f} кг смеси по норме. Склад не меняется.</div>
+    </div>
+    <button type="submit">✅ Покормил</button>
   </form>"""

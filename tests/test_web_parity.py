@@ -234,6 +234,23 @@ class WebParityTest(unittest.TestCase):
         self.assertIn("Справочник: календарь и уход после вывода", page)
         self.assertIn("Уход после вывода", page)
 
+    def test_fed_button_marks_feeding_once(self) -> None:
+        from app.services.feeding import FeedingService
+        from app.storage.repositories.feeding import FeedingRepository
+
+        page = self.client.get(f"/{AUTH}").text
+        first = self._post("/feeding", {"back": "/"})
+        second = self._post("/feeding", {"back": "/feeds"})
+        events = FeedingService(FeedingRepository(self.database), FeedRepository(self.database)).today(1)
+
+        self.assertIn("✅ Покормил", page)
+        self.assertIn("ещё не отмечено", page)
+        self.assertEqual(first.status_code, 303)
+        self.assertIn("1.2", first.headers["location"].replace("%2C", ","))  # 10 hens * 120 g
+        self.assertEqual(len(events), 1)  # the second press within 2 minutes is a double tap
+        self.assertIn("/feeds", second.headers["location"])
+        self.assertIn("✅", self.client.get(f"/feeds{AUTH}").text)
+
     def test_new_pages_require_token(self) -> None:
         self.assertEqual(self.client.get("/advisor").status_code, 401)
         self.assertEqual(self.client.get("/help").status_code, 401)

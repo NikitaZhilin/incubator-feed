@@ -1,6 +1,10 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 
+FED_BUTTON_TEXT = "✅ Покормил"
+FED_CALLBACK = "feeding:done"
+
+
 def main_menu_keyboard(
     settings: dict | None = None,
     *,
@@ -16,6 +20,8 @@ def main_menu_keyboard(
         feature_row.append(InlineKeyboardButton(text="🥚 Яйца", callback_data="eggs:menu"))
 
     rows: list[list[InlineKeyboardButton]] = []
+    if _enabled(settings, "notify_feed"):
+        rows.append([InlineKeyboardButton(text=FED_BUTTON_TEXT, callback_data=FED_CALLBACK)])
     if feature_row:
         rows.append(feature_row)
     if _enabled(settings, "notify_poultry_advisor"):
@@ -69,6 +75,7 @@ def back_to_menu_keyboard() -> InlineKeyboardMarkup:
 def daily_summary_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text=FED_BUTTON_TEXT, callback_data=FED_CALLBACK)],
             [
                 InlineKeyboardButton(text="Добавить яйца", callback_data="eggs:add"),
                 InlineKeyboardButton(text="Переход в раздел корма", callback_data="feeds:menu"),
@@ -140,6 +147,12 @@ def settings_sections_keyboard(settings: dict) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text=f"📊 Ежедневная сводка: {_status_label(settings, 'notify_daily_summary')}",
                     callback_data="settings:toggle:notify_daily_summary",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"🌾 Напоминание о кормлении: {_status_label(settings, 'notify_feeding')}",
+                    callback_data="settings:toggle:notify_feeding",
                 )
             ],
             [
@@ -218,3 +231,24 @@ def _web_button(web_url: str, *, miniapp_url: str = "") -> InlineKeyboardButton:
 
 def _status_label(settings: dict, field: str) -> str:
     return "включено" if _enabled(settings, field) else "выключено"
+
+
+def feeding_done_keyboard(event_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="↩️ Отменить отметку", callback_data=f"feeding:undo:{event_id}")],
+            [
+                InlineKeyboardButton(text="🌾 Корма", callback_data="feeds:menu"),
+                InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home"),
+            ],
+        ]
+    )
+
+
+def feeding_reminder_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=FED_BUTTON_TEXT, callback_data=FED_CALLBACK)],
+            [InlineKeyboardButton(text="⚙️ Отключить напоминание", callback_data="settings:sections")],
+        ]
+    )

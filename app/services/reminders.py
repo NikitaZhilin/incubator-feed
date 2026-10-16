@@ -14,10 +14,11 @@ from aiogram.exceptions import (
     TelegramRetryAfter,
 )
 
-from app.keyboards.menu import daily_summary_keyboard
+from app.keyboards.menu import daily_summary_keyboard, feeding_reminder_keyboard
 from app.services.eggs import EggService
 from app.services.incubation import IncubationService
 from app.services.guides import post_hatch_care
+from app.services.feeding import FeedingService, format_feeding_status
 from app.services.feeds import FeedService
 from app.services.poultry_advisor import PoultryAdvisorService
 from app.services.stock import StockService
@@ -39,6 +40,7 @@ class ReminderRunner:
         egg_service: EggService | None = None,
         stock_service: StockService | None = None,
         poultry_advisor_service: PoultryAdvisorService | None = None,
+        feeding_service: FeedingService | None = None,
         users: UserRepository | None = None,
         notifications: NotificationRepository | None = None,
         heartbeats: HeartbeatRepository | None = None,
@@ -51,6 +53,7 @@ class ReminderRunner:
         self.incubation_service = incubation_service
         self.feed_service = feed_service
         self.egg_service = egg_service
+        self.feeding_service = feeding_service
         self.stock_service = stock_service
         self.poultry_advisor_service = poultry_advisor_service
         self.users = users
@@ -90,6 +93,7 @@ class ReminderRunner:
         await self._send_post_hatch_reminders(now)
         await self._send_daily_summary_reminders(now)
         await self._send_feed_reminders(now)
+        await self._send_feeding_reminders(now)
 
     async def _send_incubation_reminders(self, now: datetime) -> None:
         due_by_user = defaultdict(list)
@@ -269,6 +273,60 @@ class ReminderRunner:
                 self.notifications.mark_sent(event_key, local_now)
             self.feed_service.mark_purchase_reminded(feed.id, now)
 
+    def _feeding_summary_line(self, user_id: int, now: datetime) -> str:
+        if self.feeding_service is None:
+            return "- Дать корм."
+        try:
+            status = format_feeding_status(self.feeding_service, user_id, now=now)
+        except Exception:
+            logger.exception("Failed to read feeding status for user %s", user_id)
+            return "- Дать корм."
+        if "не отмечено" in status:
+            return "- Дать корм и нажать «✅ Покормил»."
+        return f"- {status}"
+
+    async def _send_feeding_reminders(self, now: datetime) -> None:
+        """Evening nudge for people who use «Покормил» and have not marked today."""
+        if self.feeding_service is None or self.users is None:
+            return
+        for settings in self.users.list_users_with_settings():
+            user_id = int(settings["user_id"])
+            if not settings.get("is_active", True) or not settings.get("notify_feeding", True):
+                continue
+            if not settings.get("notify_feed", True):
+                continue
+            if not self.feeding_service.needs_evening_reminder(user_id, now=now):
+                continue
+            local_now = _local_now_for_settings(settings, now)
+            event_key = f"feeding_reminder:user_{user_id}:{local_now.date().isoformat()}"
+            if self.notifications and not self.notifications.can_attempt(event_key, now=now):
+                continue
+            try:
+                if self.notifications:
+                    self.notifications.record_attempt(
+                        user_id=user_id,
+                        type="feeding",
+                        event_key=event_key,
+                        scheduled_for=local_now,
+                    )
+                await self.bot.send_message(
+                    user_id,
+                    "🌾 Сегодня ещё не отмечено кормление.\n"
+                    "Если уже покормили, нажмите «✅ Покормил».",
+                    reply_markup=feeding_reminder_keyboard(),
+                )
+            except Exception as exc:
+                logger.exception("Failed to send feeding reminder to user %s", user_id)
+                error_code = classify_telegram_error(exc)
+                await respect_rate_limit(exc)
+                if self.notifications:
+                    self.notifications.mark_failed(event_key, error_code=error_code, error_message=str(exc))
+                if error_code in {"blocked", "deactivated"}:
+                    self.incubation_service.mark_user_inactive(user_id, error_code)
+                continue
+            if self.notifications:
+                self.notifications.mark_sent(event_key, local_now)
+
     def _write_heartbeat(self, *, status: str, last_error: str | None = None) -> None:
         if self.heartbeats is None:
             return
@@ -302,7 +360,7 @@ class ReminderRunner:
             "Напоминания:",
             "- Собрать яйца и записать результат.",
             "- Проверить и заменить воду.",
-            "- Дать корм.",
+            self._feeding_summary_line(user_id, now),
             "",
         ]
 

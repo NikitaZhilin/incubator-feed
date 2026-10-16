@@ -5,6 +5,7 @@ def feeds_menu_keyboard(feed_buttons: list[tuple[int, str]] | None = None) -> In
     rows = []
     for feed_id, name in feed_buttons or []:
         rows.append([InlineKeyboardButton(text=f"🌾 {name[:28]}", callback_data=f"feeds:view:{feed_id}")])
+    rows.append([InlineKeyboardButton(text="✅ Покормил", callback_data="feeding:done")])
     rows.append(
         [
             InlineKeyboardButton(text="➕ Добавить корм", callback_data="stock:purchase"),

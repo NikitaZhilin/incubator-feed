@@ -572,6 +572,7 @@ def _settings(settings: dict) -> dict:
             "post_hatch_care": bool(settings.get("notify_post_hatch_care", True)),
             "poultry_advisor": bool(settings.get("notify_poultry_advisor", True)),
             "daily_summary": bool(settings.get("notify_daily_summary", True)),
+            "feeding": bool(settings.get("notify_feeding", True)),
             "service": bool(settings.get("notify_service", True)),
         },
     }

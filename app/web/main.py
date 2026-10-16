@@ -32,6 +32,7 @@ from app.web.parity import (
     exclusion_finish_form,
     group_ration_form,
     incubation_reference,
+    fed_block,
     profile_form,
     register_parity_routes,
     weather_refresh_form,
@@ -988,6 +989,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             notify_post_hatch_care="post_hatch_care" in section_keys,
             notify_poultry_advisor="poultry_advisor" in section_keys,
             notify_daily_summary="daily_summary" in section_keys,
+            notify_feeding="feeding" in section_keys,
             notify_service="service" in section_keys,
         )
         return _redirect_with_message(
@@ -1569,6 +1571,9 @@ def _page_style() -> str:
       border-color: color-mix(in srgb, var(--danger) 40%, transparent);
       background: var(--danger-soft);
     }
+    form.fed { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+    form.fed button { width: auto; min-width: 150px; font-size: 17px; }
+    @media (max-width: 600px) { form.fed { flex-direction: column; align-items: stretch; } form.fed button { width: 100%; } }
     .status-line {
       display: flex;
       align-items: center;
@@ -1679,6 +1684,7 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
 {_page_header(str(settings.get("farm_name") or "Хозяйство"), "Сегодня в хозяйстве: яйца, корм, птица и инкубация.", auth_token, active_path="/")}
 
   <div class="status-line {_status_tone(report)}"><span class="status-dot"></span>{escape(_status_headline(report))}</div>
+  {fed_block(config.db_path, selected_user=selected_user, auth_token=auth_token, back="/", timezone_name=config.timezone_name)}
   <section class="wide-summary" aria-label="Хозяйственная сводка">
     <div class="metric">
       <span class="label">Яйца сегодня</span>
@@ -1876,6 +1882,7 @@ def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = ""
 <body>
 <main>
 {_page_header("Корма и склад", "Запасы, смесь, стада и последние операции.", auth_token, active_path="/feeds")}
+  {fed_block(config.db_path, selected_user=selected_user, auth_token=auth_token, back="/feeds", timezone_name=config.timezone_name)}
 
   <section class="summary">
     <div class="metric"><span class="label">Готовая смесь</span><span class="value">{escape(_kg(ready_mix.get("remaining_kg")))}</span></div>
@@ -2725,6 +2732,7 @@ def _render_sections_form(sections: dict, *, selected_user, auth_token: str) -> 
         ("post_hatch_care", "Уход после вывода"),
         ("poultry_advisor", "Птицевод"),
         ("daily_summary", "Ежедневная сводка"),
+        ("feeding", "Напоминание о кормлении"),
         ("service", "Системные сообщения"),
     )
     checkboxes = "".join(
