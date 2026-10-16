@@ -399,11 +399,11 @@ class HandlerHelpersTest(unittest.TestCase):
 
         self.assertEqual(
             _keyboard_texts(keyboard),
-            ["Добавить яйца", "Переход в раздел корма", "Выйти в меню"],
+            ["✅ Покормил", "Добавить яйца", "Переход в раздел корма", "Выйти в меню"],
         )
         self.assertEqual(
             _keyboard_callbacks(keyboard),
-            ["eggs:add", "feeds:menu", "menu:home"],
+            ["feeding:done", "eggs:add", "feeds:menu", "menu:home"],
         )
 
     def test_eggs_keyboards_have_section_navigation(self) -> None:

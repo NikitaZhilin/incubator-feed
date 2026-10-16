@@ -17,6 +17,7 @@ from app.middlewares.callbacks import StaleCallbackMiddleware
 from app.middlewares.users import UserTrackingMiddleware
 from app.services.incubation import IncubationService
 from app.services.eggs import EggService
+from app.services.feeding import FeedingService
 from app.services.feeds import FeedService
 from app.services.heartbeats import HeartbeatLoop
 from app.services.stock import StockService
@@ -30,6 +31,7 @@ from app.storage.database import Database
 from app.storage.repositories.analytics import AnalyticsRepository
 from app.storage.repositories.batches import BatchRepository
 from app.storage.repositories.eggs import EggRepository
+from app.storage.repositories.feeding import FeedingRepository
 from app.storage.repositories.feeds import FeedRepository
 from app.storage.repositories.heartbeats import HeartbeatRepository
 from app.storage.repositories.notifications import NotificationRepository
@@ -118,6 +120,11 @@ async def main() -> None:
         )
         stock_service = StockService(StockRepository(database), feed_repository, analytics)
         feed_service.before_ration_change = stock_service.checkpoint_user
+        feeding_service = FeedingService(
+            FeedingRepository(database),
+            feed_repository,
+            timezone_name=config.timezone,
+        )
         poultry_advisor_service = PoultryAdvisorService(
             incubation_service=incubation_service,
             feed_service=feed_service,
@@ -145,6 +152,7 @@ async def main() -> None:
         dispatcher["feed_service"] = feed_service
         dispatcher["egg_service"] = egg_service
         dispatcher["stock_service"] = stock_service
+        dispatcher["feeding_service"] = feeding_service
         dispatcher["poultry_advisor_service"] = poultry_advisor_service
         dispatcher["admin_service"] = admin_service
         dispatcher["analytics"] = analytics
@@ -161,6 +169,7 @@ async def main() -> None:
             egg_service=egg_service,
             stock_service=stock_service,
             poultry_advisor_service=poultry_advisor_service,
+            feeding_service=feeding_service,
             users=users,
             notifications=notifications,
             heartbeats=heartbeats,

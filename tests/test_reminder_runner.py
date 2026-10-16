@@ -320,7 +320,7 @@ class ReminderRunnerTest(unittest.IsolatedAsyncioTestCase):
             ]
             self.assertEqual(
                 markup_texts,
-                ["Добавить яйца", "Переход в раздел корма", "Выйти в меню"],
+                ["✅ Покормил", "Добавить яйца", "Переход в раздел корма", "Выйти в меню"],
             )
 
             with database.connect() as connection:
