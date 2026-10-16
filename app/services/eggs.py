@@ -17,6 +17,10 @@ EXCLUSION_REASON_LABELS = {
 }
 
 MAX_MULTI_DAY_COLLECTION_DAYS = 30
+# A typo guard for one collection; a household flock does not lay this many eggs at once.
+MAX_EGGS_PER_COLLECTION = 2000
+# "Не помню период" uses the recent laying rate: summer numbers would make autumn periods too short.
+AVERAGE_LOOKBACK_DAYS = 30
 
 
 class EggService:
@@ -70,9 +74,12 @@ class EggService:
     ) -> list[tuple[date, int]]:
         if total_eggs <= 0:
             raise ValueError("Количество яиц должно быть больше нуля.")
+        self._validate_collection_size(total_eggs)
         current_date = today or self.current_date()
+        if current_date > self.current_date():
+            raise ValueError("Дата сбора не может быть в будущем.")
         if days is None:
-            average = self.average_recorded_eggs(user_id)
+            average = self.average_recorded_eggs(user_id, today=current_date)
             if average <= 0:
                 raise ValueError("Недостаточно статистики. Укажите количество дней вручную.")
             days = min(max(ceil(total_eggs / average), 2), MAX_MULTI_DAY_COLLECTION_DAYS)
@@ -101,6 +108,9 @@ class EggService:
             raise ValueError("Количество яиц должно быть больше нуля.")
         if sum(count for _, count in distribution) != total_eggs:
             raise ValueError("Распределение не сходится с общим количеством яиц.")
+        self._validate_collection_size(total_eggs)
+        if max(entry_date for entry_date, _ in distribution) > self.current_date():
+            raise ValueError("Дата сбора не может быть в будущем.")
         days = len(distribution)
         note = f"Сбор за несколько дней: {total_eggs} шт. за {days} дн."
         if auto_period:
@@ -115,8 +125,32 @@ class EggService:
             for entry_date, eggs_count in distribution
         ]
 
-    def average_recorded_eggs(self, user_id: int) -> float:
+    def average_recorded_eggs(self, user_id: int, *, today: date | None = None) -> float:
+        """Average eggs per recorded day over the last 30 days (all time if none)."""
+        current_date = today or self.current_date()
+        totals = self.eggs.daily_totals(
+            user_id,
+            start_date=current_date - timedelta(days=AVERAGE_LOOKBACK_DAYS - 1),
+            end_date=current_date,
+        )
+        if totals:
+            return sum(totals.values()) / len(totals)
         return float(self.eggs.average_daily_total(user_id) or 0)
+
+    def already_recorded(self, user_id: int, dates: list[date]) -> dict[date, int]:
+        """Eggs already recorded on the given dates (only dates that have records)."""
+        if not dates:
+            return {}
+        totals = self.eggs.daily_totals(user_id, start_date=min(dates), end_date=max(dates))
+        return {day: totals[day] for day in sorted(dates, reverse=True) if day in totals}
+
+    @staticmethod
+    def _validate_collection_size(total_eggs: int) -> None:
+        if total_eggs > MAX_EGGS_PER_COLLECTION:
+            raise ValueError(
+                f"{total_eggs} яиц за один сбор — похоже на опечатку. "
+                f"Проверьте число (максимум {MAX_EGGS_PER_COLLECTION})."
+            )
 
     def recent_empty_days(
         self,

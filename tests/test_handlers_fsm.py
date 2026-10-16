@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import unittest
@@ -18,6 +18,7 @@ from app.handlers.eggs import (
     eggs_edit_date_start,
     eggs_multi_day_auto,
     eggs_multi_day_collection_date,
+    eggs_multi_day_collection_date_manual,
     eggs_multi_day_confirm,
     eggs_multi_day_days,
     eggs_multi_day_manual,
@@ -252,6 +253,38 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Сбор за несколько дней записан", confirm_callback.message.answers[-1][0])
         history = self.egg_service.history(1, days=3, today=date(2026, 5, 27))
         self.assertEqual(history, [(date(2026, 5, 27), 7), (date(2026, 5, 26), 7), (date(2026, 5, 25), 6)])
+
+        # A second tap on «Записать» must not record again or show a technical error.
+        repeat_callback = FakeCallback("eggs:multi_days:confirm")
+        await eggs_multi_day_confirm(repeat_callback, state, self.egg_service)
+
+        self.assertTrue(repeat_callback.answered)
+        self.assertEqual(repeat_callback.message.answers, [])
+        self.assertEqual(
+            self.egg_service.history(1, days=3, today=date(2026, 5, 27)),
+            [(date(2026, 5, 27), 7), (date(2026, 5, 26), 7), (date(2026, 5, 25), 6)],
+        )
+
+    async def test_multi_day_preview_warns_about_existing_records(self) -> None:
+        self.egg_service.record_today(1, 5, today=date(2026, 5, 26))
+        state = FakeState()
+        state.data = {"multi_day_total": 20, "multi_day_collection_date": "2026-05-27"}
+
+        days_message = FakeMessage("2")
+        await eggs_multi_day_days(days_message, state, self.egg_service)
+
+        self.assertIn("уже записано 5 шт.", days_message.answers[-1][0])
+
+    async def test_multi_day_collection_date_cannot_be_in_future(self) -> None:
+        state = FakeState()
+        state.state = EggMultiDayFlow.collection_date
+        future = (self.egg_service.current_date() + timedelta(days=30)).strftime("%d.%m.%Y")
+
+        message = FakeMessage(future)
+        await eggs_multi_day_collection_date_manual(message, state, self.egg_service)
+
+        self.assertIn("не может быть в будущем", message.answers[-1][0])
+        self.assertNotIn("multi_day_collection_date", state.data)
 
     async def test_multi_day_egg_entry_auto_period_uses_average(self) -> None:
         self.egg_service.record_today(1, 7, today=date(2026, 5, 20))
