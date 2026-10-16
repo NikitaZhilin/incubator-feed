@@ -399,7 +399,7 @@ class HandlerHelpersTest(unittest.TestCase):
 
         self.assertEqual(
             _keyboard_texts(keyboard),
-            ["Добавить яйца", "Переход в раздел корма", "Выйти в меню"],
+            ["✅ Покормил", "Добавить яйца", "Переход в раздел корма", "Выйти в меню"],
         )
         self.assertEqual(
             _keyboard_callbacks(keyboard),
