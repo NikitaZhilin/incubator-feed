@@ -31,6 +31,8 @@ from app.handlers.feeds import (
     NewFeed,
     StockPurchaseFlow,
     bird_group_count,
+    bird_group_role,
+    bird_group_role_set,
     feed_amount,
     feed_change_amount,
     feed_command,
@@ -425,6 +427,21 @@ class HandlerFsmTest(unittest.IsolatedAsyncioTestCase):
         await feed_edit_value(FakeMessage("ПК-2"), state, self.feed_service, self.incubation)
 
         self.assertEqual(self.feed_service.get_estimate(feed.id, 1).feed.name, "ПК-2")
+
+    async def test_bird_group_role_can_be_changed_in_bot(self) -> None:
+        group = self.feed_service.create_bird_group(user_id=1, name="Куры", bird_count=12, role="mixed")
+        menu = FakeCallback(f"feeds:group_role:{group.id}")
+
+        await bird_group_role(menu, FakeState(), self.feed_service)
+        await bird_group_role_set(FakeCallback(f"feeds:group_role_set:{group.id}:hens"), self.feed_service)
+
+        self.assertIn("Несушки", menu.message.answers[-1][0])
+        self.assertEqual(self.feed_service.get_bird_group(group.id, 1).role, "hens")
+        self.assertEqual(self.egg_service.total_laying_hens(1), 12)
+
+        bad = FakeCallback(f"feeds:group_role_set:{group.id}:chicks")
+        await bird_group_role_set(bad, self.feed_service)
+        self.assertEqual(self.feed_service.get_bird_group(group.id, 1).role, "hens")
 
     async def test_stock_purchase_fsm_critical_path(self) -> None:
         state = FakeState()
