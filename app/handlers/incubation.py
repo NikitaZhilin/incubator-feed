@@ -1143,6 +1143,12 @@ async def _send_stats(callback: CallbackQuery, incubation_service: IncubationSer
         if stats_value.hatch_rate is not None
         else "нет завершенных партий"
     )
+    from app.services.farm_overview import incubation_results_lines
+
+    details = incubation_results_lines(
+        incubation_service.batches.list_all_for_user(callback.from_user.id),
+        {code: profile.title for code, profile in PROFILES.items()},
+    )
     await _answer_callback_message(
         callback,
         "Статистика инкубации:\n"
@@ -1151,7 +1157,7 @@ async def _send_stats(callback: CallbackQuery, incubation_service: IncubationSer
         f"Завершенных: {stats_value.completed_batches}\n"
         f"Яиц в завершенных партиях: {stats_value.total_eggs}\n"
         f"Вывелось: {stats_value.total_hatched}\n"
-        f"Процент вывода: {hatch_rate}",
+        f"Процент вывода: {hatch_rate}\n\n" + "\n".join(details),
         reply_markup=incubation_menu_keyboard(),
     )
 

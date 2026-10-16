@@ -5,7 +5,7 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from app.domain import DailyWeather, EggEntry, EggStats, HenLayingExclusion
 from app.keyboards.eggs import (
@@ -93,10 +93,18 @@ async def eggs_add_date(callback: CallbackQuery, state: FSMContext, egg_service:
         return
     await state.update_data(entry_date=entry_date.isoformat())
     await state.set_state(EggEntryFlow.count)
+    from app.handlers.quick import quick_eggs_keyboard
+    from app.services.farm_overview import usual_egg_counts
+
+    counts = usual_egg_counts(egg_service.eggs, callback.from_user.id, today=egg_service.current_date())
+    markup = eggs_cancel_keyboard()
+    if counts:
+        quick = quick_eggs_keyboard(counts, entry_date, other_callback="eggs:menu")
+        markup = InlineKeyboardMarkup(inline_keyboard=[quick.inline_keyboard[0], *markup.inline_keyboard])
     await callback.message.answer(
         f"Сколько яиц собрано {_egg_entry_date_label(choice)} ({entry_date.isoformat()})?\n\n"
-        "Введите число. Если хотите внести несколько раз за день, можно добавлять отдельными записями.",
-        reply_markup=eggs_cancel_keyboard(),
+        "Нажмите число или напишите своё. Если вносите несколько раз за день, записи сложатся.",
+        reply_markup=markup,
     )
     await callback.answer()
 

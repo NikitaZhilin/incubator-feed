@@ -127,7 +127,14 @@ class PoultryAdvisorService:
             lines.extend(light_advice_lines(light, compact=True))
 
         try:
-            grown = grown_chick_groups(self.feed_service.list_bird_groups(user_id), today=today)
+            groups = self.feed_service.list_bird_groups(user_id)
+            grown = grown_chick_groups(groups, today=today)
+            from app.services.farm_overview import flock_age_lines
+
+            age_lines = [line for line in flock_age_lines(groups, today=today) if "замен" in line]
+            if age_lines:
+                lines.extend(["", "Возраст стада:"])
+                lines.extend(age_lines)
         except Exception:
             grown = []
         if grown:
@@ -505,6 +512,14 @@ class PoultryAdvisorService:
         lines.extend(light_advice_lines(light))
         if "не задан" in light.place:
             lines.append("- Укажите город в «Яйца → Город и погода», чтобы считать восход и закат точно.")
+        return "\n".join(lines)
+
+    def build_flock_age_advice(self, user_id: int, *, today: date | None = None) -> str:
+        from app.services.farm_overview import flock_age_lines
+
+        current = today or self.egg_service.current_date()
+        lines = ["🐔 Возраст стада и замена", ""]
+        lines.extend(flock_age_lines(self.feed_service.list_bird_groups(user_id), today=current))
         return "\n".join(lines)
 
     def detect_egg_drop(self, user_id: int, *, today: date) -> EggDrop | None:

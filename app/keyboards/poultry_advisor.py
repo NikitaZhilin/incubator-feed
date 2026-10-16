@@ -17,6 +17,7 @@ def advisor_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="💡 Свет зимой", callback_data="advisor:light"),
                 InlineKeyboardButton(text="🗓 Уход за птицей", callback_data="care:menu"),
             ],
+            [InlineKeyboardButton(text="🐔 Возраст стада и замена", callback_data="advisor:flock_age")],
             [InlineKeyboardButton(text="🩺 Проблема с птицей", callback_data="advisor:health")],
             [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:poultry_advisor")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
