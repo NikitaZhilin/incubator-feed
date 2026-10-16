@@ -7,6 +7,8 @@ import unittest
 from app.services.backups import (
     DailyBackupLoop,
     backup_is_due,
+    compress_backup,
+    offsite_copy_is_due,
     latest_backup_time,
     run_verified_backup,
 )
@@ -63,6 +65,41 @@ class BackupTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(first)
         self.assertIsNone(second)
         self.assertEqual(len(list(self.backup_dir.glob("incubator_*.db"))), 1)
+
+    async def test_offsite_copy_is_sent_weekly_and_retried_on_failure(self) -> None:
+        sent: list[Path] = []
+        results = [False, True]
+
+        async def send(path: Path) -> bool:
+            sent.append(path)
+            return results.pop(0)
+
+        loop = DailyBackupLoop(db_path=self.db_path, backup_dir=self.backup_dir, send_offsite=send)
+        await loop.run_once()
+
+        self.assertFalse(await loop.send_offsite_if_due())  # failed: will retry
+        self.assertTrue(await loop.send_offsite_if_due())
+        self.assertFalse(await loop.send_offsite_if_due())  # already sent this week
+
+        self.assertEqual(len(sent), 2)
+        self.assertTrue(sent[0].name.startswith("incubator_"))
+        next_week = datetime.now(timezone.utc) + timedelta(days=7, minutes=1)
+        self.assertTrue(offsite_copy_is_due(self.backup_dir, every=timedelta(days=7), now=next_week))
+
+    def test_compressed_backup_restores(self) -> None:
+        import gzip
+
+        path = run_verified_backup(self.db_path, self.backup_dir)
+        payload, name = compress_backup(path)
+        restored = self.backup_dir / "restored.db"
+        restored.write_bytes(gzip.decompress(payload))
+
+        connection = sqlite3.connect(restored)
+        try:
+            self.assertEqual(connection.execute("SELECT x FROM t").fetchone()[0], 42)
+        finally:
+            connection.close()
+        self.assertTrue(name.endswith(".db.gz"))
 
 
 if __name__ == "__main__":

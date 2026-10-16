@@ -9,11 +9,12 @@ from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from app.keyboards.admin import (
     MAX_CALLBACK_VERSION_LENGTH,
     RELEASE_CALLBACK_PREFIX,
+    admin_panel_keyboard,
     parse_release_callback,
     release_confirm_keyboard,
 )
-from app.keyboards.menu import back_to_menu_keyboard
 from app.services.admin import AdminService
+from app.services.backups import TELEGRAM_DOCUMENT_LIMIT, compress_backup, run_verified_backup
 from app.services.release_notifications import (
     ReleaseNotificationService,
     build_release_preview,
@@ -45,7 +46,70 @@ async def admin_command(message: Message, admin_service: AdminService) -> None:
     if not _is_admin_message(message, admin_service):
         await message.answer("Команда недоступна.")
         return
-    await message.answer(_format_admin_stats(admin_service), reply_markup=back_to_menu_keyboard())
+    await message.answer(_format_admin_stats(admin_service), reply_markup=admin_panel_keyboard())
+
+
+BACKUP_CAPTION = (
+    "📦 Копия базы бота ({name}).\n"
+    "Сохраните файл у себя: если сервер сломается, из него всё восстанавливается "
+    "(инструкция в docs/BACKUP_RESTORE.md).\n"
+    "Копия приходит раз в неделю; свежую можно получить командой /backup."
+)
+
+
+async def send_backup_document(bot, chat_id: int, backup_path) -> bool:
+    """Send a gzipped verified backup to one chat; False if it is too large or sending failed."""
+    payload, filename = await asyncio.to_thread(compress_backup, backup_path)
+    if len(payload) > TELEGRAM_DOCUMENT_LIMIT:
+        await bot.send_message(
+            chat_id,
+            f"Копия базы слишком большая для Telegram ({len(payload) // (1024 * 1024)} МБ). "
+            "Она сохранена только на сервере.",
+        )
+        return False
+    await bot.send_document(
+        chat_id,
+        BufferedInputFile(payload, filename=filename),
+        caption=BACKUP_CAPTION.format(name=filename),
+    )
+    return True
+
+
+async def send_backup_to_admins(bot, admin_ids, backup_path) -> bool:
+    sent = False
+    for admin_id in admin_ids:
+        try:
+            sent = await send_backup_document(bot, admin_id, backup_path) or sent
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception("Failed to send backup to admin %s", admin_id)
+    return sent
+
+
+@router.message(Command("backup"))
+async def admin_backup(message: Message, admin_service: AdminService, config) -> None:
+    if not _is_admin_message(message, admin_service):
+        await message.answer("Команда недоступна.")
+        return
+    await _send_fresh_backup(message, config)
+
+
+@router.callback_query(F.data == "admin:backup")
+async def admin_backup_button(callback: CallbackQuery, admin_service: AdminService, config) -> None:
+    if not admin_service.is_admin(callback.from_user.id):
+        await callback.answer("Недоступно", show_alert=True)
+        return
+    await callback.answer("Готовлю копию…")
+    await _send_fresh_backup(callback.message, config)
+
+
+async def _send_fresh_backup(target: Message, config) -> None:
+    try:
+        path = await asyncio.to_thread(run_verified_backup, config.db_path, config.backup_dir)
+        await send_backup_document(target.bot, target.chat.id, path)
+    except Exception as exc:
+        await target.answer(f"Не удалось сделать копию: {type(exc).__name__}: {str(exc)[:300]}")
 
 
 @router.message(Command("admin_export"))
@@ -131,7 +195,7 @@ async def admin_refresh(callback: CallbackQuery, admin_service: AdminService) ->
     if not admin_service.is_admin(callback.from_user.id):
         await callback.answer("Недоступно", show_alert=True)
         return
-    await callback.message.answer(_format_admin_stats(admin_service), reply_markup=back_to_menu_keyboard())
+    await callback.message.answer(_format_admin_stats(admin_service), reply_markup=admin_panel_keyboard())
     await callback.answer()
 
 

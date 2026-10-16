@@ -22,6 +22,7 @@ from app.services.feeds import FeedService
 from app.services.heartbeats import HeartbeatLoop
 from app.services.stock import StockService
 from app.services.admin import AdminService
+from app.handlers.admin import send_backup_to_admins
 from app.services.backups import DailyBackupLoop
 from app.services.poultry_advisor import PoultryAdvisorService
 from app.services.release_notifications import AdminStartupNotificationService, ReleaseNotificationService
@@ -195,6 +196,9 @@ async def main() -> None:
             db_path=config.db_path,
             backup_dir=config.backup_dir,
             on_failure=lambda exc: notify_admins_about_backup_failure(bot, config.admin_ids, exc),
+            send_offsite=(
+                (lambda path: send_backup_to_admins(bot, config.admin_ids, path)) if config.admin_ids else None
+            ),
         )
         polling_heartbeat.start()
         reminder_runner.start()
