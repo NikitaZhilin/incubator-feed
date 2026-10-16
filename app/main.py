@@ -24,6 +24,7 @@ from app.services.stock import StockService
 from app.services.admin import AdminService
 from app.handlers.admin import send_backup_to_admins
 from app.services.backups import DailyBackupLoop
+from app.services.ledger import LedgerService
 from app.services.poultry_advisor import PoultryAdvisorService
 from app.services.release_notifications import AdminStartupNotificationService, ReleaseNotificationService
 from app.services.reminders import ReminderRunner
@@ -127,6 +128,9 @@ async def main() -> None:
             stock=stock_service,
             timezone_name=config.timezone,
         )
+        ledger_service = LedgerService(
+            database, feed_service, feeding_service=feeding_service, stock_service=stock_service
+        )
         poultry_advisor_service = PoultryAdvisorService(
             incubation_service=incubation_service,
             feed_service=feed_service,
@@ -156,6 +160,7 @@ async def main() -> None:
         dispatcher["egg_service"] = egg_service
         dispatcher["stock_service"] = stock_service
         dispatcher["feeding_service"] = feeding_service
+        dispatcher["ledger_service"] = ledger_service
         dispatcher["poultry_advisor_service"] = poultry_advisor_service
         dispatcher["admin_service"] = admin_service
         dispatcher["analytics"] = analytics

@@ -306,6 +306,33 @@ class WebParityTest(unittest.TestCase):
         self.assertEqual(service.today(1), [])
         self.assertAlmostEqual(corn.remaining_kg, 40, places=2)
 
+    def test_loss_eggs_out_and_price_on_site(self) -> None:
+        from app.storage.repositories.ledger import LedgerRepository
+
+        livestock = self.client.get(f"/livestock{AUTH}").text
+        lost = self._post("/ledger/losses", {"bird_group_id": str(self.hens.id), "count": "2", "reason": "died"})
+        too_many = self._post("/ledger/losses", {"bird_group_id": str(self.hens.id), "count": "99", "reason": "died"})
+        loss = LedgerRepository(self.database).recent_losses(1)[0]
+
+        self.assertIn("Падёж и выбраковка", livestock)
+        self.assertIn("−2", unquote_plus(lost.headers["location"]))
+        self.assertIn("error=", too_many.headers["location"])
+        self.assertEqual(self.feeds.get_bird_group(self.hens.id, 1).bird_count, 8)
+        self._post(f"/ledger/losses/{loss.id}/undo", {})
+        self.assertEqual(self.feeds.get_bird_group(self.hens.id, 1).bird_count, 10)
+
+        sold = self._post("/ledger/eggs-out", {"kind": "sold", "eggs_count": "20", "amount_rub": "300"})
+        self.assertIn("300", unquote_plus(sold.headers["location"]))
+        self.assertIn("Продажа и раздача яиц", self.client.get(f"/eggs{AUTH}").text)
+
+        purchase = self._post(
+            "/stock/purchases", {"name": "Кукуруза", "kind": "ingredient", "amount": "50 кг", "price_rub": "1000"}
+        )
+        self.assertIn("notice=", purchase.headers["location"])
+        priced = LedgerRepository(self.database).priced_purchases(1)
+        self.assertEqual([(p.name, p.price_rub) for p in priced], [("Кукуруза", 1000.0)])
+        self.assertIn("Себестоимость", self.client.get(f"/feeds{AUTH}").text)
+
     def test_new_pages_require_token(self) -> None:
         self.assertEqual(self.client.get("/advisor").status_code, 401)
         self.assertEqual(self.client.get("/help").status_code, 401)
