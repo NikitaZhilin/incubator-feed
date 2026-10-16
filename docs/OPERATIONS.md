@@ -10,12 +10,6 @@ Docker:
 docker compose logs -f --tail=100 bot
 ```
 
-systemd:
-
-```bash
-journalctl -u tg-bot-inkubator.service -f
-```
-
 ## Deploy checklist
 
 1. Проверить `git status`.
@@ -59,7 +53,6 @@ python -B scripts/check_disk.py
 
 Для падений вне Python-процесса используйте внешний механизм:
 
-- systemd: `tg-bot-inkubator.service` содержит `OnFailure=tg-bot-inkubator-failure@%n.service`; failure-unit запускает `scripts/notify_admin_failure.py`.
 - Docker: Compose настроен на `restart: unless-stopped` и healthcheck. Для Telegram-уведомлений о падении контейнера можно запускать с хоста:
 
 ```bash

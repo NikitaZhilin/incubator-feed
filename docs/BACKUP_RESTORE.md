@@ -22,11 +22,7 @@ Docker:
 docker compose run --rm backup
 ```
 
-systemd timer:
-
-```bash
-systemctl list-timers | grep tg-bot-inkubator-backup
-```
+Бот сам делает копию раз в сутки и раз в неделю присылает её администратору в Telegram; свежую копию можно получить командой `/backup`.
 
 ## Restore
 
