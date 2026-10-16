@@ -364,6 +364,23 @@ def register_parity_routes(app: FastAPI, require_web_access) -> None:
             notice = f"Отмечено: покормили в {at}." + (f" По норме около {format_kg(norm)} в день." if norm > 0 else "")
         return web._redirect_with_message(redirect_base, notice=notice)
 
+    @app.post("/feeding/{event_id}/undo", dependencies=access)
+    async def undo_fed(event_id: int, request: Request, auth: str | None = Query(default=None)):
+        form = await _form(request)
+        back = form.get("back", "/")
+        redirect_base = web._link(back if back in {"/", "/feeds"} else "/", auth or "")
+        user_id, failed = _guard(form, redirect_base, "Отмена кормления")
+        if failed:
+            return failed
+        service = feeding_service_for(Database(app.state.web_config.db_path), app.state.web_config.timezone_name)
+        event = service.feeding.get(event_id, user_id)
+        if event is None or not service.undo(user_id, event_id):
+            return web._redirect_with_message(redirect_base, error="Эта отметка уже отменена.")
+        tail = " Ингредиенты возвращены на склад." if event.cups else ""
+        return web._redirect_with_message(
+            redirect_base, notice=f"Отметка о кормлении в {service.format_time(event)} отменена.{tail}"
+        )
+
     @app.post("/feeding/mix", dependencies=access)
     async def save_feeding_mix(request: Request, auth: str | None = Query(default=None)):
         from app.services.feeding import parse_mix_text
@@ -833,8 +850,18 @@ def fed_block(db_path, *, selected_user, auth_token: str, back: str, timezone_na
         week = service.week(int(selected_user))
         last = service.last_cups(int(selected_user)) or 3.5
         per_cup = service.mix_kg_per_cup(int(selected_user))
+        today_events = service.today(int(selected_user))
     except Exception:
         return ""
+    undo = ""
+    if today_events:
+        last_event = today_events[-1]
+        undo = f"""
+  <form class="quiet" method="post" action="{escape(_link(f'/feeding/{last_event.id}/undo', auth_token))}">
+    <input type="hidden" name="user_id" value="{escape(str(selected_user))}">
+    <input type="hidden" name="back" value="{escape(back)}">
+    <button type="submit" class="secondary">↩️ Отменить отметку {escape(service.format_time(last_event))}</button>
+  </form>"""
     return f"""
   <form class="note fed" method="post" action="{escape(_link('/feeding', auth_token))}">
     <input type="hidden" name="user_id" value="{escape(str(selected_user))}">
@@ -846,7 +873,7 @@ def fed_block(db_path, *, selected_user, auth_token: str, back: str, timezone_na
     <label class="fed-cups"><span class="label">Кружек смеси</span>
       <input name="cups" type="number" min="0.5" max="100" step="0.5" value="{last:g}" placeholder="пусто — по норме"></label>
     <button type="submit">✅ Покормил</button>
-  </form>"""
+  </form>{undo}"""
 
 
 def feeding_mix_form(db_path, *, selected_user, auth_token: str, timezone_name: str) -> str:

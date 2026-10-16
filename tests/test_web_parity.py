@@ -284,6 +284,28 @@ class WebParityTest(unittest.TestCase):
         self.assertIn("Кормите своей смесью", advisor)
         self.assertNotIn("Готовой смеси нет", advisor)
 
+    def test_fed_mark_can_be_undone_on_site(self) -> None:
+        from app.services.feeding import FeedingService
+        from app.storage.repositories.feeding import FeedingRepository
+
+        stock = StockService(StockRepository(self.database), FeedRepository(self.database))
+        stock.add_purchase(user_id=1, name="Кукуруза", kind="ingredient", amount_kg=40)
+        self._post("/feeding/mix", {"mix_text": "Кукуруза 4\nКомбикорм 2", "cup_liters": "1"})
+        self._post("/feeding", {"back": "/", "cups": "3"})
+        service = FeedingService(FeedingRepository(self.database), FeedRepository(self.database))
+        event = service.today(1)[0]
+
+        page = self.client.get(f"/{AUTH}").text
+        undone = self._post(f"/feeding/{event.id}/undo", {"back": "/"})
+        again = self._post(f"/feeding/{event.id}/undo", {"back": "/"})
+        corn = next(e for e in stock.list_estimates(1) if e.item.name == "Кукуруза")
+
+        self.assertIn("Отменить отметку", page)
+        self.assertIn("отменена", unquote_plus(undone.headers["location"]))
+        self.assertIn("error=", again.headers["location"])
+        self.assertEqual(service.today(1), [])
+        self.assertAlmostEqual(corn.remaining_kg, 40, places=2)
+
     def test_new_pages_require_token(self) -> None:
         self.assertEqual(self.client.get("/advisor").status_code, 401)
         self.assertEqual(self.client.get("/help").status_code, 401)
