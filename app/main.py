@@ -132,6 +132,7 @@ async def main() -> None:
             egg_service=egg_service,
             stock_service=stock_service,
             timezone_name=config.timezone,
+            feeding_service=feeding_service,
         )
         admin_service = AdminService(
             database=database,

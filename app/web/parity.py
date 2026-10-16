@@ -463,6 +463,7 @@ def register_parity_routes(app: FastAPI, require_web_access) -> None:
             egg_service=_egg_service(database),
             stock_service=StockService(StockRepository(database), feeds),
             timezone_name=current.timezone_name,
+            feeding_service=feeding_service_for(database, current.timezone_name),
         )
         blocks = []
         for title, builder in (
@@ -791,6 +792,32 @@ def feeding_service_for(database: Database, timezone_name: str):
         stock=StockService(StockRepository(database), feeds),
         timezone_name=timezone_name,
     )
+
+
+def pace_tile(db_path, *, selected_user, timezone_name: str) -> str:
+    """Home tile for feeding the home mix in cups; empty if cups are not used."""
+    if selected_user is None or not db_path.exists():
+        return ""
+    from app.services.feeding import format_kg
+
+    try:
+        pace = feeding_service_for(Database(db_path), timezone_name).pace(selected_user)
+    except Exception:
+        return ""
+    if pace is None:
+        return ""
+    soon = pace.soon_out
+    if soon:
+        detail = "Скоро закончится: " + "; ".join(f"{item.name} — {item.days_left} дн." for item in soon)
+    else:
+        known = [item for item in pace.ingredients if item.days_left is not None]
+        first = min(known, key=lambda item: item.days_left) if known else None
+        detail = f"Раньше всего кончится: {first.name} — {first.days_left} дн." if first else "Ингредиентов нет на складе."
+    return f"""<div class="metric">
+      <span class="label">Корм (своя смесь)</span>
+      <span class="value">{escape(format_kg(pace.daily_kg))}/день</span>
+      <div class="small">По отметкам «Покормил» за {pace.observed_days} дн. {escape(detail)}</div>
+    </div>"""
 
 
 def fed_block(db_path, *, selected_user, auth_token: str, back: str, timezone_name: str) -> str:

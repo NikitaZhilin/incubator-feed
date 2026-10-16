@@ -34,6 +34,7 @@ from app.web.parity import (
     incubation_reference,
     fed_block,
     feeding_mix_form,
+    pace_tile,
     profile_form,
     register_parity_routes,
     weather_refresh_form,
@@ -1661,6 +1662,11 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
     incubation = summary.get("incubation") or {}
     settings = summary.get("settings") or {}
     ready_mix = feeds.get("ready_mix") or {}
+    ready_mix_tile = f"""<div class="metric">
+      <span class="label">Готовая смесь</span>
+      <span class="value">{escape(_kg(ready_mix.get("remaining_kg")))}</span>
+      <div class="small">Расход: {escape(_kg(ready_mix.get("daily_usage_kg")))} в день. Дней: {escape(_days(ready_mix.get("days_left")))}. До: {escape(_date_text(ready_mix.get("ends_at")))}. Докупить до: {escape(_date_text(ready_mix.get("purchase_by")))}</div>
+    </div>"""
     possible_mix = feeds.get("possible_mix") or {}
     norms_html = _render_feeding_norms(feeds.get("feeding_norms") or {})
     bird_groups = feeds.get("bird_groups") or {}
@@ -1695,11 +1701,7 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
       <span class="value">{escape(str(eggs.get("today_eggs", 0)))}</span>
       <div class="small">Несутся: {escape(str(eggs.get("active_hens", 0)))} из {escape(str(eggs.get("total_hens", 0)))}. Прогноз на 7 дней: {escape(str(eggs.get("next_week_forecast", 0)))}</div>
     </div>
-    <div class="metric">
-      <span class="label">Готовая смесь</span>
-      <span class="value">{escape(_kg(ready_mix.get("remaining_kg")))}</span>
-      <div class="small">Расход: {escape(_kg(ready_mix.get("daily_usage_kg")))} в день. Дней: {escape(_days(ready_mix.get("days_left")))}. До: {escape(_date_text(ready_mix.get("ends_at")))}. Докупить до: {escape(_date_text(ready_mix.get("purchase_by")))}</div>
-    </div>
+    {pace_tile(config.db_path, selected_user=selected_user, timezone_name=config.timezone_name) or ready_mix_tile}
     <div class="metric">
       <span class="label">Возможные замесы</span>
       <span class="value">{escape(str(possible_mix.get("mix_count", 0)))}</span>

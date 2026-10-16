@@ -33,6 +33,12 @@ DUPLICATE_WINDOW = timedelta(minutes=2)
 # Evening reminder when nothing was marked during the day.
 FEEDING_REMINDER_TIME = time(19, 0)
 QUICK_CUPS = (3.0, 3.5, 4.0)
+# Feeding in cups within this many days means the owner feeds the home mix
+# straight from ingredients, so "finished mix" warnings do not apply.
+PACE_LOOKBACK_DAYS = 14
+PACE_WINDOW_DAYS = 7
+PACE_WARNING_DAYS = 7
+PACE_URGENT_DAYS = 2
 MAX_CUPS = 100
 DEFAULT_DENSITY_KG_PER_L = 0.7
 # The owner's usual mix: the bot recipe without barley and meat-and-bone meal,
@@ -128,6 +134,34 @@ class GivenIngredient:
 class FeedingNorm:
     bird_count: int
     daily_kg: float
+
+
+@dataclass(frozen=True)
+class IngredientPace:
+    name: str
+    per_day_kg: float
+    remaining_kg: float | None
+    days_left: int | None
+
+
+@dataclass(frozen=True)
+class FeedPace:
+    """How fast the home mix is eaten, from «Покормил» with cups."""
+
+    daily_kg: float
+    observed_days: int
+    ingredients: tuple[IngredientPace, ...]
+
+    @property
+    def soon_out(self) -> tuple[IngredientPace, ...]:
+        return tuple(
+            item for item in sorted(self.ingredients, key=lambda i: i.days_left if i.days_left is not None else 10**6)
+            if item.days_left is not None and item.days_left <= PACE_WARNING_DAYS
+        )
+
+    @property
+    def not_in_stock(self) -> tuple[IngredientPace, ...]:
+        return tuple(item for item in self.ingredients if item.remaining_kg is None)
 
 
 @dataclass(frozen=True)
@@ -298,6 +332,39 @@ class FeedingService:
             for item in self.feeding.items(event_id, user_id)
         )
 
+    def pace(self, user_id: int, *, today: date | None = None) -> FeedPace | None:
+        """Daily use of the home mix by ingredient; None if cups were not used recently."""
+        current = today or self.local_now().date()
+        recent = [
+            event
+            for event in self.feeding.between(
+                user_id, start_date=current - timedelta(days=PACE_LOOKBACK_DAYS - 1), end_date=current
+            )
+            if event.cups
+        ]
+        if not recent:
+            return None
+        first_day = min(event.fed_date for event in recent)
+        window = max(1, min(PACE_WINDOW_DAYS, (current - first_day).days + 1))
+        start = current - timedelta(days=window - 1)
+        in_window = [event for event in recent if event.fed_date >= start]
+        totals = self.feeding.item_totals_between(user_id, start_date=start, end_date=current)
+        ingredients = []
+        for part in self.get_mix(user_id):
+            per_day = totals.get(part.name, 0.0) / window
+            remaining = days_left = None
+            if self.stock is not None:
+                item = self.stock._find_stock_item_by_names(user_id=user_id, names=(part.name, *part.aliases))
+                if item is not None:
+                    remaining = max(self.stock.estimate_item(item).remaining_kg, 0.0)
+                    days_left = int(remaining // per_day) if per_day > 0 else None
+            ingredients.append(IngredientPace(part.name, round(per_day, 3), remaining, days_left))
+        return FeedPace(
+            daily_kg=round(sum(event.mix_kg or 0 for event in in_window) / window, 3),
+            observed_days=window,
+            ingredients=tuple(ingredients),
+        )
+
     def ingredients_week(self, user_id: int, *, today: date | None = None, days: int = 7) -> list[dict]:
         """Ingredient totals over the last days and how long the stock lasts at that pace."""
         current = today or self.local_now().date()
@@ -397,3 +464,29 @@ def format_kg(value: float) -> str:
 def format_cups(value: float) -> str:
     text = f"{value:g}".replace(".", ",")
     return f"{text} кр."
+
+
+def pace_lines(pace: FeedPace, *, limit: int = 4) -> list[str]:
+    """Summary lines for feeding the home mix straight from ingredients."""
+    lines = [
+        f"- Кормите своей смесью: около {format_kg(pace.daily_kg)} в день "
+        f"(по отметкам «Покормил» за {pace.observed_days} дн.)."
+    ]
+    soon = pace.soon_out
+    if soon:
+        marks = [
+            ("‼️ " if item.days_left <= PACE_URGENT_DAYS else "") + f"{item.name} — на {item.days_left} дн."
+            for item in soon
+        ]
+        lines.append("- ⚠️ Скоро закончится: " + "; ".join(marks))
+    rest = [
+        item for item in sorted(pace.ingredients, key=lambda i: i.days_left if i.days_left is not None else 10**6)
+        if item.days_left is not None and item not in soon
+    ]
+    if rest:
+        lines.append(
+            "- Хватит: " + ", ".join(f"{item.name.lower()} {item.days_left} дн." for item in rest[:limit])
+        )
+    if pace.not_in_stock:
+        lines.append("- Нет на складе (только учёт): " + ", ".join(item.name.lower() for item in pace.not_in_stock) + ".")
+    return lines

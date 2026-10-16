@@ -18,7 +18,7 @@ from app.keyboards.menu import daily_summary_keyboard, feeding_reminder_keyboard
 from app.services.eggs import EggService
 from app.services.incubation import IncubationService
 from app.services.guides import post_hatch_care
-from app.services.feeding import FeedingService, format_feeding_status
+from app.services.feeding import FeedingService, format_feeding_status, pace_lines
 from app.services.feeds import FeedService
 from app.services.poultry_advisor import PoultryAdvisorService
 from app.services.stock import StockService
@@ -376,7 +376,11 @@ class ReminderRunner:
                 ]
             )
 
-        if sections.get("notify_feed", True):
+        pace = self._feed_pace(user_id, local_now)
+        if sections.get("notify_feed", True) and pace is not None:
+            lines.append("Корм (своя смесь):")
+            lines.extend(pace_lines(pace))
+        elif sections.get("notify_feed", True):
             lines.append("Готовая смесь:")
             lines.extend(
                 self._finished_mix_summary_lines(
@@ -397,6 +401,15 @@ class ReminderRunner:
                 lines.extend(["", "Совет птицевода:"])
                 lines.extend(f"- {line}" for line in advice_lines)
         return "\n".join(lines)
+
+    def _feed_pace(self, user_id: int, local_now: datetime):
+        if self.feeding_service is None:
+            return None
+        try:
+            return self.feeding_service.pace(user_id, today=local_now.date())
+        except Exception:
+            logger.exception("Failed to compute feed pace for user %s", user_id)
+            return None
 
     def _low_ingredient_lines(self, *, user_id: int, now: datetime) -> list[str]:
         if self.stock_service is None:

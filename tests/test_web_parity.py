@@ -270,6 +270,20 @@ class WebParityTest(unittest.TestCase):
         self.assertIn("Кормление моей смесью", page)
         self.assertIn("Комбикорм 2", page)
 
+    def test_feeding_by_cups_replaces_finished_mix_warnings(self) -> None:
+        stock = StockService(StockRepository(self.database), FeedRepository(self.database))
+        stock.add_purchase(user_id=1, name="Кукуруза", kind="ingredient", amount_kg=40)
+        self._post("/feeding/mix", {"mix_text": "Кукуруза 4\nКомбикорм 2", "cup_liters": "1"})
+        self._post("/feeding", {"back": "/", "cups": "3"})
+
+        home = self.client.get(f"/{AUTH}").text
+        advisor = self.client.get(f"/advisor{AUTH}").text
+
+        self.assertIn("Корм (своя смесь)", home)
+        self.assertIn("Кукуруза", home)
+        self.assertIn("Кормите своей смесью", advisor)
+        self.assertNotIn("Готовой смеси нет", advisor)
+
     def test_new_pages_require_token(self) -> None:
         self.assertEqual(self.client.get("/advisor").status_code, 401)
         self.assertEqual(self.client.get("/help").status_code, 401)
