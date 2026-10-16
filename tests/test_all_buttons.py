@@ -214,6 +214,9 @@ class AllButtonsTest(unittest.IsolatedAsyncioTestCase):
         )
         from app.services.ledger import LedgerService
 
+        from app.services.care import CareService
+
+        self.dp["care_service"] = CareService(self.database)
         self.dp["ledger_service"] = LedgerService(
             self.database, feed_service, feeding_service=self.dp["feeding_service"], stock_service=stock_service
         )

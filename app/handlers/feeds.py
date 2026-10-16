@@ -462,7 +462,7 @@ async def bird_group_view(callback: CallbackQuery, feed_service: FeedService) ->
     if group is None:
         await callback.message.answer("Поголовье не найдено.", reply_markup=bird_groups_keyboard())
     else:
-        await callback.message.answer(_format_bird_group(group), reply_markup=bird_group_actions_keyboard(group.id))
+        await callback.message.answer(_format_bird_group(group), reply_markup=bird_group_actions_keyboard(group.id, is_chicks=group.group_kind == "chicks"))
     await callback.answer()
 
 
@@ -503,7 +503,7 @@ async def bird_group_edit_value(message: Message, state: FSMContext, feed_servic
     if group is None:
         await message.answer("Поголовье не найдено.", reply_markup=bird_groups_keyboard())
     else:
-        await message.answer("Поголовье обновлено.\n\n" + _format_bird_group(group), reply_markup=bird_group_actions_keyboard(group.id))
+        await message.answer("Поголовье обновлено.\n\n" + _format_bird_group(group), reply_markup=bird_group_actions_keyboard(group.id, is_chicks=group.group_kind == "chicks"))
 
 
 GROUP_ROLE_CHOICES = (
@@ -525,7 +525,7 @@ async def bird_group_role(callback: CallbackQuery, state: FSMContext, feed_servi
     if group.group_kind == "chicks":
         await callback.message.answer(
             "У цыплят роль не выбирается: норма корма считается по возрасту.",
-            reply_markup=bird_group_actions_keyboard(group.id),
+            reply_markup=bird_group_actions_keyboard(group.id, is_chicks=group.group_kind == "chicks"),
         )
         return
     rows = [
@@ -566,7 +566,7 @@ async def bird_group_role_set(callback: CallbackQuery, feed_service: FeedService
     await callback.answer("Роль сохранена")
     await callback.message.answer(
         "Роль сохранена. Норма корма и учёт яиц пересчитаны.\n\n" + _format_bird_group(group),
-        reply_markup=bird_group_actions_keyboard(group.id),
+        reply_markup=bird_group_actions_keyboard(group.id, is_chicks=group.group_kind == "chicks"),
     )
 
 

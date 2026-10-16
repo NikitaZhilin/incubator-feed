@@ -26,6 +26,8 @@ from app.utils.dates import local_today, validate_incubation_start_date
 from app.web.config import WebConfig, load_web_config
 from app.services.ledger import parse_rub
 from app.storage.repositories.ledger import LedgerRepository
+from app.web.charts import register_chart_routes
+from app.web.farm_tools import care_block, chick_grow_forms, register_farm_tool_routes
 from app.web.ledger_pages import cost_block, eggs_out_block, losses_block, register_ledger_routes
 from app.web.parity import (
     already_fed_mix_form,
@@ -97,6 +99,8 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
 
     register_parity_routes(app, require_web_access)
     register_ledger_routes(app, require_web_access)
+    register_chart_routes(app, require_web_access)
+    register_farm_tool_routes(app, require_web_access)
 
     @app.get("/health")
     def health() -> dict:
@@ -1648,6 +1652,7 @@ def _nav_links(auth_token: str, *, active_path: str) -> str:
         ("/livestock", "Поголовье и стада"),
         ("/eggs", "Яйца"),
         ("/incubation", "Инкубация"),
+        ("/charts", "Графики"),
         ("/advisor", "Птицевод"),
         ("/help", "FAQ"),
         ("/about", "Настройки и о боте"),
@@ -2404,7 +2409,9 @@ def _render_livestock_page(config: WebConfig, payload: dict, *, auth_token: str 
 
   {assignment_form}
   {group_ration_form(groups, stock_items, selected_user=selected_user, auth_token=auth_token)}
+  {chick_grow_forms(config.db_path, selected_user=selected_user, auth_token=auth_token, timezone_name=config.timezone_name)}
   {losses_block(config.db_path, selected_user=selected_user, auth_token=auth_token, timezone_name=config.timezone_name)}
+  {care_block(config.db_path, selected_user=selected_user, auth_token=auth_token, timezone_name=config.timezone_name)}
 
   <h2>Назначенная смесь</h2>
   <table>
@@ -2659,6 +2666,12 @@ def _render_about_page(config: WebConfig, payload: dict, *, auth_token: str = ""
 {_page_header("О боте", "Версия, деплой, ссылки, настройки хозяйства и технический статус.", auth_token, active_path="/about")}
 
   {notice_html}
+
+  <form class="quiet" method="get" action="/export.xlsx">
+    <input type="hidden" name="auth" value="{escape(auth_token)}">
+    <input type="hidden" name="user_id" value="{escape(str(selected_user or ''))}">
+    <button type="submit">📥 Выгрузить все данные в Excel</button>
+  </form>
 
   <section class="summary">
     <div class="metric"><span class="label">Версия</span><span class="value">{escape(str(release.get("version", "")))}</span></div>
