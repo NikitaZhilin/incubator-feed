@@ -342,7 +342,7 @@ jobs:
               done
               rm -f /etc/systemd/system/tg-bot-inkubator-failure@.service 2>/dev/null || true
               systemctl daemon-reload >/dev/null 2>&1 || sudo -n systemctl daemon-reload >/dev/null 2>&1 || true
-              echo \"Old systemd units removed:\${FOUND_OLD_UNITS:- none}\"
+              echo \"::notice::Old systemd units removed:\${FOUND_OLD_UNITS:- none}\"
             fi
             RELEASE_COMMIT=\"\$(git rev-parse --short=12 HEAD 2>/dev/null || true)\"
             RELEASE_DEPLOYED_AT=\"\$(date -u +'%Y-%m-%dT%H:%M:%SZ')\"

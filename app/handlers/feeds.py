@@ -506,6 +506,70 @@ async def bird_group_edit_value(message: Message, state: FSMContext, feed_servic
         await message.answer("Поголовье обновлено.\n\n" + _format_bird_group(group), reply_markup=bird_group_actions_keyboard(group.id))
 
 
+GROUP_ROLE_CHOICES = (
+    ("hens", "🐔 Несушки"),
+    ("roosters", "🐓 Петухи"),
+    ("mixed", "Смешанная (куры и петухи вместе)"),
+)
+
+
+@router.callback_query(F.data.startswith("feeds:group_role:"))
+async def bird_group_role(callback: CallbackQuery, state: FSMContext, feed_service: FeedService) -> None:
+    await state.clear()
+    raw = str(callback.data).rsplit(":", 1)[1]
+    group = feed_service.get_bird_group(int(raw), callback.from_user.id) if raw.isdigit() else None
+    if group is None or not group.is_active:
+        await callback.answer("Поголовье не найдено.", show_alert=True)
+        return
+    await callback.answer()
+    if group.group_kind == "chicks":
+        await callback.message.answer(
+            "У цыплят роль не выбирается: норма корма считается по возрасту.",
+            reply_markup=bird_group_actions_keyboard(group.id),
+        )
+        return
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=("✓ " if code == group.role else "") + label,
+                callback_data=f"feeds:group_role_set:{group.id}:{code}",
+            )
+        ]
+        for code, label in GROUP_ROLE_CHOICES
+    ]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"feeds:group_view:{group.id}")])
+    await callback.message.answer(
+        f"Роль группы «{group.name}».\n\n"
+        "Несушки — по ним считаются яйца на курицу и прогноз, норма 120 г в день.\n"
+        "Петухи — норма 150 г в день, в яйцах не учитываются.\n"
+        "Смешанная — норма 120 г, в яйцах не учитывается.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+@router.callback_query(F.data.startswith("feeds:group_role_set:"))
+async def bird_group_role_set(callback: CallbackQuery, feed_service: FeedService) -> None:
+    parts = str(callback.data).split(":")
+    role = parts[-1] if len(parts) == 4 else ""
+    group_id = int(parts[2]) if len(parts) == 4 and parts[2].isdigit() else 0
+    if role not in {code for code, _ in GROUP_ROLE_CHOICES}:
+        await callback.answer("Выберите роль из списка.", show_alert=True)
+        return
+    try:
+        group = feed_service.update_bird_group(group_id=group_id, user_id=callback.from_user.id, role=role)
+    except ValueError as exc:
+        await callback.answer(str(exc), show_alert=True)
+        return
+    if group is None:
+        await callback.answer("Поголовье не найдено.", show_alert=True)
+        return
+    await callback.answer("Роль сохранена")
+    await callback.message.answer(
+        "Роль сохранена. Норма корма и учёт яиц пересчитаны.\n\n" + _format_bird_group(group),
+        reply_markup=bird_group_actions_keyboard(group.id),
+    )
+
+
 @router.callback_query(F.data.startswith("feeds:group_archive:"))
 async def bird_group_archive(callback: CallbackQuery, feed_service: FeedService) -> None:
     group_id = int(str(callback.data).rsplit(":", 1)[1])
@@ -2392,6 +2456,9 @@ def _format_bird_group(group) -> str:
         lines.append(f"Дата вывода: {group.hatched_at.isoformat()}")
     if group.joined_at:
         lines.append(f"Дата подсадки: {group.joined_at.isoformat()}")
+    if group.group_kind != "chicks" and group.role == "mixed":
+        lines.append("")
+        lines.append("Смешанная группа не учитывается как несушки. Если это куры-несушки, нажмите «🏷 Роль».")
     return "\n".join(lines)
 
 

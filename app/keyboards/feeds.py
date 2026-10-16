@@ -192,6 +192,7 @@ def bird_group_actions_keyboard(group_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="✏️ Название", callback_data=f"feeds:group_edit:{group_id}:name"),
                 InlineKeyboardButton(text="🔢 Количество", callback_data=f"feeds:group_edit:{group_id}:count"),
             ],
+            [InlineKeyboardButton(text="🏷 Роль: несушки / петухи", callback_data=f"feeds:group_role:{group_id}")],
             [InlineKeyboardButton(text="🗑 Архивировать", callback_data=f"feeds:group_archive:{group_id}")],
             [InlineKeyboardButton(text="⬅️ К поголовью", callback_data="feeds:groups")],
         ]
