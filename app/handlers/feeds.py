@@ -733,9 +733,19 @@ async def stock_purchase_amount(
         amount_kg=amount_kg,
     )
     await state.clear()
+    purchase_id = stock_service.stock.last_purchase_id(estimate.item.id, message.from_user.id)
+    markup = stock_menu_keyboard()
+    if purchase_id:
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="💰 Указать цену", callback_data=f"ledger:price:{purchase_id}")],
+                *markup.inline_keyboard,
+            ]
+        )
     await message.answer(
-        "Покупка добавлена.\n\n" + _format_stock_estimate(estimate),
-        reply_markup=stock_menu_keyboard(),
+        "Покупка добавлена.\n\n" + _format_stock_estimate(estimate)
+        + "\n\nУкажите цену — бот посчитает стоимость кружки смеси и яйца.",
+        reply_markup=markup,
     )
 
 

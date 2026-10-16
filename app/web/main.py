@@ -24,6 +24,9 @@ from app.storage.repositories.stock import StockRepository
 from app.storage.repositories.users import UserRepository
 from app.utils.dates import local_today, validate_incubation_start_date
 from app.web.config import WebConfig, load_web_config
+from app.services.ledger import parse_rub
+from app.storage.repositories.ledger import LedgerRepository
+from app.web.ledger_pages import cost_block, eggs_out_block, losses_block, register_ledger_routes
 from app.web.parity import (
     already_fed_mix_form,
     archive_form,
@@ -34,6 +37,7 @@ from app.web.parity import (
     incubation_reference,
     fed_block,
     feeding_mix_form,
+    pace_tile,
     profile_form,
     register_parity_routes,
     weather_refresh_form,
@@ -92,6 +96,7 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             )
 
     register_parity_routes(app, require_web_access)
+    register_ledger_routes(app, require_web_access)
 
     @app.get("/health")
     def health() -> dict:
@@ -191,6 +196,8 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
             if kind not in STOCK_KIND_LABELS:
                 raise ValueError("Выберите корректный тип позиции.")
             amount_kg = parse_feed_amount(amount)
+            raw_price = form.get("price_rub", "").strip()
+            price_rub = parse_rub(raw_price) if raw_price else None
             database = Database(current.db_path)
             service = StockService(StockRepository(database), FeedRepository(database))
             estimate = service.add_purchase(
@@ -200,6 +207,10 @@ def create_app(config: WebConfig | None = None) -> FastAPI:
                 amount_kg=amount_kg,
                 note=note,
             )
+            if price_rub is not None:
+                LedgerRepository(database).set_purchase_price(
+                    service.stock.last_purchase_id(estimate.item.id, selected_user_id), selected_user_id, price_rub
+                )
         except ValueError as exc:
             return _redirect_with_message(redirect_base, error=str(exc))
         return _redirect_with_message(
@@ -1572,6 +1583,10 @@ def _page_style() -> str:
       border-color: color-mix(in srgb, var(--danger) 40%, transparent);
       background: var(--danger-soft);
     }
+    form.inline { display: flex; gap: 8px; align-items: center; margin: 0; }
+    form.inline input { max-width: 150px; }
+    form.inline button { width: auto; white-space: nowrap; }
+    ul.note { margin: 0 0 12px; padding-left: 28px; }
     form.fed { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
     form.fed button { width: auto; min-width: 150px; font-size: 17px; }
     form.fed > div { flex: 1 1 auto; }
@@ -1661,6 +1676,11 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
     incubation = summary.get("incubation") or {}
     settings = summary.get("settings") or {}
     ready_mix = feeds.get("ready_mix") or {}
+    ready_mix_tile = f"""<div class="metric">
+      <span class="label">Готовая смесь</span>
+      <span class="value">{escape(_kg(ready_mix.get("remaining_kg")))}</span>
+      <div class="small">Расход: {escape(_kg(ready_mix.get("daily_usage_kg")))} в день. Дней: {escape(_days(ready_mix.get("days_left")))}. До: {escape(_date_text(ready_mix.get("ends_at")))}. Докупить до: {escape(_date_text(ready_mix.get("purchase_by")))}</div>
+    </div>"""
     possible_mix = feeds.get("possible_mix") or {}
     norms_html = _render_feeding_norms(feeds.get("feeding_norms") or {})
     bird_groups = feeds.get("bird_groups") or {}
@@ -1695,11 +1715,7 @@ def _render_index(config: WebConfig, report: dict, summary: dict, *, auth_token:
       <span class="value">{escape(str(eggs.get("today_eggs", 0)))}</span>
       <div class="small">Несутся: {escape(str(eggs.get("active_hens", 0)))} из {escape(str(eggs.get("total_hens", 0)))}. Прогноз на 7 дней: {escape(str(eggs.get("next_week_forecast", 0)))}</div>
     </div>
-    <div class="metric">
-      <span class="label">Готовая смесь</span>
-      <span class="value">{escape(_kg(ready_mix.get("remaining_kg")))}</span>
-      <div class="small">Расход: {escape(_kg(ready_mix.get("daily_usage_kg")))} в день. Дней: {escape(_days(ready_mix.get("days_left")))}. До: {escape(_date_text(ready_mix.get("ends_at")))}. Докупить до: {escape(_date_text(ready_mix.get("purchase_by")))}</div>
-    </div>
+    {pace_tile(config.db_path, selected_user=selected_user, timezone_name=config.timezone_name) or ready_mix_tile}
     <div class="metric">
       <span class="label">Возможные замесы</span>
       <span class="value">{escape(str(possible_mix.get("mix_count", 0)))}</span>
@@ -1888,6 +1904,7 @@ def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = ""
 {_page_header("Корма и склад", "Запасы, смесь, стада и последние операции.", auth_token, active_path="/feeds")}
   {fed_block(config.db_path, selected_user=selected_user, auth_token=auth_token, back="/feeds", timezone_name=config.timezone_name)}
   {feeding_mix_form(config.db_path, selected_user=selected_user, auth_token=auth_token, timezone_name=config.timezone_name)}
+  {cost_block(config.db_path, selected_user=selected_user, auth_token=auth_token, timezone_name=config.timezone_name)}
 
   <section class="summary">
     <div class="metric"><span class="label">Готовая смесь</span><span class="value">{escape(_kg(ready_mix.get("remaining_kg")))}</span></div>
@@ -1920,6 +1937,10 @@ def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = ""
     <label>
       <span class="label">Количество</span>
       <input name="amount" type="text" maxlength="80" required placeholder="25 кг, 1 мешок, 2 пачки 500 гр">
+    </label>
+    <label>
+      <span class="label">Заплатили, ₽</span>
+      <input name="price_rub" type="text" inputmode="decimal" maxlength="20" placeholder="необязательно — для себестоимости">
     </label>
     <label>
       <span class="label">Комментарий</span>
@@ -2383,6 +2404,7 @@ def _render_livestock_page(config: WebConfig, payload: dict, *, auth_token: str 
 
   {assignment_form}
   {group_ration_form(groups, stock_items, selected_user=selected_user, auth_token=auth_token)}
+  {losses_block(config.db_path, selected_user=selected_user, auth_token=auth_token, timezone_name=config.timezone_name)}
 
   <h2>Назначенная смесь</h2>
   <table>
@@ -2459,6 +2481,7 @@ def _render_eggs_page(config: WebConfig, payload: dict, *, auth_token: str = "")
     <button type="submit">Добавить запись</button>
   </form>
   {eggs_extra_forms(selected_user=selected_user, auth_token=auth_token, today_value=today_value)}
+  {eggs_out_block(config.db_path, selected_user=selected_user, auth_token=auth_token, timezone_name=config.timezone_name)}
 
   <h2>Погода</h2>
   <p>{escape(weather_text)}</p>

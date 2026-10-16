@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.utils.dates import local_today
 from app.domain import StockEstimate
 from app.services.eggs import EggService, EXCLUSION_REASON_LABELS
+from app.services.feeding import FeedPace, pace_lines
 from app.services.feeds import FeedService
 from app.services.incubation import IncubationService
 from app.services.stock import StockService
@@ -60,6 +61,10 @@ class FinishedMixStatus:
     estimates: tuple[StockEstimate, ...]
 
 
+class _SkipFinishedMix(Exception):
+    """Owner feeds by cups: finished-mix stock does not apply."""
+
+
 class PoultryAdvisorService:
     def __init__(
         self,
@@ -70,7 +75,9 @@ class PoultryAdvisorService:
         stock_service: StockService,
         content: dict | None = None,
         timezone_name: str = "Europe/Moscow",
+        feeding_service=None,
     ) -> None:
+        self.feeding_service = feeding_service
         self.incubation_service = incubation_service
         self.feed_service = feed_service
         self.egg_service = egg_service
@@ -105,12 +112,22 @@ class PoultryAdvisorService:
         except Exception:
             lines.append("- Раздел яиц сейчас не дал расчет. Проверьте запись сбора вручную.")
 
-        lines.extend(["", "Корма и смесь:"])
+        pace = self._feed_pace(user_id, today)
+        if pace is not None:
+            lines.extend(["", "Корм (своя смесь):"])
+            lines.extend(pace_lines(pace))
+            lines.extend(self._flock_setup_warnings(user_id=user_id, now=now, by_cups=True))
+        else:
+            lines.extend(["", "Корма и смесь:"])
         try:
+            if pace is not None:
+                raise _SkipFinishedMix
             mix_status = self._finished_mix_status(user_id=user_id, now=now)
             lines.extend(self._finished_mix_lines(mix_status))
             lines.extend(self._mix_plan_lines(user_id=user_id, now=now, compact=True))
             lines.extend(self._flock_setup_warnings(user_id=user_id, now=now))
+        except _SkipFinishedMix:
+            pass
         except Exception:
             lines.append("- Расчет кормов сейчас недоступен.")
 
@@ -129,6 +146,11 @@ class PoultryAdvisorService:
     ) -> str:
         now = now_utc or datetime.now(timezone.utc)
         lines = ["Корма и замес:", ""]
+        pace = self._feed_pace(user_id, now.astimezone(self._timezone()).date())
+        if pace is not None:
+            lines.append("Своя смесь (по «Покормил»):")
+            lines.extend(pace_lines(pace, limit=10))
+            return "\n".join(_dedupe_blank_lines(lines))
         reports = self.stock_service.list_flock_reports(user_id, now=now)
         if not reports:
             lines.append(f"- {self.content.get('feeding', {}).get('no_flocks', DEFAULT_CONTENT['feeding']['no_flocks'])}")
@@ -177,6 +199,13 @@ class PoultryAdvisorService:
     ) -> str:
         now = now_utc or datetime.now(timezone.utc)
         local = local_now or now.astimezone(self._timezone())
+        pace = self._feed_pace(user_id, local.date())
+        if pace is not None:
+            lines = ["Когда делать замес:", "", "Вы кормите своей смесью кружками, поэтому замес — по мере надобности.", ""]
+            lines.extend(pace_lines(pace, limit=10))
+            if pace.soon_out:
+                lines.append("- Докупите заканчивающиеся ингредиенты заранее, до того как смесь станет неполной.")
+            return "\n".join(_dedupe_blank_lines(lines))
         status = self._finished_mix_status(user_id=user_id, now=now)
         lines = ["Когда делать замес:", ""]
         lines.extend(self._finished_mix_lines(status))
@@ -329,6 +358,12 @@ class PoultryAdvisorService:
         lines: list[str] = []
 
         try:
+            pace = self._feed_pace(user_id, local_now.date())
+            if pace is not None:
+                if pace.soon_out:
+                    first = pace.soon_out[0]
+                    lines.append(f"{first.name.lower()} хватит на {first.days_left} дн., пора докупить.")
+                raise _SkipFinishedMix
             status = self._finished_mix_status(user_id=user_id, now=now)
             if status.daily_usage_kg <= 0:
                 lines.append("назначьте готовую смесь стаду, чтобы считать расход.")
@@ -336,6 +371,8 @@ class PoultryAdvisorService:
                 lines.append("готовой смеси нет, нужен замес или пополнение склада.")
             elif status.days_left is not None and status.days_left <= self._low_mix_days_threshold():
                 lines.append(f"смеси осталось примерно на {status.days_left} дн., пора готовить замес.")
+        except _SkipFinishedMix:
+            pass
         except Exception:
             pass
 
@@ -416,15 +453,25 @@ class PoultryAdvisorService:
             ]
         return ["- По рецепту замеса ограничений не найдено."]
 
-    def _flock_setup_warnings(self, *, user_id: int, now: datetime) -> list[str]:
+    def _feed_pace(self, user_id: int, today: date) -> FeedPace | None:
+        if self.feeding_service is None:
+            return None
+        try:
+            return self.feeding_service.pace(user_id, today=today)
+        except Exception:
+            return None
+
+    def _flock_setup_warnings(self, *, user_id: int, now: datetime, by_cups: bool = False) -> list[str]:
         warnings: list[str] = []
-        flocks = self.feed_service.list_flocks(user_id)
-        if not flocks:
-            warnings.append("- Стада не созданы: расчет расхода смеси будет неполным.")
-            return warnings
-        reports = self.stock_service.list_flock_reports(user_id, now=now)
-        if any(not report.assignments for report in reports):
-            warnings.append("- Есть стада без назначенной смеси.")
+        if not by_cups:
+            # Feeding in cups is counted from «Покормил», flocks and rations are optional.
+            flocks = self.feed_service.list_flocks(user_id)
+            if not flocks:
+                warnings.append("- Стада не созданы: расчет расхода смеси будет неполным.")
+                return warnings
+            reports = self.stock_service.list_flock_reports(user_id, now=now)
+            if any(not report.assignments for report in reports):
+                warnings.append("- Есть стада без назначенной смеси.")
         groups = self.feed_service.list_bird_groups(user_id)
         has_hens = any(group.is_active and group.group_kind == "adult" and group.role == "hens" for group in groups)
         has_mixed_adults = any(group.is_active and group.group_kind == "adult" and group.role == "mixed" for group in groups)

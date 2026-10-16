@@ -212,6 +212,11 @@ class AllButtonsTest(unittest.IsolatedAsyncioTestCase):
         self.dp["feeding_service"] = FeedingService(
             FeedingRepository(self.database), feeds, stock=stock_service, timezone_name="Europe/Moscow"
         )
+        from app.services.ledger import LedgerService
+
+        self.dp["ledger_service"] = LedgerService(
+            self.database, feed_service, feeding_service=self.dp["feeding_service"], stock_service=stock_service
+        )
         self.dp["poultry_advisor_service"] = PoultryAdvisorService(
             incubation_service=incubation,
             feed_service=feed_service,

@@ -24,6 +24,7 @@ MIGRATIONS = (
     "016_daily_summary_setting",
     "017_feeding_events",
     "018_feeding_amounts",
+    "019_farm_ledger",
 )
 
 

@@ -22,7 +22,9 @@ from app.services.feeds import FeedService
 from app.services.heartbeats import HeartbeatLoop
 from app.services.stock import StockService
 from app.services.admin import AdminService
+from app.handlers.admin import send_backup_to_admins
 from app.services.backups import DailyBackupLoop
+from app.services.ledger import LedgerService
 from app.services.poultry_advisor import PoultryAdvisorService
 from app.services.release_notifications import AdminStartupNotificationService, ReleaseNotificationService
 from app.services.reminders import ReminderRunner
@@ -126,12 +128,16 @@ async def main() -> None:
             stock=stock_service,
             timezone_name=config.timezone,
         )
+        ledger_service = LedgerService(
+            database, feed_service, feeding_service=feeding_service, stock_service=stock_service
+        )
         poultry_advisor_service = PoultryAdvisorService(
             incubation_service=incubation_service,
             feed_service=feed_service,
             egg_service=egg_service,
             stock_service=stock_service,
             timezone_name=config.timezone,
+            feeding_service=feeding_service,
         )
         admin_service = AdminService(
             database=database,
@@ -154,6 +160,7 @@ async def main() -> None:
         dispatcher["egg_service"] = egg_service
         dispatcher["stock_service"] = stock_service
         dispatcher["feeding_service"] = feeding_service
+        dispatcher["ledger_service"] = ledger_service
         dispatcher["poultry_advisor_service"] = poultry_advisor_service
         dispatcher["admin_service"] = admin_service
         dispatcher["analytics"] = analytics
@@ -171,6 +178,7 @@ async def main() -> None:
             stock_service=stock_service,
             poultry_advisor_service=poultry_advisor_service,
             feeding_service=feeding_service,
+            ledger_service=ledger_service,
             users=users,
             notifications=notifications,
             heartbeats=heartbeats,
@@ -194,6 +202,9 @@ async def main() -> None:
             db_path=config.db_path,
             backup_dir=config.backup_dir,
             on_failure=lambda exc: notify_admins_about_backup_failure(bot, config.admin_ids, exc),
+            send_offsite=(
+                (lambda path: send_backup_to_admins(bot, config.admin_ids, path)) if config.admin_ids else None
+            ),
         )
         polling_heartbeat.start()
         reminder_runner.start()

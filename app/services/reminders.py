@@ -14,11 +14,17 @@ from aiogram.exceptions import (
     TelegramRetryAfter,
 )
 
-from app.keyboards.menu import daily_summary_keyboard, feeding_reminder_keyboard
+from app.keyboards.menu import buy_reminder_keyboard, daily_summary_keyboard, feeding_reminder_keyboard
 from app.services.eggs import EggService
 from app.services.incubation import IncubationService
 from app.services.guides import post_hatch_care
-from app.services.feeding import FeedingService, format_feeding_status
+from app.services.feeding import (
+    FeedingService,
+    buy_reminder_stage,
+    format_buy_reminder,
+    format_feeding_status,
+    pace_lines,
+)
 from app.services.feeds import FeedService
 from app.services.poultry_advisor import PoultryAdvisorService
 from app.services.stock import StockService
@@ -41,6 +47,7 @@ class ReminderRunner:
         stock_service: StockService | None = None,
         poultry_advisor_service: PoultryAdvisorService | None = None,
         feeding_service: FeedingService | None = None,
+        ledger_service=None,
         users: UserRepository | None = None,
         notifications: NotificationRepository | None = None,
         heartbeats: HeartbeatRepository | None = None,
@@ -54,6 +61,7 @@ class ReminderRunner:
         self.feed_service = feed_service
         self.egg_service = egg_service
         self.feeding_service = feeding_service
+        self.ledger_service = ledger_service
         self.stock_service = stock_service
         self.poultry_advisor_service = poultry_advisor_service
         self.users = users
@@ -94,6 +102,8 @@ class ReminderRunner:
         await self._send_daily_summary_reminders(now)
         await self._send_feed_reminders(now)
         await self._send_feeding_reminders(now)
+        await self._send_buy_reminders(now)
+        await self._send_weekly_reports(now)
 
     async def _send_incubation_reminders(self, now: datetime) -> None:
         due_by_user = defaultdict(list)
@@ -327,6 +337,104 @@ class ReminderRunner:
             if self.notifications:
                 self.notifications.mark_sent(event_key, local_now)
 
+    async def _send_weekly_reports(self, now: datetime) -> None:
+        """Sunday evening: the week's eggs, feed, money and what runs out soon."""
+        if self.users is None or self.egg_service is None:
+            return
+        from app.services.weekly_report import WEEKLY_REPORT_HOUR, WEEKLY_REPORT_WEEKDAY, build_weekly_report
+
+        for settings in self.users.list_users_with_settings():
+            user_id = int(settings["user_id"])
+            if not settings.get("is_active", True) or not settings.get("notify_daily_summary", True):
+                continue
+            local_now = _local_now_for_settings(settings, now)
+            if local_now.weekday() != WEEKLY_REPORT_WEEKDAY or local_now.hour < WEEKLY_REPORT_HOUR:
+                continue
+            event_key = f"weekly_report:user_{user_id}:{local_now.date().isoformat()}"
+            if self.notifications and not self.notifications.can_attempt(event_key, now=now):
+                continue
+            try:
+                text = build_weekly_report(
+                    user_id=user_id,
+                    today=local_now.date(),
+                    eggs=self.egg_service.eggs,
+                    feeding_service=self.feeding_service,
+                    ledger_service=self.ledger_service,
+                )
+                if self.notifications:
+                    self.notifications.record_attempt(
+                        user_id=user_id, type="weekly_report", event_key=event_key, scheduled_for=local_now
+                    )
+                await self.bot.send_message(user_id, text, reply_markup=daily_summary_keyboard())
+            except Exception as exc:
+                logger.exception("Failed to send weekly report to user %s", user_id)
+                error_code = classify_telegram_error(exc)
+                await respect_rate_limit(exc)
+                if self.notifications:
+                    self.notifications.mark_failed(event_key, error_code=error_code, error_message=str(exc))
+                if error_code in {"blocked", "deactivated"}:
+                    self.incubation_service.mark_user_inactive(user_id, error_code)
+                continue
+            if self.notifications:
+                self.notifications.mark_sent(event_key, local_now)
+
+    async def _send_buy_reminders(self, now: datetime) -> None:
+        """Warn ahead that an ingredient of the home mix runs out, by the real feeding pace.
+
+        Each ingredient is reminded once at 5 days left and once more at 2 days left;
+        a new purchase of that ingredient starts the count over.
+        """
+        if self.feeding_service is None or self.users is None or self.stock_service is None:
+            return
+        for settings in self.users.list_users_with_settings():
+            user_id = int(settings["user_id"])
+            if not _settings_allow_notification(settings, "notify_feed", now):
+                continue
+            local_now = _local_now_for_settings(settings, now)
+            pace = self._feed_pace(user_id, local_now)
+            if pace is None:
+                continue
+            due: list[tuple[str, object]] = []
+            for item in pace.ingredients:
+                stage = buy_reminder_stage(item)
+                if stage is None or item.stock_item_id is None:
+                    continue
+                purchase = self.stock_service.stock.last_purchase_id(item.stock_item_id, user_id)
+                key = f"buy_ingredient:user_{user_id}:item_{item.stock_item_id}:p{purchase}:d{stage}"
+                if self.notifications and not self.notifications.can_attempt(key, now=now):
+                    continue
+                if self.notifications and stage > 2 and self.notifications.was_sent(
+                    f"buy_ingredient:user_{user_id}:item_{item.stock_item_id}:p{purchase}:d2"
+                ):
+                    continue
+                due.append((key, item))
+            if not due:
+                continue
+            try:
+                if self.notifications:
+                    for key, _ in due:
+                        self.notifications.record_attempt(
+                            user_id=user_id, type="feed", event_key=key, scheduled_for=local_now
+                        )
+                await self.bot.send_message(
+                    user_id,
+                    format_buy_reminder([item for _, item in due], pace, local_now.date()),
+                    reply_markup=buy_reminder_keyboard(),
+                )
+            except Exception as exc:
+                logger.exception("Failed to send buy reminder to user %s", user_id)
+                error_code = classify_telegram_error(exc)
+                await respect_rate_limit(exc)
+                if self.notifications:
+                    for key, _ in due:
+                        self.notifications.mark_failed(key, error_code=error_code, error_message=str(exc))
+                if error_code in {"blocked", "deactivated"}:
+                    self.incubation_service.mark_user_inactive(user_id, error_code)
+                continue
+            if self.notifications:
+                for key, _ in due:
+                    self.notifications.mark_sent(key, local_now)
+
     def _write_heartbeat(self, *, status: str, last_error: str | None = None) -> None:
         if self.heartbeats is None:
             return
@@ -376,7 +484,11 @@ class ReminderRunner:
                 ]
             )
 
-        if sections.get("notify_feed", True):
+        pace = self._feed_pace(user_id, local_now)
+        if sections.get("notify_feed", True) and pace is not None:
+            lines.append("Корм (своя смесь):")
+            lines.extend(pace_lines(pace))
+        elif sections.get("notify_feed", True):
             lines.append("Готовая смесь:")
             lines.extend(
                 self._finished_mix_summary_lines(
@@ -397,6 +509,15 @@ class ReminderRunner:
                 lines.extend(["", "Совет птицевода:"])
                 lines.extend(f"- {line}" for line in advice_lines)
         return "\n".join(lines)
+
+    def _feed_pace(self, user_id: int, local_now: datetime):
+        if self.feeding_service is None:
+            return None
+        try:
+            return self.feeding_service.pace(user_id, today=local_now.date())
+        except Exception:
+            logger.exception("Failed to compute feed pace for user %s", user_id)
+            return None
 
     def _low_ingredient_lines(self, *, user_id: int, now: datetime) -> list[str]:
         if self.stock_service is None:

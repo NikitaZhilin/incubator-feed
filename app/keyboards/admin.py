@@ -65,3 +65,13 @@ def release_confirm_keyboard(version: str, recipients: int) -> InlineKeyboardMar
             ],
         ]
     )
+
+
+def admin_panel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📦 Прислать копию базы", callback_data="admin:backup")],
+            [InlineKeyboardButton(text="🔄 Обновить", callback_data="admin:refresh")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
+        ]
+    )

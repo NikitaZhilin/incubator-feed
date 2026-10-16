@@ -270,6 +270,69 @@ class WebParityTest(unittest.TestCase):
         self.assertIn("Кормление моей смесью", page)
         self.assertIn("Комбикорм 2", page)
 
+    def test_feeding_by_cups_replaces_finished_mix_warnings(self) -> None:
+        stock = StockService(StockRepository(self.database), FeedRepository(self.database))
+        stock.add_purchase(user_id=1, name="Кукуруза", kind="ingredient", amount_kg=40)
+        self._post("/feeding/mix", {"mix_text": "Кукуруза 4\nКомбикорм 2", "cup_liters": "1"})
+        self._post("/feeding", {"back": "/", "cups": "3"})
+
+        home = self.client.get(f"/{AUTH}").text
+        advisor = self.client.get(f"/advisor{AUTH}").text
+
+        self.assertIn("Корм (своя смесь)", home)
+        self.assertIn("Кукуруза", home)
+        self.assertIn("Кормите своей смесью", advisor)
+        self.assertNotIn("Готовой смеси нет", advisor)
+
+    def test_fed_mark_can_be_undone_on_site(self) -> None:
+        from app.services.feeding import FeedingService
+        from app.storage.repositories.feeding import FeedingRepository
+
+        stock = StockService(StockRepository(self.database), FeedRepository(self.database))
+        stock.add_purchase(user_id=1, name="Кукуруза", kind="ingredient", amount_kg=40)
+        self._post("/feeding/mix", {"mix_text": "Кукуруза 4\nКомбикорм 2", "cup_liters": "1"})
+        self._post("/feeding", {"back": "/", "cups": "3"})
+        service = FeedingService(FeedingRepository(self.database), FeedRepository(self.database))
+        event = service.today(1)[0]
+
+        page = self.client.get(f"/{AUTH}").text
+        undone = self._post(f"/feeding/{event.id}/undo", {"back": "/"})
+        again = self._post(f"/feeding/{event.id}/undo", {"back": "/"})
+        corn = next(e for e in stock.list_estimates(1) if e.item.name == "Кукуруза")
+
+        self.assertIn("Отменить отметку", page)
+        self.assertIn("отменена", unquote_plus(undone.headers["location"]))
+        self.assertIn("error=", again.headers["location"])
+        self.assertEqual(service.today(1), [])
+        self.assertAlmostEqual(corn.remaining_kg, 40, places=2)
+
+    def test_loss_eggs_out_and_price_on_site(self) -> None:
+        from app.storage.repositories.ledger import LedgerRepository
+
+        livestock = self.client.get(f"/livestock{AUTH}").text
+        lost = self._post("/ledger/losses", {"bird_group_id": str(self.hens.id), "count": "2", "reason": "died"})
+        too_many = self._post("/ledger/losses", {"bird_group_id": str(self.hens.id), "count": "99", "reason": "died"})
+        loss = LedgerRepository(self.database).recent_losses(1)[0]
+
+        self.assertIn("Падёж и выбраковка", livestock)
+        self.assertIn("−2", unquote_plus(lost.headers["location"]))
+        self.assertIn("error=", too_many.headers["location"])
+        self.assertEqual(self.feeds.get_bird_group(self.hens.id, 1).bird_count, 8)
+        self._post(f"/ledger/losses/{loss.id}/undo", {})
+        self.assertEqual(self.feeds.get_bird_group(self.hens.id, 1).bird_count, 10)
+
+        sold = self._post("/ledger/eggs-out", {"kind": "sold", "eggs_count": "20", "amount_rub": "300"})
+        self.assertIn("300", unquote_plus(sold.headers["location"]))
+        self.assertIn("Продажа и раздача яиц", self.client.get(f"/eggs{AUTH}").text)
+
+        purchase = self._post(
+            "/stock/purchases", {"name": "Кукуруза", "kind": "ingredient", "amount": "50 кг", "price_rub": "1000"}
+        )
+        self.assertIn("notice=", purchase.headers["location"])
+        priced = LedgerRepository(self.database).priced_purchases(1)
+        self.assertEqual([(p.name, p.price_rub) for p in priced], [("Кукуруза", 1000.0)])
+        self.assertIn("Себестоимость", self.client.get(f"/feeds{AUTH}").text)
+
     def test_new_pages_require_token(self) -> None:
         self.assertEqual(self.client.get("/advisor").status_code, 401)
         self.assertEqual(self.client.get("/help").status_code, 401)

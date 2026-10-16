@@ -364,6 +364,23 @@ def register_parity_routes(app: FastAPI, require_web_access) -> None:
             notice = f"Отмечено: покормили в {at}." + (f" По норме около {format_kg(norm)} в день." if norm > 0 else "")
         return web._redirect_with_message(redirect_base, notice=notice)
 
+    @app.post("/feeding/{event_id}/undo", dependencies=access)
+    async def undo_fed(event_id: int, request: Request, auth: str | None = Query(default=None)):
+        form = await _form(request)
+        back = form.get("back", "/")
+        redirect_base = web._link(back if back in {"/", "/feeds"} else "/", auth or "")
+        user_id, failed = _guard(form, redirect_base, "Отмена кормления")
+        if failed:
+            return failed
+        service = feeding_service_for(Database(app.state.web_config.db_path), app.state.web_config.timezone_name)
+        event = service.feeding.get(event_id, user_id)
+        if event is None or not service.undo(user_id, event_id):
+            return web._redirect_with_message(redirect_base, error="Эта отметка уже отменена.")
+        tail = " Ингредиенты возвращены на склад." if event.cups else ""
+        return web._redirect_with_message(
+            redirect_base, notice=f"Отметка о кормлении в {service.format_time(event)} отменена.{tail}"
+        )
+
     @app.post("/feeding/mix", dependencies=access)
     async def save_feeding_mix(request: Request, auth: str | None = Query(default=None)):
         from app.services.feeding import parse_mix_text
@@ -463,10 +480,12 @@ def register_parity_routes(app: FastAPI, require_web_access) -> None:
             egg_service=_egg_service(database),
             stock_service=StockService(StockRepository(database), feeds),
             timezone_name=current.timezone_name,
+            feeding_service=feeding_service_for(database, current.timezone_name),
         )
         blocks = []
         for title, builder in (
             ("План на сегодня", lambda: advisor.build_today_plan(selected)),
+            ("Итоги недели", lambda: _weekly_report_text(database, selected, current.timezone_name)),
             ("Корма и замес", lambda: advisor.build_feed_advice(selected)),
             ("Когда делать замес", lambda: advisor.build_mix_timing_advice(selected)),
             ("Мало яиц", lambda: advisor.build_egg_drop_advice(selected)),
@@ -516,6 +535,20 @@ def register_parity_routes(app: FastAPI, require_web_access) -> None:
 
 
 # ----- Fragments used by the existing pages -----------------------------------
+
+
+def _weekly_report_text(database: Database, user_id: int, timezone_name: str) -> str:
+    from app.services.weekly_report import build_weekly_report
+    from app.web.ledger_pages import ledger_service_for
+
+    ledger = ledger_service_for(database, timezone_name)
+    return build_weekly_report(
+        user_id=user_id,
+        today=_local_today(timezone_name),
+        eggs=EggRepository(database),
+        feeding_service=ledger.feeding_service,
+        ledger_service=ledger,
+    )
 
 
 def eggs_extra_forms(*, selected_user, auth_token: str, today_value: str) -> str:
@@ -793,6 +826,32 @@ def feeding_service_for(database: Database, timezone_name: str):
     )
 
 
+def pace_tile(db_path, *, selected_user, timezone_name: str) -> str:
+    """Home tile for feeding the home mix in cups; empty if cups are not used."""
+    if selected_user is None or not db_path.exists():
+        return ""
+    from app.services.feeding import format_kg
+
+    try:
+        pace = feeding_service_for(Database(db_path), timezone_name).pace(selected_user)
+    except Exception:
+        return ""
+    if pace is None:
+        return ""
+    soon = pace.soon_out
+    if soon:
+        detail = "Скоро закончится: " + "; ".join(f"{item.name} — {item.days_left} дн." for item in soon)
+    else:
+        known = [item for item in pace.ingredients if item.days_left is not None]
+        first = min(known, key=lambda item: item.days_left) if known else None
+        detail = f"Раньше всего кончится: {first.name} — {first.days_left} дн." if first else "Ингредиентов нет на складе."
+    return f"""<div class="metric">
+      <span class="label">Корм (своя смесь)</span>
+      <span class="value">{escape(format_kg(pace.daily_kg))}/день</span>
+      <div class="small">По отметкам «Покормил» за {pace.observed_days} дн. {escape(detail)}</div>
+    </div>"""
+
+
 def fed_block(db_path, *, selected_user, auth_token: str, back: str, timezone_name: str) -> str:
     """Status line and the «✅ Покормил» button, same as in the bot."""
     from app.services.feeding import format_feeding_status
@@ -806,8 +865,18 @@ def fed_block(db_path, *, selected_user, auth_token: str, back: str, timezone_na
         week = service.week(int(selected_user))
         last = service.last_cups(int(selected_user)) or 3.5
         per_cup = service.mix_kg_per_cup(int(selected_user))
+        today_events = service.today(int(selected_user))
     except Exception:
         return ""
+    undo = ""
+    if today_events:
+        last_event = today_events[-1]
+        undo = f"""
+  <form class="quiet" method="post" action="{escape(_link(f'/feeding/{last_event.id}/undo', auth_token))}">
+    <input type="hidden" name="user_id" value="{escape(str(selected_user))}">
+    <input type="hidden" name="back" value="{escape(back)}">
+    <button type="submit" class="secondary">↩️ Отменить отметку {escape(service.format_time(last_event))}</button>
+  </form>"""
     return f"""
   <form class="note fed" method="post" action="{escape(_link('/feeding', auth_token))}">
     <input type="hidden" name="user_id" value="{escape(str(selected_user))}">
@@ -819,7 +888,7 @@ def fed_block(db_path, *, selected_user, auth_token: str, back: str, timezone_na
     <label class="fed-cups"><span class="label">Кружек смеси</span>
       <input name="cups" type="number" min="0.5" max="100" step="0.5" value="{last:g}" placeholder="пусто — по норме"></label>
     <button type="submit">✅ Покормил</button>
-  </form>"""
+  </form>{undo}"""
 
 
 def feeding_mix_form(db_path, *, selected_user, auth_token: str, timezone_name: str) -> str:

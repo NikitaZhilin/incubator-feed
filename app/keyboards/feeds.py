@@ -14,7 +14,12 @@ def feeds_menu_keyboard(feed_buttons: list[tuple[int, str]] | None = None) -> In
     )
     rows.append([InlineKeyboardButton(text="📦 Склад", callback_data="stock:menu")])
     rows.append([InlineKeyboardButton(text="🐔 Поголовье и стада", callback_data="feeds:livestock")])
-    rows.append([InlineKeyboardButton(text="📊 Расчеты", callback_data="feeds:stats")])
+    rows.append(
+        [
+            InlineKeyboardButton(text="📊 Расчеты", callback_data="feeds:stats"),
+            InlineKeyboardButton(text="💰 Себестоимость", callback_data="ledger:cost"),
+        ]
+    )
     rows.append([InlineKeyboardButton(text="❓ FAQ", callback_data="faq:feeds")])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -39,6 +44,10 @@ def livestock_menu_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="➕ Добавить поголовье", callback_data="feeds:group_add"),
                 InlineKeyboardButton(text="➕ Создать стадо", callback_data="feeds:flock_add"),
+            ],
+            [
+                InlineKeyboardButton(text="➖ Падёж / выбыло", callback_data="ledger:loss"),
+                InlineKeyboardButton(text="📉 Потери", callback_data="ledger:losses"),
             ],
             [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:livestock")],
             [InlineKeyboardButton(text="⬅️ К кормам", callback_data="feeds:menu")],
