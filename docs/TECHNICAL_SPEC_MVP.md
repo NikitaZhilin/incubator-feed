@@ -32,7 +32,7 @@
 - учет яиц и временно не несущихся кур;
 - reminder runner;
 - Windows-скрипты запуска и автозапуска;
-- Docker, systemd-шаблоны, GitHub Actions deploy и VPS auto-deploy fallback;
+- Docker и GitHub Actions deploy;
 - backup/restore, smoke-start, проверку диска;
 - базовые тесты сервисов и обработчиков.
 

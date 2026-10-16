@@ -329,6 +329,21 @@ jobs:
             set -e
             cd '$DEPLOY_PATH'
             mkdir -p data logs backups
+            # Old systemd services from the pre-Docker setup would run a second copy of the bot
+            # or redeploy main on their own: stop and remove them if they are still installed.
+            if command -v systemctl >/dev/null 2>&1; then
+              FOUND_OLD_UNITS=''
+              for unit in tg-bot-inkubator.service tg-bot-inkubator-backup.timer tg-bot-inkubator-backup.service incubator-feed-auto-deploy.timer incubator-feed-auto-deploy.service; do
+                if systemctl list-unit-files \"\$unit\" 2>/dev/null | grep -q \"^\$unit\"; then
+                  FOUND_OLD_UNITS=\"\$FOUND_OLD_UNITS \$unit\"
+                  systemctl disable --now \"\$unit\" >/dev/null 2>&1 || sudo -n systemctl disable --now \"\$unit\" >/dev/null 2>&1 || true
+                  rm -f \"/etc/systemd/system/\$unit\" 2>/dev/null || sudo -n rm -f \"/etc/systemd/system/\$unit\" 2>/dev/null || true
+                fi
+              done
+              rm -f /etc/systemd/system/tg-bot-inkubator-failure@.service 2>/dev/null || true
+              systemctl daemon-reload >/dev/null 2>&1 || sudo -n systemctl daemon-reload >/dev/null 2>&1 || true
+              echo \"Old systemd units removed:\${FOUND_OLD_UNITS:- none}\"
+            fi
             RELEASE_COMMIT=\"\$(git rev-parse --short=12 HEAD 2>/dev/null || true)\"
             RELEASE_DEPLOYED_AT=\"\$(date -u +'%Y-%m-%dT%H:%M:%SZ')\"
             NGROK_AUTHTOKEN=\"\$(printf '%s' '$NGROK_AUTHTOKEN_B64' | base64 -d)\"

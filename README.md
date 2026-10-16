@@ -23,7 +23,7 @@ Telegram-бот помогает вести небольшое птицевод�
 - Встроенные инструкции: кнопки `FAQ` читают тексты из отдельных файлов `app/content/help/*.md`.
 - Админские команды: статистика, последние регистрации, ошибки, сервисная рассылка, CSV-экспорт.
 - Миграции SQLite через `schema_migrations`.
-- Docker Compose, systemd-шаблоны, VPS deploy scripts, backup/restore и smoke-start.
+- Docker Compose, VPS deploy scripts, backup/restore и smoke-start.
 
 ## Структура меню
 
