@@ -191,3 +191,25 @@ def chick_grow_forms(db_path, *, selected_user, auth_token: str, timezone_name: 
     </form>"""
         )
     return "\n  <h2>Цыплята → взрослые</h2>\n  <p class=\"small\">С 16 недель молодняк ест и живёт как взрослые: переведите группу, и учёт яиц с нормой корма станут точными.</p>" + "".join(forms)
+
+
+def incubation_results_block(db_path, *, selected_user) -> str:
+    """Hatch rate by species and the batch-to-batch comparison, like «Статистика» in the bot."""
+    from app.domain import PROFILES
+    from app.services.farm_overview import incubation_results_lines
+    from app.storage.repositories.batches import BatchRepository
+
+    if selected_user is None or not db_path.exists():
+        return ""
+    lines = incubation_results_lines(
+        BatchRepository(Database(db_path)).list_all_for_user(int(selected_user)),
+        {code: profile.title for code, profile in PROFILES.items()},
+    )
+    items = "".join(
+        f"<li>{escape(line.removeprefix('- '))}</li>" if line.startswith("- ") else
+        (f"<p class=\"small\">{escape(line)}</p>" if line else "")
+        for line in lines
+    )
+    return f"""
+  <h2>Итоги инкубации</h2>
+  <div class="note"><ul class="note">{items}</ul></div>"""

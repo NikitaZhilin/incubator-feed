@@ -115,6 +115,7 @@ class ReminderRunner:
         await self._send_egg_drop_alerts(now)
         await self._send_grown_chick_alerts(now)
         await self._send_care_reminders(now)
+        await self._send_egg_entry_reminders(now)
 
     async def _send_incubation_reminders(self, now: datetime) -> None:
         due_by_user = defaultdict(list)
@@ -395,6 +396,48 @@ class ReminderRunner:
             await self._send_simple(
                 user_id=user_id, event_key=event_key, kind="egg_drop", local_now=local_now,
                 text=text, markup=egg_drop_keyboard(), now=now,
+            )
+
+    async def _send_egg_entry_reminders(self, now: datetime) -> None:
+        """20:00: today's collection is not recorded yet; one tap records the usual number."""
+        if self.users is None or self.egg_service is None:
+            return
+        from app.handlers.quick import collected_keyboard
+        from app.services.farm_overview import (
+            EGG_REMINDER_HOUR,
+            eggs_recorded_on,
+            eggs_recorded_recently,
+            usual_egg_counts,
+        )
+
+        for settings in self.users.list_users_with_settings():
+            user_id = int(settings["user_id"])
+            if not settings.get("is_active", True) or not settings.get("notify_eggs", True):
+                continue
+            local_now = _local_now_for_settings(settings, now)
+            if local_now.hour < EGG_REMINDER_HOUR:
+                continue
+            today = local_now.date()
+            eggs = self.egg_service.eggs
+            try:
+                if (
+                    self.egg_service.total_laying_hens(user_id) <= 0
+                    or eggs_recorded_on(eggs, user_id, today)
+                    or not eggs_recorded_recently(eggs, user_id, today=today)
+                ):
+                    continue
+                counts = usual_egg_counts(eggs, user_id, today=today)
+            except Exception:
+                logger.exception("Failed to check egg entries for user %s", user_id)
+                continue
+            await self._send_simple(
+                user_id=user_id,
+                event_key=f"egg_entry_reminder:user_{user_id}:{today.isoformat()}",
+                kind="eggs",
+                local_now=local_now,
+                text="🥚 Сбор яиц за сегодня ещё не записан. Сколько собрали?",
+                markup=collected_keyboard(counts, today),
+                now=now,
             )
 
     async def _send_care_reminders(self, now: datetime) -> None:

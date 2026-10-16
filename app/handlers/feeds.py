@@ -472,7 +472,11 @@ async def bird_group_edit(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await state.update_data(group_id=int(group_id_text), field=field)
     await state.set_state(EditBirdGroupFlow.value)
-    prompt = "Введите новое название поголовья." if field == "name" else "Введите новое количество птиц."
+    prompt = {
+        "name": "Введите новое название поголовья.",
+        "hatched": "Когда вывелись птицы этой группы? Год (например 2024) или дата (например 15.04.2024). "
+        "Нужно, чтобы бот следил за возрастом стада.",
+    }.get(field, "Введите новое количество птиц.")
     await callback.message.answer(prompt, reply_markup=feed_cancel_keyboard())
     await callback.answer()
 
@@ -485,6 +489,12 @@ async def bird_group_edit_value(message: Message, state: FSMContext, feed_servic
     kwargs = {}
     if field == "name":
         kwargs["name"] = value
+    elif field == "hatched":
+        try:
+            kwargs["hatched_at"] = _parse_hatch_date(value, today=date.today())
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
     else:
         if not value.isdigit() or int(value) <= 0:
             await message.answer("Введите количество птиц числом больше нуля.")
@@ -2440,6 +2450,24 @@ async def _send_flock_detail(message: Message, user_id: int, flock_id: int, feed
     await message.answer(_format_flock(flock, members), reply_markup=flock_actions_keyboard(flock.id))
 
 
+def _parse_hatch_date(value: str, *, today: date) -> date:
+    text = value.strip()
+    if text.isdigit() and len(text) == 4:
+        result = date(int(text), 5, 1)  # mid-spring: the usual hatch season when only the year is known
+    else:
+        for pattern in ("%d.%m.%Y", "%Y-%m-%d", "%d.%m.%y"):
+            try:
+                result = datetime.strptime(text, pattern).date()
+                break
+            except ValueError:
+                continue
+        else:
+            raise ValueError("Напишите год (например 2024) или дату (например 15.04.2024).")
+    if result > today or result < today.replace(year=today.year - 15):
+        raise ValueError("Дата вывода должна быть в прошлом и не раньше чем 15 лет назад.")
+    return min(result, today)
+
+
 def _format_bird_group(group) -> str:
     role_labels = {
         "hens": "куры/несушки",
@@ -2456,6 +2484,10 @@ def _format_bird_group(group) -> str:
         lines.append(f"Дата вывода: {group.hatched_at.isoformat()}")
     if group.joined_at:
         lines.append(f"Дата подсадки: {group.joined_at.isoformat()}")
+    if group.group_kind != "chicks" and group.hatched_at:
+        from app.services.farm_overview import years_text
+
+        lines.append(f"Возраст: {years_text((date.today() - group.hatched_at).days / 365.25)}")
     if group.group_kind != "chicks" and group.role == "mixed":
         lines.append("")
         lines.append("Смешанная группа не учитывается как несушки. Если это куры-несушки, нажмите «🏷 Роль».")

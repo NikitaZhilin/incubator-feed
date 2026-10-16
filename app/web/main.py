@@ -27,7 +27,7 @@ from app.web.config import WebConfig, load_web_config
 from app.services.ledger import parse_rub
 from app.storage.repositories.ledger import LedgerRepository
 from app.web.charts import register_chart_routes
-from app.web.farm_tools import care_block, chick_grow_forms, register_farm_tool_routes
+from app.web.farm_tools import care_block, chick_grow_forms, incubation_results_block, register_farm_tool_routes
 from app.web.ledger_pages import cost_block, eggs_out_block, losses_block, register_ledger_routes
 from app.web.parity import (
     already_fed_mix_form,
@@ -2616,6 +2616,7 @@ def _render_incubation_page(config: WebConfig, payload: dict, *, auth_token: str
     </thead>
     <tbody>{completed_rows}</tbody>
   </table>
+  {incubation_results_block(config.db_path, selected_user=selected_user)}
 
   {incubation_reference()}
 </main>

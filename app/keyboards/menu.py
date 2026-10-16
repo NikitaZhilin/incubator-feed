@@ -19,18 +19,28 @@ def main_menu_keyboard(
     if _enabled(settings, "notify_eggs"):
         feature_row.append(InlineKeyboardButton(text="🥚 Яйца", callback_data="eggs:menu"))
 
-    rows: list[list[InlineKeyboardButton]] = []
+    # Everyday actions first, sections below.
+    quick: list[InlineKeyboardButton] = []
     if _enabled(settings, "notify_feed"):
-        rows.append([InlineKeyboardButton(text=FED_BUTTON_TEXT, callback_data=FED_CALLBACK)])
+        quick.append(InlineKeyboardButton(text=FED_BUTTON_TEXT, callback_data=FED_CALLBACK))
+    if _enabled(settings, "notify_eggs"):
+        quick.append(InlineKeyboardButton(text="🥚 Собрал яйца", callback_data="eggs:collected"))
+        quick.append(InlineKeyboardButton(text="📤 Продал / отдал", callback_data="ledger:out"))
+    if _enabled(settings, "notify_poultry_advisor"):
+        quick.append(InlineKeyboardButton(text="🗓 Уход", callback_data="care:menu"))
+
+    rows: list[list[InlineKeyboardButton]] = [quick[i : i + 2] for i in range(0, len(quick), 2)]
     if feature_row:
         rows.append(feature_row)
+    lower = []
     if _enabled(settings, "notify_poultry_advisor"):
-        rows.append([InlineKeyboardButton(text="🐔 Птицевод", callback_data="advisor:menu")])
-    rows.extend(
+        lower.append(InlineKeyboardButton(text="🐔 Птицевод", callback_data="advisor:menu"))
+    lower.append(InlineKeyboardButton(text="📊 Посмотреть сводку", callback_data="menu:summary"))
+    rows.append(lower)
+    rows.append(
         [
-            [InlineKeyboardButton(text="📊 Посмотреть сводку", callback_data="menu:summary")],
-            [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:main")],
-            [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings:menu")],
+            InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings:menu"),
+            InlineKeyboardButton(text="❓ FAQ", callback_data="faq:main"),
         ]
     )
     rows.extend(_web_choice_rows(web_url=web_url, miniapp_url=miniapp_url) or [[_web_button(web_url)]])

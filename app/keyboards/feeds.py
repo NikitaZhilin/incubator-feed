@@ -200,6 +200,7 @@ def bird_group_actions_keyboard(group_id: int, *, is_chicks: bool = False) -> In
                 InlineKeyboardButton(text="🔢 Количество", callback_data=f"feeds:group_edit:{group_id}:count"),
             ],
             [InlineKeyboardButton(text="🏷 Роль: несушки / петухи", callback_data=f"feeds:group_role:{group_id}")],
+            [InlineKeyboardButton(text="📅 Год вывода", callback_data=f"feeds:group_edit:{group_id}:hatched")],
             [InlineKeyboardButton(text="🗑 Архивировать", callback_data=f"feeds:group_archive:{group_id}")],
             [InlineKeyboardButton(text="⬅️ К поголовью", callback_data="feeds:groups")],
         ]
