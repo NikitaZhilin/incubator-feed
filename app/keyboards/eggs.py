@@ -19,6 +19,7 @@ def eggs_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="📤 Продал / отдал", callback_data="ledger:out"),
                 InlineKeyboardButton(text="💰 Продажи", callback_data="ledger:out_list"),
             ],
+            [InlineKeyboardButton(text="📅 Итоги недели", callback_data="report:week")],
             [InlineKeyboardButton(text="🌦 Город и погода", callback_data="eggs:weather")],
             [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:eggs")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],

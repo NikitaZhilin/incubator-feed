@@ -178,6 +178,7 @@ async def main() -> None:
             stock_service=stock_service,
             poultry_advisor_service=poultry_advisor_service,
             feeding_service=feeding_service,
+            ledger_service=ledger_service,
             users=users,
             notifications=notifications,
             heartbeats=heartbeats,

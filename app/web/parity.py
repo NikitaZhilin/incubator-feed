@@ -485,6 +485,7 @@ def register_parity_routes(app: FastAPI, require_web_access) -> None:
         blocks = []
         for title, builder in (
             ("План на сегодня", lambda: advisor.build_today_plan(selected)),
+            ("Итоги недели", lambda: _weekly_report_text(database, selected, current.timezone_name)),
             ("Корма и замес", lambda: advisor.build_feed_advice(selected)),
             ("Когда делать замес", lambda: advisor.build_mix_timing_advice(selected)),
             ("Мало яиц", lambda: advisor.build_egg_drop_advice(selected)),
@@ -534,6 +535,20 @@ def register_parity_routes(app: FastAPI, require_web_access) -> None:
 
 
 # ----- Fragments used by the existing pages -----------------------------------
+
+
+def _weekly_report_text(database: Database, user_id: int, timezone_name: str) -> str:
+    from app.services.weekly_report import build_weekly_report
+    from app.web.ledger_pages import ledger_service_for
+
+    ledger = ledger_service_for(database, timezone_name)
+    return build_weekly_report(
+        user_id=user_id,
+        today=_local_today(timezone_name),
+        eggs=EggRepository(database),
+        feeding_service=ledger.feeding_service,
+        ledger_service=ledger,
+    )
 
 
 def eggs_extra_forms(*, selected_user, auth_token: str, today_value: str) -> str:

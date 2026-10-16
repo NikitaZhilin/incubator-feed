@@ -380,6 +380,34 @@ async def out_list(callback: CallbackQuery, state: FSMContext, ledger_service: L
     )
 
 
+# --- weekly report -------------------------------------------------------------
+
+
+@router.callback_query(F.data == "report:week")
+async def weekly_report(
+    callback: CallbackQuery,
+    state: FSMContext,
+    ledger_service: LedgerService,
+    feeding_service,
+    egg_service,
+) -> None:
+    from app.services.weekly_report import build_weekly_report
+
+    await state.clear()
+    await callback.answer()
+    text = build_weekly_report(
+        user_id=callback.from_user.id,
+        today=_today(),
+        eggs=egg_service.eggs,
+        feeding_service=feeding_service,
+        ledger_service=ledger_service,
+    )
+    await callback.message.answer(
+        text + "\n\nТакой отчёт приходит сам по воскресеньям в 20:00.",
+        reply_markup=_kb([[("🥚 Яйца", "eggs:menu"), ("🌾 Корма", "feeds:menu")], [HOME]]),
+    )
+
+
 # --- prices and cost ----------------------------------------------------------
 
 

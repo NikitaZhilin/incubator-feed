@@ -47,6 +47,7 @@ class ReminderRunner:
         stock_service: StockService | None = None,
         poultry_advisor_service: PoultryAdvisorService | None = None,
         feeding_service: FeedingService | None = None,
+        ledger_service=None,
         users: UserRepository | None = None,
         notifications: NotificationRepository | None = None,
         heartbeats: HeartbeatRepository | None = None,
@@ -60,6 +61,7 @@ class ReminderRunner:
         self.feed_service = feed_service
         self.egg_service = egg_service
         self.feeding_service = feeding_service
+        self.ledger_service = ledger_service
         self.stock_service = stock_service
         self.poultry_advisor_service = poultry_advisor_service
         self.users = users
@@ -101,6 +103,7 @@ class ReminderRunner:
         await self._send_feed_reminders(now)
         await self._send_feeding_reminders(now)
         await self._send_buy_reminders(now)
+        await self._send_weekly_reports(now)
 
     async def _send_incubation_reminders(self, now: datetime) -> None:
         due_by_user = defaultdict(list)
@@ -324,6 +327,47 @@ class ReminderRunner:
                 )
             except Exception as exc:
                 logger.exception("Failed to send feeding reminder to user %s", user_id)
+                error_code = classify_telegram_error(exc)
+                await respect_rate_limit(exc)
+                if self.notifications:
+                    self.notifications.mark_failed(event_key, error_code=error_code, error_message=str(exc))
+                if error_code in {"blocked", "deactivated"}:
+                    self.incubation_service.mark_user_inactive(user_id, error_code)
+                continue
+            if self.notifications:
+                self.notifications.mark_sent(event_key, local_now)
+
+    async def _send_weekly_reports(self, now: datetime) -> None:
+        """Sunday evening: the week's eggs, feed, money and what runs out soon."""
+        if self.users is None or self.egg_service is None:
+            return
+        from app.services.weekly_report import WEEKLY_REPORT_HOUR, WEEKLY_REPORT_WEEKDAY, build_weekly_report
+
+        for settings in self.users.list_users_with_settings():
+            user_id = int(settings["user_id"])
+            if not settings.get("is_active", True) or not settings.get("notify_daily_summary", True):
+                continue
+            local_now = _local_now_for_settings(settings, now)
+            if local_now.weekday() != WEEKLY_REPORT_WEEKDAY or local_now.hour < WEEKLY_REPORT_HOUR:
+                continue
+            event_key = f"weekly_report:user_{user_id}:{local_now.date().isoformat()}"
+            if self.notifications and not self.notifications.can_attempt(event_key, now=now):
+                continue
+            try:
+                text = build_weekly_report(
+                    user_id=user_id,
+                    today=local_now.date(),
+                    eggs=self.egg_service.eggs,
+                    feeding_service=self.feeding_service,
+                    ledger_service=self.ledger_service,
+                )
+                if self.notifications:
+                    self.notifications.record_attempt(
+                        user_id=user_id, type="weekly_report", event_key=event_key, scheduled_for=local_now
+                    )
+                await self.bot.send_message(user_id, text, reply_markup=daily_summary_keyboard())
+            except Exception as exc:
+                logger.exception("Failed to send weekly report to user %s", user_id)
                 error_code = classify_telegram_error(exc)
                 await respect_rate_limit(exc)
                 if self.notifications:

@@ -159,5 +159,44 @@ class LedgerTest(unittest.TestCase):
             parse_count("0", limit=10, what="птиц")
 
 
+
+class WeeklyReportTest(LedgerTest):
+    def test_report_has_eggs_feed_money_losses(self) -> None:
+        from app.services.weekly_report import build_weekly_report
+
+        self.feeding.set_mix(1, parse_mix_text("Кукуруза 4\nКомбикорм 2"))
+        corn = self.stock.add_purchase(user_id=1, name="Кукуруза", kind="ingredient", amount_kg=50)
+        self.stock.add_purchase(user_id=1, name="Комбикорм", kind="commercial_feed", amount_kg=3)
+        self.service.set_purchase_price(1, StockRepository(self.database).last_purchase_id(corn.item.id, 1), 1000)
+        for offset in range(7):
+            self._egg(TODAY - timedelta(days=offset), 10)
+            self._egg(TODAY - timedelta(days=offset + 7), 8)
+            self.feeding.record(1, cups=3, now=MORNING - timedelta(days=offset))
+        self.service.record_outflow(user_id=1, kind="sold", eggs_count=30, amount_rub=450, occurred_on=TODAY)
+        self.service.record_loss(user_id=1, bird_group_id=self.hens.id, count=1, reason="died", occurred_on=TODAY)
+
+        text = build_weekly_report(
+            user_id=1, today=TODAY, eggs=self.eggs, feeding_service=self.feeding, ledger_service=self.service
+        )
+
+        self.assertIn("Собрано 70 (▲ 25% к прошлой неделе: 56)", text)
+        self.assertIn("Кормили 7 из 7 дней", text)
+        self.assertIn("На десяток яиц", text)
+        self.assertIn("Продано 30 яиц на 450 ₽", text)
+        self.assertIn("Корм за неделю", text)
+        self.assertIn("«Несушки» −1", text)
+        self.assertIn("Скоро закончится: Комбикорм", text)
+
+    def test_report_without_feeding_or_sales(self) -> None:
+        from app.services.weekly_report import build_weekly_report
+
+        self._egg(TODAY, 5)
+        text = build_weekly_report(user_id=1, today=TODAY, eggs=self.eggs, feeding_service=self.feeding, ledger_service=self.service)
+
+        self.assertIn("Сбор записан за 1 из 7 дней", text)
+        self.assertIn("Отметок «✅ Покормил» за неделю нет", text)
+        self.assertNotIn("Деньги", text)
+
+
 if __name__ == "__main__":
     unittest.main()
