@@ -405,6 +405,53 @@ class FeedService:
         self._ration_will_change(user_id)
         return self.feeds.archive_bird_group(group_id, user_id)
 
+    def grow_chicks(self, *, user_id: int, group_id: int, hens: int | None) -> list[BirdGroup]:
+        """Turn a grown chick group into adult groups: hens and roosters, or one mixed group.
+
+        `hens=None` means the sex is not clear yet: one adult "mixed" group is created.
+        The new groups take the chick group's place in its flock; the chick group is archived.
+        """
+        group = self.feeds.get_bird_group(group_id, user_id)
+        if group is None or not group.is_active or group.group_kind != "chicks":
+            raise ValueError("Группа цыплят не найдена.")
+        total = group.bird_count
+        if hens is not None and not 0 <= hens <= total:
+            raise ValueError(f"Курочек может быть от 0 до {total}.")
+        if hens is None:
+            parts = [("mixed", group.name, total)]
+        else:
+            parts = [
+                ("hens", f"{group.name} — несушки", hens),
+                ("roosters", f"{group.name} — петухи", total - hens),
+            ]
+        flock_ids = [
+            flock.id
+            for flock in self.feeds.list_flocks(user_id)
+            if flock.is_active
+            and any(member.bird_group_id == group.id for member in self.feeds.list_flock_members(flock.id, user_id))
+        ]
+        self._ration_will_change(user_id)
+        self.feeds.archive_bird_group(group.id, user_id)
+        created = []
+        for role, name, count in parts:
+            if count <= 0:
+                continue
+            new_group = self.feeds.create_bird_group(
+                user_id=user_id,
+                name=name[:255],
+                bird_count=count,
+                species=group.species,
+                group_kind="adult",
+                role=role,
+                hatched_at=group.hatched_at,
+                joined_at=group.joined_at,
+                reserve_percent=group.reserve_percent,
+            )
+            created.append(new_group)
+            for flock_id in flock_ids[:1]:
+                self.feeds.add_flock_member(user_id=user_id, flock_id=flock_id, bird_group_id=new_group.id)
+        return created
+
     def create_flock(self, *, user_id: int, name: str, member_group_ids: list[int]) -> Flock:
         clean_name = name.strip()[:255]
         if not clean_name:

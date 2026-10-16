@@ -333,6 +333,37 @@ class WebParityTest(unittest.TestCase):
         self.assertEqual([(p.name, p.price_rub) for p in priced], [("Кукуруза", 1000.0)])
         self.assertIn("Себестоимость", self.client.get(f"/feeds{AUTH}").text)
 
+    def test_charts_export_care_and_grow_on_site(self) -> None:
+        from openpyxl import load_workbook
+        from io import BytesIO
+        from app.services.care import CareService
+
+        charts = self.client.get(f"/charts{AUTH}&days=90")
+        export = self.client.get(f"/export.xlsx{AUTH}")
+        tasks = CareService(self.database).list(1, today=self.today)
+        done = self._post(f"/care/{tasks[0].id}/done", {})
+        bad = self._post(f"/care/{tasks[0].id}/interval", {"interval_days": "0"})
+        chicks = self.feeds.create_bird_group(
+            user_id=1, name="Молодняк", bird_count=6, group_kind="chicks",
+            hatched_at=self.today - timedelta(weeks=17),
+        )
+        livestock = self.client.get(f"/livestock{AUTH}").text
+        grown = self._post(f"/bird-groups/{chicks.id}/grow", {"hens": "4", "mode": "split"})
+        advisor = self.client.get(f"/advisor{AUTH}").text
+
+        self.assertEqual(charts.status_code, 200)
+        self.assertIn("Яйца по дням", charts.text)
+        self.assertIn("<svg", charts.text)
+        self.assertEqual(export.status_code, 200)
+        self.assertIn("Яйца", load_workbook(BytesIO(export.content)).sheetnames)
+        self.assertIn("сделано", unquote_plus(done.headers["location"]))
+        self.assertIn("error=", bad.headers["location"])
+        self.assertIn("Календарь ухода", livestock)
+        self.assertIn("Перевести во взрослых", livestock)
+        self.assertIn("несушки — 4", unquote_plus(grown.headers["location"]))
+        self.assertIn("Свет зимой", advisor)
+        self.assertEqual(self.client.get("/export.xlsx").status_code, 401)
+
     def test_new_pages_require_token(self) -> None:
         self.assertEqual(self.client.get("/advisor").status_code, 401)
         self.assertEqual(self.client.get("/help").status_code, 401)

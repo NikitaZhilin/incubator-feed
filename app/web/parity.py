@@ -486,6 +486,7 @@ def register_parity_routes(app: FastAPI, require_web_access) -> None:
         for title, builder in (
             ("План на сегодня", lambda: advisor.build_today_plan(selected)),
             ("Итоги недели", lambda: _weekly_report_text(database, selected, current.timezone_name)),
+            ("Свет зимой", lambda: advisor.build_light_advice(selected)),
             ("Корма и замес", lambda: advisor.build_feed_advice(selected)),
             ("Когда делать замес", lambda: advisor.build_mix_timing_advice(selected)),
             ("Мало яиц", lambda: advisor.build_egg_drop_advice(selected)),

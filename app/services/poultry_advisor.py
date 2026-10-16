@@ -11,6 +11,15 @@ from app.utils.dates import local_today
 from app.domain import StockEstimate
 from app.services.eggs import EggService, EXCLUSION_REASON_LABELS
 from app.services.feeding import FeedPace, pace_lines
+from app.services.insights import (
+    MIN_LIGHT_HOURS,
+    EggDrop,
+    chick_age_text,
+    daylight,
+    detect_egg_drop,
+    grown_chick_groups,
+    light_advice_lines,
+)
 from app.services.feeds import FeedService
 from app.services.incubation import IncubationService
 from app.services.stock import StockService
@@ -111,6 +120,23 @@ class PoultryAdvisorService:
                 lines.append("- В поголовье нет несушек: прогноз яйценоскости будет неточным.")
         except Exception:
             lines.append("- Раздел яиц сейчас не дал расчет. Проверьте запись сбора вручную.")
+
+        light = self.daylight_for(user_id, today)
+        if light.hours < MIN_LIGHT_HOURS:
+            lines.extend(["", "Свет:"])
+            lines.extend(light_advice_lines(light, compact=True))
+
+        try:
+            grown = grown_chick_groups(self.feed_service.list_bird_groups(user_id), today=today)
+        except Exception:
+            grown = []
+        if grown:
+            lines.extend(["", "Цыплята подросли:"])
+            lines.extend(
+                f"- «{group.name}» уже {chick_age_text(group, today)}: переведите во взрослых "
+                "(«Поголовье» → группа → «🐓 Перевести во взрослых»)."
+                for group in grown
+            )
 
         pace = self._feed_pace(user_id, today)
         if pace is not None:
@@ -260,6 +286,15 @@ class PoultryAdvisorService:
                     lines.append(f"- Есть просадка: неделя ниже месячного среднего примерно на {drop_percent:.0f}%.")
                 else:
                     lines.append("- Сильной просадки по 7/30 дням не видно, но условия все равно стоит проверить.")
+
+        drop = self.detect_egg_drop(user_id, today=current_date)
+        if drop is not None:
+            lines.append(
+                f"- Последние 3 дня: {drop.recent_avg:.1f} в день против обычных {drop.baseline_avg:.1f} "
+                f"(−{drop.drop_percent:.0f}%)."
+            )
+        for reason in self.egg_drop_reasons(user_id, today=current_date):
+            lines.append(f"- {reason}")
 
         if stats.active_exclusions:
             lines.append("- Временно не несутся:")
@@ -452,6 +487,101 @@ class PoultryAdvisorService:
                 for item in missing[:8]
             ]
         return ["- По рецепту замеса ограничений не найдено."]
+
+    def daylight_for(self, user_id: int, today: date):
+        place = ""
+        latitude = longitude = None
+        try:
+            settings = self.egg_service.get_weather_settings(user_id)
+            latitude, longitude, place = settings.latitude, settings.longitude, settings.city or ""
+        except Exception:
+            pass
+        return daylight(today, latitude=latitude, longitude=longitude, timezone_name=self.timezone_name, place=place)
+
+    def build_light_advice(self, user_id: int, *, today: date | None = None) -> str:
+        current = today or self.egg_service.current_date()
+        light = self.daylight_for(user_id, current)
+        lines = ["💡 Свет для несушек", ""]
+        lines.extend(light_advice_lines(light))
+        if "не задан" in light.place:
+            lines.append("- Укажите город в «Яйца → Город и погода», чтобы считать восход и закат точно.")
+        return "\n".join(lines)
+
+    def detect_egg_drop(self, user_id: int, *, today: date) -> EggDrop | None:
+        try:
+            if self.egg_service.total_laying_hens(user_id) <= 0:
+                return None
+            return detect_egg_drop(self.egg_service.eggs, user_id, today=today)
+        except Exception:
+            return None
+
+    def egg_drop_reasons(self, user_id: int, *, today: date) -> list[str]:
+        """Causes worth checking first, from what the bot knows about the farm."""
+        reasons: list[str] = []
+        light = self.daylight_for(user_id, today)
+        if light.hours < MIN_LIGHT_HOURS:
+            reasons.append(
+                f"Короткий день: {light.hours:.1f} ч света при норме {MIN_LIGHT_HOURS:g}–16 ч — досветка вернёт кладку "
+                "(«Птицевод → 💡 Свет зимой»)."
+            )
+        try:
+            stats = self.egg_service.stats(user_id, today=today)
+            if stats.active_exclusions:
+                reasons.append(
+                    f"Сейчас не несутся {stats.excluded_hens_count} кур (линька, наседки и т. п.) — это уже учтено."
+                )
+            if stats.weather_note:
+                reasons.append(f"Погода: {stats.weather_note}")
+        except Exception:
+            pass
+        if self.feeding_service is not None:
+            try:
+                from app.storage.repositories.ledger import LedgerRepository
+
+                losses = LedgerRepository(self.feeding_service.feeding.database).losses_between(
+                    user_id, start_date=today - timedelta(days=14), end_date=today
+                )
+                if losses:
+                    reasons.append(
+                        f"За 2 недели выбыло {sum(loss.count for loss in losses)} птиц — несушек стало меньше."
+                    )
+                start = today - timedelta(days=3)
+                events = self.feeding_service.feeding.between(user_id, start_date=start, end_date=today - timedelta(days=1))
+                fed_days = {event.fed_date for event in events}
+                if self.feeding_service.feeding.has_any(user_id) and len(fed_days) < 3:
+                    reasons.append(f"Кормление отмечено только {len(fed_days)} из 3 последних дней.")
+                given = [event for event in events if event.mix_kg]
+                if given and given[0].daily_norm_kg:
+                    per_day = sum(event.mix_kg for event in given) / max(len(fed_days), 1)
+                    if per_day < given[0].daily_norm_kg * 0.8:
+                        reasons.append(
+                            f"Дают меньше нормы: ≈ {per_day:.1f} кг в день при норме {given[0].daily_norm_kg:.1f} кг."
+                        )
+                pace = self.feeding_service.pace(user_id, today=today)
+                if pace is not None:
+                    empty = [item.name for item in pace.ingredients if item.days_left == 0]
+                    if empty:
+                        reasons.append("Закончилось: " + ", ".join(empty) + " — без ракушки и премикса кладка падает первой.")
+            except Exception:
+                pass
+        return reasons
+
+    def build_egg_drop_alert(self, user_id: int, drop: EggDrop, *, today: date) -> str:
+        lines = [
+            "📉 Яиц стало заметно меньше",
+            "",
+            f"За последние 3 дня в среднем {drop.recent_avg:.1f} в день, обычно {drop.baseline_avg:.1f} "
+            f"(−{drop.drop_percent:.0f}%).",
+        ]
+        reasons = self.egg_drop_reasons(user_id, today=today)
+        if reasons:
+            lines.extend(["", "Что видно по данным:"])
+            lines.extend(f"- {reason}" for reason in reasons)
+        lines.extend(["", "Проверьте сегодня:"])
+        for check in self.content.get("eggs", {}).get("checks", [])[:5]:
+            lines.append(f"- {check}.")
+        lines.append("- Если куры вялые, не едят, есть понос, кровь или тяжёлое дыхание — «Птицевод → 🩺 Проблема с птицей».")
+        return "\n".join(lines)
 
     def _feed_pace(self, user_id: int, today: date) -> FeedPace | None:
         if self.feeding_service is None:

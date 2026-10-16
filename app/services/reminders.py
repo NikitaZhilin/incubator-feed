@@ -14,7 +14,13 @@ from aiogram.exceptions import (
     TelegramRetryAfter,
 )
 
-from app.keyboards.menu import buy_reminder_keyboard, daily_summary_keyboard, feeding_reminder_keyboard
+from app.keyboards.menu import (
+    buy_reminder_keyboard,
+    daily_summary_keyboard,
+    egg_drop_keyboard,
+    feeding_reminder_keyboard,
+    grown_chicks_keyboard,
+)
 from app.services.eggs import EggService
 from app.services.incubation import IncubationService
 from app.services.guides import post_hatch_care
@@ -48,6 +54,7 @@ class ReminderRunner:
         poultry_advisor_service: PoultryAdvisorService | None = None,
         feeding_service: FeedingService | None = None,
         ledger_service=None,
+        care_service=None,
         users: UserRepository | None = None,
         notifications: NotificationRepository | None = None,
         heartbeats: HeartbeatRepository | None = None,
@@ -62,6 +69,7 @@ class ReminderRunner:
         self.egg_service = egg_service
         self.feeding_service = feeding_service
         self.ledger_service = ledger_service
+        self.care_service = care_service
         self.stock_service = stock_service
         self.poultry_advisor_service = poultry_advisor_service
         self.users = users
@@ -104,6 +112,9 @@ class ReminderRunner:
         await self._send_feeding_reminders(now)
         await self._send_buy_reminders(now)
         await self._send_weekly_reports(now)
+        await self._send_egg_drop_alerts(now)
+        await self._send_grown_chick_alerts(now)
+        await self._send_care_reminders(now)
 
     async def _send_incubation_reminders(self, now: datetime) -> None:
         due_by_user = defaultdict(list)
@@ -336,6 +347,119 @@ class ReminderRunner:
                 continue
             if self.notifications:
                 self.notifications.mark_sent(event_key, local_now)
+
+    async def _send_simple(self, *, user_id: int, event_key: str, kind: str, local_now, text: str, markup, now) -> None:
+        """Send one deduplicated notification with the usual retry/blocked handling."""
+        if self.notifications and not self.notifications.can_attempt(event_key, now=now):
+            return
+        try:
+            if self.notifications:
+                self.notifications.record_attempt(
+                    user_id=user_id, type=kind, event_key=event_key, scheduled_for=local_now
+                )
+            await self.bot.send_message(user_id, text, reply_markup=markup)
+        except Exception as exc:
+            logger.exception("Failed to send %s to user %s", kind, user_id)
+            error_code = classify_telegram_error(exc)
+            await respect_rate_limit(exc)
+            if self.notifications:
+                self.notifications.mark_failed(event_key, error_code=error_code, error_message=str(exc))
+            if error_code in {"blocked", "deactivated"}:
+                self.incubation_service.mark_user_inactive(user_id, error_code)
+            return
+        if self.notifications:
+            self.notifications.mark_sent(event_key, local_now)
+
+    async def _send_egg_drop_alerts(self, now: datetime) -> None:
+        """Laying fell for 3 days: tell the owner once a week with likely causes."""
+        if self.users is None or self.poultry_advisor_service is None:
+            return
+        for settings in self.users.list_users_with_settings():
+            user_id = int(settings["user_id"])
+            if not _settings_allow_notification(settings, "notify_eggs", now):
+                continue
+            local_now = _local_now_for_settings(settings, now)
+            today = local_now.date()
+            year, week, _ = today.isocalendar()
+            event_key = f"egg_drop:user_{user_id}:{year}-W{week:02d}"
+            if self.notifications and self.notifications.was_sent(event_key):
+                continue
+            drop = self.poultry_advisor_service.detect_egg_drop(user_id, today=today)
+            if drop is None:
+                continue
+            try:
+                text = self.poultry_advisor_service.build_egg_drop_alert(user_id, drop, today=today)
+            except Exception:
+                logger.exception("Failed to build egg drop alert for user %s", user_id)
+                continue
+            await self._send_simple(
+                user_id=user_id, event_key=event_key, kind="egg_drop", local_now=local_now,
+                text=text, markup=egg_drop_keyboard(), now=now,
+            )
+
+    async def _send_care_reminders(self, now: datetime) -> None:
+        """Care calendar: due tasks in one message, repeated every few days until done."""
+        if self.users is None or self.care_service is None:
+            return
+        from app.handlers.farm_tools import care_reminder_keyboard
+        from app.services.care import format_care_reminder
+
+        for settings in self.users.list_users_with_settings():
+            user_id = int(settings["user_id"])
+            if not _settings_allow_notification(settings, "notify_poultry_advisor", now):
+                continue
+            local_now = _local_now_for_settings(settings, now)
+            today = local_now.date()
+            try:
+                due = self.care_service.due_for_reminder(user_id, today=today)
+            except Exception:
+                logger.exception("Failed to read care tasks for user %s", user_id)
+                continue
+            if not due:
+                continue
+            event_key = f"care:user_{user_id}:{today.isoformat()}"
+            await self._send_simple(
+                user_id=user_id,
+                event_key=event_key,
+                kind="care",
+                local_now=local_now,
+                text=format_care_reminder(due, today),
+                markup=care_reminder_keyboard(due),
+                now=now,
+            )
+            if self.notifications is None or self.notifications.was_sent(event_key):
+                self.care_service.mark_reminded(user_id, [task.id for task in due], today=today)
+
+    async def _send_grown_chick_alerts(self, now: datetime) -> None:
+        """Chicks reached 16 weeks: offer once per group to move them to adults."""
+        if self.users is None or self.feed_service is None:
+            return
+        from app.services.insights import chick_age_text, grown_chick_groups
+
+        for settings in self.users.list_users_with_settings():
+            user_id = int(settings["user_id"])
+            if not _settings_allow_notification(settings, "notify_feed", now):
+                continue
+            local_now = _local_now_for_settings(settings, now)
+            try:
+                groups = grown_chick_groups(self.feed_service.list_bird_groups(user_id), today=local_now.date())
+            except Exception:
+                logger.exception("Failed to check chick groups for user %s", user_id)
+                continue
+            for group in groups:
+                await self._send_simple(
+                    user_id=user_id,
+                    event_key=f"chicks_grown:group_{group.id}",
+                    kind="chicks_grown",
+                    local_now=local_now,
+                    text=(
+                        f"🐓 Цыплята «{group.name}» подросли: им уже {chick_age_text(group, local_now.date())}.\n\n"
+                        "Пора перевести их во взрослых и разделить на несушек и петухов — тогда яйца "
+                        "и норма корма будут считаться правильно."
+                    ),
+                    markup=grown_chicks_keyboard(group.id),
+                    now=now,
+                )
 
     async def _send_weekly_reports(self, now: datetime) -> None:
         """Sunday evening: the week's eggs, feed, money and what runs out soon."""

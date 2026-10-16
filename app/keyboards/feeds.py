@@ -49,6 +49,7 @@ def livestock_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="➖ Падёж / выбыло", callback_data="ledger:loss"),
                 InlineKeyboardButton(text="📉 Потери", callback_data="ledger:losses"),
             ],
+            [InlineKeyboardButton(text="🗓 Уход за птицей", callback_data="care:menu")],
             [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:livestock")],
             [InlineKeyboardButton(text="⬅️ К кормам", callback_data="feeds:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
@@ -185,9 +186,15 @@ def bird_groups_keyboard(groups=None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def bird_group_actions_keyboard(group_id: int) -> InlineKeyboardMarkup:
+def bird_group_actions_keyboard(group_id: int, *, is_chicks: bool = False) -> InlineKeyboardMarkup:
+    grow = (
+        [[InlineKeyboardButton(text="🐓 Перевести во взрослых", callback_data=f"chicks:grow:{group_id}")]]
+        if is_chicks
+        else []
+    )
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            *grow,
             [
                 InlineKeyboardButton(text="✏️ Название", callback_data=f"feeds:group_edit:{group_id}:name"),
                 InlineKeyboardButton(text="🔢 Количество", callback_data=f"feeds:group_edit:{group_id}:count"),

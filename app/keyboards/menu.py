@@ -102,6 +102,7 @@ def settings_keyboard(*, web_url: str = "", miniapp_url: str = "") -> InlineKeyb
             InlineKeyboardButton(text="🔔 Время уведомлений", callback_data="settings:edit:notification_time"),
         ],
         [InlineKeyboardButton(text="🧩 Разделы и уведомления", callback_data="settings:sections")],
+        [InlineKeyboardButton(text="📥 Выгрузить всё в Excel", callback_data="export:xlsx")],
         [InlineKeyboardButton(text="ℹ️ О боте", callback_data="settings:about")],
         [InlineKeyboardButton(text="❓ FAQ", callback_data="faq:settings")],
     ]
@@ -241,6 +242,25 @@ def feeding_done_keyboard(event_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🌾 Корма", callback_data="feeds:menu"),
                 InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home"),
             ],
+        ]
+    )
+
+
+def egg_drop_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🥚 Что проверить", callback_data="advisor:eggs_drop")],
+            [InlineKeyboardButton(text="💡 Свет зимой", callback_data="advisor:light")],
+            [InlineKeyboardButton(text="⚙️ Настроить уведомления", callback_data="settings:sections")],
+        ]
+    )
+
+
+def grown_chicks_keyboard(group_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🐓 Перевести во взрослых", callback_data=f"chicks:grow:{group_id}")],
+            [InlineKeyboardButton(text="Позже", callback_data="menu:home")],
         ]
     )
 
