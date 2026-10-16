@@ -33,6 +33,7 @@ from app.web.parity import (
     group_ration_form,
     incubation_reference,
     fed_block,
+    feeding_mix_form,
     profile_form,
     register_parity_routes,
     weather_refresh_form,
@@ -1573,6 +1574,9 @@ def _page_style() -> str:
     }
     form.fed { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
     form.fed button { width: auto; min-width: 150px; font-size: 17px; }
+    form.fed > div { flex: 1 1 auto; }
+    form.fed .fed-cups { flex: 0 0 140px; }
+    textarea { min-height: 120px; line-height: 1.45; resize: vertical; }
     @media (max-width: 600px) { form.fed { flex-direction: column; align-items: stretch; } form.fed button { width: 100%; } }
     .status-line {
       display: flex;
@@ -1883,6 +1887,7 @@ def _render_feeds_page(config: WebConfig, payload: dict, *, auth_token: str = ""
 <main>
 {_page_header("Корма и склад", "Запасы, смесь, стада и последние операции.", auth_token, active_path="/feeds")}
   {fed_block(config.db_path, selected_user=selected_user, auth_token=auth_token, back="/feeds", timezone_name=config.timezone_name)}
+  {feeding_mix_form(config.db_path, selected_user=selected_user, auth_token=auth_token, timezone_name=config.timezone_name)}
 
   <section class="summary">
     <div class="metric"><span class="label">Готовая смесь</span><span class="value">{escape(_kg(ready_mix.get("remaining_kg")))}</span></div>

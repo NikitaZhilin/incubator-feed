@@ -210,7 +210,7 @@ class AllButtonsTest(unittest.IsolatedAsyncioTestCase):
         self.dp["egg_service"] = egg_service
         self.dp["stock_service"] = stock_service
         self.dp["feeding_service"] = FeedingService(
-            FeedingRepository(self.database), feeds, timezone_name="Europe/Moscow"
+            FeedingRepository(self.database), feeds, stock=stock_service, timezone_name="Europe/Moscow"
         )
         self.dp["poultry_advisor_service"] = PoultryAdvisorService(
             incubation_service=incubation,
