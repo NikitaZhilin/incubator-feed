@@ -144,6 +144,84 @@ class DailySummaryPaceTest(FeedPaceTest):
         self.assertNotIn("Критично", text)
 
 
+class BuyReminderStageTest(unittest.TestCase):
+    def test_stages(self) -> None:
+        from app.services.feeding import IngredientPace, buy_reminder_stage
+
+        def stage(days):
+            return buy_reminder_stage(IngredientPace("Премикс", 0.1, 1.0, days, 1))
+
+        self.assertIsNone(stage(None))
+        self.assertIsNone(stage(6))
+        self.assertEqual(stage(5), 5)
+        self.assertEqual(stage(3), 5)
+        self.assertEqual(stage(2), 2)
+        self.assertEqual(stage(0), 2)
+
+
+@unittest.skipUnless(importlib.util.find_spec("aiogram"), "aiogram is not installed")
+class BuyReminderRunnerTest(FeedPaceTest):
+    class Bot:
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+
+        async def send_message(self, user_id, text, reply_markup=None) -> None:
+            self.messages.append(text)
+
+    def _runner(self, bot):
+        from app.services.reminders import ReminderRunner
+        from app.storage.repositories.notifications import NotificationRepository
+        from app.storage.repositories.users import UserRepository
+
+        users = UserRepository(self.database)
+        users.upsert(user_id=1, first_name="Никита")
+        return ReminderRunner(
+            bot=bot,
+            incubation_service=IncubationService(BatchRepository(self.database)),
+            stock_service=self.stock,
+            feeding_service=self.service,
+            users=users,
+            notifications=NotificationRepository(self.database),
+            timezone="Europe/Moscow",
+        )
+
+    def test_reminds_once_ahead_and_again_after_new_purchase(self) -> None:
+        import asyncio
+
+        self._feed_days(3)
+        bot = self.Bot()
+        runner = self._runner(bot)
+
+        asyncio.run(runner._send_buy_reminders(MORNING + timedelta(minutes=5)))
+        asyncio.run(runner._send_buy_reminders(MORNING + timedelta(hours=2)))
+
+        self.assertEqual(len(bot.messages), 1)
+        self.assertIn("Пора докупить", bot.messages[0])
+        self.assertIn("Комбикорм: закончится через", bot.messages[0])
+        self.assertNotIn("Кукуруза", bot.messages[0])
+        self.assertIn("сколько вы реально даёте", bot.messages[0])
+
+        # A small top-up is still short: a new purchase restarts the reminders.
+        self.stock.add_purchase(user_id=1, name="Комбикорм", kind="commercial_feed", amount_kg=0.1)
+        asyncio.run(runner._send_buy_reminders(MORNING + timedelta(hours=3)))
+
+        self.assertEqual(len(bot.messages), 2)
+
+    def test_no_reminder_before_notification_time_or_when_feed_section_off(self) -> None:
+        import asyncio
+        from app.storage.repositories.users import UserRepository
+
+        self._feed_days(3)
+        bot = self.Bot()
+        runner = self._runner(bot)
+
+        asyncio.run(runner._send_buy_reminders(MORNING - timedelta(hours=2)))  # 07:00
+        UserRepository(self.database).update_settings(1, notify_feed=False)
+        asyncio.run(runner._send_buy_reminders(MORNING + timedelta(hours=1)))
+
+        self.assertEqual(bot.messages, [])
+
+
 def _mix(text: str):
     from app.services.feeding import parse_mix_text
 

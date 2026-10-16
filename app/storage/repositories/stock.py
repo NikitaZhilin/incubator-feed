@@ -148,6 +148,17 @@ class StockRepository:
             ).fetchone()
         return self._transaction_from_row(row) if row else None
 
+    def last_purchase_id(self, stock_item_id: int, user_id: int) -> int:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT MAX(id) FROM stock_transactions
+                WHERE stock_item_id = ? AND user_id = ? AND type = 'purchase'
+                """,
+                (stock_item_id, user_id),
+            ).fetchone()
+        return int(row[0] or 0) if row else 0
+
     def last_transaction_by_type(
         self,
         user_id: int,

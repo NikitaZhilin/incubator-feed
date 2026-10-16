@@ -245,6 +245,15 @@ def feeding_done_keyboard(event_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def buy_reminder_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Внести покупку", callback_data="stock:purchase")],
+            [InlineKeyboardButton(text="⚙️ Настроить уведомления", callback_data="settings:sections")],
+        ]
+    )
+
+
 def feeding_reminder_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[

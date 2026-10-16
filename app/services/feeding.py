@@ -39,6 +39,8 @@ PACE_LOOKBACK_DAYS = 14
 PACE_WINDOW_DAYS = 7
 PACE_WARNING_DAYS = 7
 PACE_URGENT_DAYS = 2
+# Advance purchase reminders: once at 5 days left, once more at 2 days left.
+BUY_REMINDER_STAGES = (PACE_URGENT_DAYS, 5)
 MAX_CUPS = 100
 DEFAULT_DENSITY_KG_PER_L = 0.7
 # The owner's usual mix: the bot recipe without barley and meat-and-bone meal,
@@ -142,6 +144,7 @@ class IngredientPace:
     per_day_kg: float
     remaining_kg: float | None
     days_left: int | None
+    stock_item_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -352,13 +355,14 @@ class FeedingService:
         ingredients = []
         for part in self.get_mix(user_id):
             per_day = totals.get(part.name, 0.0) / window
-            remaining = days_left = None
+            remaining = days_left = item_id = None
             if self.stock is not None:
                 item = self.stock._find_stock_item_by_names(user_id=user_id, names=(part.name, *part.aliases))
                 if item is not None:
+                    item_id = item.id
                     remaining = max(self.stock.estimate_item(item).remaining_kg, 0.0)
                     days_left = int(remaining // per_day) if per_day > 0 else None
-            ingredients.append(IngredientPace(part.name, round(per_day, 3), remaining, days_left))
+            ingredients.append(IngredientPace(part.name, round(per_day, 3), remaining, days_left, item_id))
         return FeedPace(
             daily_kg=round(sum(event.mix_kg or 0 for event in in_window) / window, 3),
             observed_days=window,
@@ -490,3 +494,35 @@ def pace_lines(pace: FeedPace, *, limit: int = 4) -> list[str]:
     if pace.not_in_stock:
         lines.append("- Нет на складе (только учёт): " + ", ".join(item.name.lower() for item in pace.not_in_stock) + ".")
     return lines
+
+
+def buy_reminder_stage(item: IngredientPace) -> int | None:
+    """Smallest reminder stage the ingredient has reached, or None if it is far from running out."""
+    if item.days_left is None or item.per_day_kg <= 0:
+        return None
+    for stage in sorted(BUY_REMINDER_STAGES):
+        if item.days_left <= stage:
+            return stage
+    return None
+
+
+def format_buy_reminder(items: list[IngredientPace], pace: FeedPace, today: date) -> str:
+    lines = ["🛒 Пора докупить для смеси:", ""]
+    for item in sorted(items, key=lambda i: i.days_left or 0):
+        urgent = item.days_left is not None and item.days_left <= PACE_URGENT_DAYS
+        if item.days_left == 0:
+            when = "уже заканчивается"
+        else:
+            ends = today + timedelta(days=item.days_left)
+            when = f"закончится через {item.days_left} дн. (≈{ends.strftime('%d.%m')})"
+        lines.append(
+            ("‼️ " if urgent else "- ")
+            + f"{item.name}: {when}; осталось {format_kg(item.remaining_kg or 0)}, "
+            f"уходит {format_kg(item.per_day_kg)} в день."
+        )
+    lines.extend([
+        "",
+        f"Срок посчитан по тому, сколько вы реально даёте: отметки «Покормил» за {pace.observed_days} дн.",
+        "После покупки внесите её на склад — напоминание сбросится.",
+    ])
+    return "\n".join(lines)

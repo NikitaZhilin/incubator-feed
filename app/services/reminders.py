@@ -14,11 +14,17 @@ from aiogram.exceptions import (
     TelegramRetryAfter,
 )
 
-from app.keyboards.menu import daily_summary_keyboard, feeding_reminder_keyboard
+from app.keyboards.menu import buy_reminder_keyboard, daily_summary_keyboard, feeding_reminder_keyboard
 from app.services.eggs import EggService
 from app.services.incubation import IncubationService
 from app.services.guides import post_hatch_care
-from app.services.feeding import FeedingService, format_feeding_status, pace_lines
+from app.services.feeding import (
+    FeedingService,
+    buy_reminder_stage,
+    format_buy_reminder,
+    format_feeding_status,
+    pace_lines,
+)
 from app.services.feeds import FeedService
 from app.services.poultry_advisor import PoultryAdvisorService
 from app.services.stock import StockService
@@ -94,6 +100,7 @@ class ReminderRunner:
         await self._send_daily_summary_reminders(now)
         await self._send_feed_reminders(now)
         await self._send_feeding_reminders(now)
+        await self._send_buy_reminders(now)
 
     async def _send_incubation_reminders(self, now: datetime) -> None:
         due_by_user = defaultdict(list)
@@ -326,6 +333,63 @@ class ReminderRunner:
                 continue
             if self.notifications:
                 self.notifications.mark_sent(event_key, local_now)
+
+    async def _send_buy_reminders(self, now: datetime) -> None:
+        """Warn ahead that an ingredient of the home mix runs out, by the real feeding pace.
+
+        Each ingredient is reminded once at 5 days left and once more at 2 days left;
+        a new purchase of that ingredient starts the count over.
+        """
+        if self.feeding_service is None or self.users is None or self.stock_service is None:
+            return
+        for settings in self.users.list_users_with_settings():
+            user_id = int(settings["user_id"])
+            if not _settings_allow_notification(settings, "notify_feed", now):
+                continue
+            local_now = _local_now_for_settings(settings, now)
+            pace = self._feed_pace(user_id, local_now)
+            if pace is None:
+                continue
+            due: list[tuple[str, object]] = []
+            for item in pace.ingredients:
+                stage = buy_reminder_stage(item)
+                if stage is None or item.stock_item_id is None:
+                    continue
+                purchase = self.stock_service.stock.last_purchase_id(item.stock_item_id, user_id)
+                key = f"buy_ingredient:user_{user_id}:item_{item.stock_item_id}:p{purchase}:d{stage}"
+                if self.notifications and not self.notifications.can_attempt(key, now=now):
+                    continue
+                if self.notifications and stage > 2 and self.notifications.was_sent(
+                    f"buy_ingredient:user_{user_id}:item_{item.stock_item_id}:p{purchase}:d2"
+                ):
+                    continue
+                due.append((key, item))
+            if not due:
+                continue
+            try:
+                if self.notifications:
+                    for key, _ in due:
+                        self.notifications.record_attempt(
+                            user_id=user_id, type="feed", event_key=key, scheduled_for=local_now
+                        )
+                await self.bot.send_message(
+                    user_id,
+                    format_buy_reminder([item for _, item in due], pace, local_now.date()),
+                    reply_markup=buy_reminder_keyboard(),
+                )
+            except Exception as exc:
+                logger.exception("Failed to send buy reminder to user %s", user_id)
+                error_code = classify_telegram_error(exc)
+                await respect_rate_limit(exc)
+                if self.notifications:
+                    for key, _ in due:
+                        self.notifications.mark_failed(key, error_code=error_code, error_message=str(exc))
+                if error_code in {"blocked", "deactivated"}:
+                    self.incubation_service.mark_user_inactive(user_id, error_code)
+                continue
+            if self.notifications:
+                for key, _ in due:
+                    self.notifications.mark_sent(key, local_now)
 
     def _write_heartbeat(self, *, status: str, last_error: str | None = None) -> None:
         if self.heartbeats is None:
