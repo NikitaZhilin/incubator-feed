@@ -341,14 +341,47 @@ def register_parity_routes(app: FastAPI, require_web_access) -> None:
         user_id, failed = _guard(form, redirect_base, "Отметка кормления")
         if failed:
             return failed
+        from app.services.feeding import format_cups, format_kg, parse_cups
+
         service = feeding_service_for(Database(app.state.web_config.db_path), app.state.web_config.timezone_name)
-        result = service.record(user_id)
+        raw_cups = form.get("cups", "").strip()
+        try:
+            cups = parse_cups(raw_cups) if raw_cups else None
+        except ValueError as exc:
+            return web._redirect_with_message(redirect_base, error=str(exc))
+        result = service.record(user_id, cups=cups)
         at = service.format_time(result.event)
         if result.duplicate:
             return web._redirect_with_message(redirect_base, notice=f"Уже отмечено в {at}.")
-        norm = result.event.daily_norm_kg
-        tail = f" По норме это около {norm:.1f} кг смеси в день." if norm > 0 else ""
-        return web._redirect_with_message(redirect_base, notice=f"Отмечено: покормили в {at}.{tail}")
+        event = result.event
+        if event.cups:
+            written = [f"{item.name} {format_kg(item.kg)}" for item in result.ingredients if item.in_stock]
+            notice = f"Покормил в {at}: {format_cups(event.cups)} ≈ {format_kg(event.mix_kg or 0)} смеси."
+            if written:
+                notice += " Списано со склада: " + ", ".join(written) + "."
+        else:
+            norm = event.daily_norm_kg
+            notice = f"Отмечено: покормили в {at}." + (f" По норме около {format_kg(norm)} в день." if norm > 0 else "")
+        return web._redirect_with_message(redirect_base, notice=notice)
+
+    @app.post("/feeding/mix", dependencies=access)
+    async def save_feeding_mix(request: Request, auth: str | None = Query(default=None)):
+        from app.services.feeding import parse_mix_text
+
+        form = await _form(request)
+        redirect_base = web._link("/feeds", auth or "")
+        user_id, failed = _guard(form, redirect_base, "Сохранение состава")
+        if failed:
+            return failed
+        service = feeding_service_for(Database(app.state.web_config.db_path), app.state.web_config.timezone_name)
+        try:
+            service.set_mix(user_id, parse_mix_text(form.get("mix_text", "")))
+            raw_cup = form.get("cup_liters", "").strip().replace(",", ".")
+            if raw_cup:
+                service.set_cup_liters(user_id, float(raw_cup))
+        except ValueError as exc:
+            return web._redirect_with_message(redirect_base, error=str(exc))
+        return web._redirect_with_message(redirect_base, notice="Состав смеси для «Покормил» сохранён.")
 
     # ----- Incubation: edit batch ----------------------------------------------
 
@@ -751,7 +784,13 @@ def feeding_service_for(database: Database, timezone_name: str):
     from app.services.feeding import FeedingService
     from app.storage.repositories.feeding import FeedingRepository
 
-    return FeedingService(FeedingRepository(database), FeedRepository(database), timezone_name=timezone_name)
+    feeds = FeedRepository(database)
+    return FeedingService(
+        FeedingRepository(database),
+        feeds,
+        stock=StockService(StockRepository(database), feeds),
+        timezone_name=timezone_name,
+    )
 
 
 def fed_block(db_path, *, selected_user, auth_token: str, back: str, timezone_name: str) -> str:
@@ -765,6 +804,8 @@ def fed_block(db_path, *, selected_user, auth_token: str, back: str, timezone_na
     try:
         status = format_feeding_status(service, int(selected_user))
         week = service.week(int(selected_user))
+        last = service.last_cups(int(selected_user)) or 3.5
+        per_cup = service.mix_kg_per_cup(int(selected_user))
     except Exception:
         return ""
     return f"""
@@ -773,7 +814,48 @@ def fed_block(db_path, *, selected_user, auth_token: str, back: str, timezone_na
     <input type="hidden" name="back" value="{escape(back)}">
     <div>
       <strong>{escape(status)}</strong>
-      <div class="small">За 7 дней кормили {week.fed_days} из {week.days} дн., около {week.estimated_kg:.1f} кг смеси по норме. Склад не меняется.</div>
+      <div class="small">За 7 дней кормили {week.fed_days} из {week.days} дн., около {week.estimated_kg:.1f} кг смеси. 1 кружка ≈ {per_cup:.2f} кг.</div>
     </div>
+    <label class="fed-cups"><span class="label">Кружек смеси</span>
+      <input name="cups" type="number" min="0.5" max="100" step="0.5" value="{last:g}" placeholder="пусто — по норме"></label>
     <button type="submit">✅ Покормил</button>
   </form>"""
+
+
+def feeding_mix_form(db_path, *, selected_user, auth_token: str, timezone_name: str) -> str:
+    """«Моя смесь»: composition in cups per batch and the cup volume, edited like in the bot."""
+    from app.services.feeding import format_kg
+    from app.web.main import _link
+
+    if selected_user is None or not db_path.exists():
+        return ""
+    service = feeding_service_for(Database(db_path), timezone_name)
+    user = int(selected_user)
+    mix = service.get_mix(user)
+    text = "\n".join(f"{part.name} {part.parts:g}".replace(".", ",") for part in mix)
+    week_rows = "".join(
+        "<tr>"
+        f"<td>{escape(row['name'])}</td>"
+        f"<td>{escape(format_kg(row['used_kg']) if row['used_kg'] else '—')}</td>"
+        f"<td>{escape(format_kg(row['remaining_kg']) if row['remaining_kg'] is not None else 'нет на складе')}</td>"
+        f"<td>{escape(str(row['days_left']) + ' дн.' if row['days_left'] is not None else '—')}</td>"
+        "</tr>"
+        for row in service.ingredients_week(user)
+    )
+    return f"""
+  <h2>Кормление моей смесью</h2>
+  <table>
+    <thead><tr><th>Ингредиент</th><th>Ушло за 7 дней</th><th>На складе</th><th>Хватит</th></tr></thead>
+    <tbody>{week_rows}</tbody>
+  </table>
+  <details>
+    <summary>Состав смеси для «Покормил» (1 кружка ≈ {escape(format_kg(service.mix_kg_per_cup(user)))})</summary>
+    <form class="note" method="post" action="{escape(_link('/feeding/mix', auth_token))}">
+      <input type="hidden" name="user_id" value="{escape(str(selected_user))}">
+      <label class="form-wide"><span class="label">Ингредиент и кружек в замесе, каждый с новой строки</span>
+        <textarea name="mix_text" rows="7" required>{escape(text)}</textarea></label>
+      <label><span class="label">Объём кружки, л</span>
+        <input name="cup_liters" type="number" min="0.05" max="5" step="0.05" value="{service.cup_liters(user):g}"></label>
+      <button type="submit">Сохранить состав</button>
+    </form>
+  </details>"""

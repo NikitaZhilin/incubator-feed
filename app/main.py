@@ -123,6 +123,7 @@ async def main() -> None:
         feeding_service = FeedingService(
             FeedingRepository(database),
             feed_repository,
+            stock=stock_service,
             timezone_name=config.timezone,
         )
         poultry_advisor_service = PoultryAdvisorService(

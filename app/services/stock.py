@@ -290,6 +290,48 @@ class StockService:
                 low.append((ingredient.name, floor(mixes_left)))
         return sorted(low, key=lambda item: item[1])
 
+    def feeding_write_off(
+        self,
+        *,
+        user_id: int,
+        names: tuple[str, ...],
+        amount_kg: float,
+        note: str,
+        now: datetime | None = None,
+    ) -> tuple[StockItem | None, StockTransaction | None, float | None]:
+        """Write off an ingredient given with «Покормил». Missing items are skipped."""
+        item = self._find_stock_item_by_names(user_id=user_id, names=names)
+        if item is None or amount_kg <= 0:
+            return item, None, None
+        # Stamped with the moment of entry like every warehouse operation, so it is
+        # always the latest one for the item.
+        remaining = self.estimate_item(item).remaining_kg
+        balance = max(remaining - amount_kg, 0)
+        transaction = self.stock.add_transaction(
+            user_id=user_id,
+            stock_item_id=item.id,
+            transaction_type="write_off",
+            amount_kg=-amount_kg,
+            balance_after_kg=balance,
+            note=note,
+        )
+        return item, transaction, balance
+
+    def feeding_restore(self, *, user_id: int, stock_item_id: int, amount_kg: float, note: str) -> None:
+        """Undo a «Покормил» write-off."""
+        item = self.stock.get_item(stock_item_id, user_id)
+        if item is None or amount_kg <= 0:
+            return
+        remaining = self.estimate_item(item).remaining_kg
+        self.stock.add_transaction(
+            user_id=user_id,
+            stock_item_id=item.id,
+            transaction_type="manual_adjustment",
+            amount_kg=amount_kg,
+            balance_after_kg=remaining + amount_kg,
+            note=note,
+        )
+
     def best_available_mix_plan(
         self,
         *,

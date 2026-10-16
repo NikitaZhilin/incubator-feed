@@ -23,6 +23,7 @@ MIGRATIONS = (
     "015_stock_mix_already_fed",
     "016_daily_summary_setting",
     "017_feeding_events",
+    "018_feeding_amounts",
 )
 
 

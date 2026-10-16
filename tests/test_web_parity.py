@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from pathlib import Path
 import tempfile
 import unittest
+from urllib.parse import unquote_plus
 
 from fastapi.testclient import TestClient
 
@@ -246,10 +247,28 @@ class WebParityTest(unittest.TestCase):
         self.assertIn("✅ Покормил", page)
         self.assertIn("ещё не отмечено", page)
         self.assertEqual(first.status_code, 303)
-        self.assertIn("1.2", first.headers["location"].replace("%2C", ","))  # 10 hens * 120 g
+        self.assertIn("1,2", unquote_plus(first.headers["location"]))  # 10 hens * 120 g
         self.assertEqual(len(events), 1)  # the second press within 2 minutes is a double tap
         self.assertIn("/feeds", second.headers["location"])
         self.assertIn("✅", self.client.get(f"/feeds{AUTH}").text)
+
+    def test_fed_with_cups_writes_off_ingredients_and_mix_is_editable(self) -> None:
+        stock = StockService(StockRepository(self.database), FeedRepository(self.database))
+        stock.add_purchase(user_id=1, name="Кукуруза", kind="ingredient", amount_kg=40)
+
+        saved = self._post("/feeding/mix", {"mix_text": "Кукуруза 4\nКомбикорм 2", "cup_liters": "1"})
+        fed = self._post("/feeding", {"back": "/feeds", "cups": "3"})
+        corn = next(e for e in stock.list_estimates(1) if e.item.name == "Кукуруза")
+        page = self.client.get(f"/feeds{AUTH}").text
+
+        self.assertIn("сохранён", unquote_plus(saved.headers["location"]))
+        notice = unquote_plus(fed.headers["location"])
+        self.assertIn("3 кр.", notice)
+        self.assertIn("Списано со склада: Кукуруза", notice)
+        # 3 cups, corn is 4 of 6 parts: 2 litres * 0.72 kg = 1.44 kg.
+        self.assertAlmostEqual(corn.remaining_kg, 40 - 1.44, places=2)
+        self.assertIn("Кормление моей смесью", page)
+        self.assertIn("Комбикорм 2", page)
 
     def test_new_pages_require_token(self) -> None:
         self.assertEqual(self.client.get("/advisor").status_code, 401)

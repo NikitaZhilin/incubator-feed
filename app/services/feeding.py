@@ -1,19 +1,29 @@
-"""«Покормил»: a one-tap feeding log with the usual mix.
+"""«Покормил»: a quick feeding log with the usual home mix.
 
-The owner does not weigh every feed. One tap records that the birds were fed;
-how much mix that is comes from the flock's norm (the same norms the bot and
-the site show: hens 120 g, roosters 150 g, mixed 120 g, chicks by age, plus the
-group's reserve). The warehouse is not touched.
+The owner gives the usual mix in cups (1 cup = 1 litre by default). The bot
+splits the cups by the composition of "my mix" (parts per ingredient, like the
+recipe), turns litres into kilograms with each ingredient's bulk density and
+writes off the ingredients that exist in the warehouse. Without an amount the
+flock's daily norm is used (hens 120 g, roosters 150 g, mixed 120 g, chicks by
+age, plus the group's reserve).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.domain import CONTENT
 from app.services.feeds import FeedService
-from app.services.stock import DEFAULT_ADULT_DAILY_G, DEFAULT_HEN_DAILY_G, DEFAULT_ROOSTER_DAILY_G
+from app.services.stock import (
+    DEFAULT_ADULT_DAILY_G,
+    DEFAULT_HEN_DAILY_G,
+    DEFAULT_ROOSTER_DAILY_G,
+    StockService,
+    _normalize_stock_name,
+)
 from app.storage.repositories.feeding import FeedingEvent, FeedingRepository
 from app.storage.repositories.feeds import FeedRepository
 
@@ -22,6 +32,96 @@ from app.storage.repositories.feeds import FeedRepository
 DUPLICATE_WINDOW = timedelta(minutes=2)
 # Evening reminder when nothing was marked during the day.
 FEEDING_REMINDER_TIME = time(19, 0)
+QUICK_CUPS = (3.0, 3.5, 4.0)
+MAX_CUPS = 100
+DEFAULT_DENSITY_KG_PER_L = 0.7
+# The owner's usual mix: the bot recipe without barley and meat-and-bone meal,
+# with the layer grain mix as the grain base. Editable per user.
+DEFAULT_MIX = (
+    ("Кукуруза", 3.5),
+    ("Зерновая смесь для кур несушек", 2.5),
+    ("Комбикорм", 1.5),
+    ("Ракушка", 0.5),
+    ("Рыбная мука", 0.2),
+    ("Премикс", 0.1),
+)
+
+
+def _recipe_catalog() -> dict[str, tuple[str, float, tuple[str, ...]]]:
+    """normalized name/alias -> (canonical name, density, aliases) from the recipe."""
+    recipe = CONTENT["feed_recipes"]["chicken_mix"]
+    entries = list(recipe["ingredients"])
+    for variant in recipe.get("ingredient_variants", {}).values():
+        entries.extend(variant.get("options", []))
+    catalog: dict[str, tuple[str, float, tuple[str, ...]]] = {}
+    for entry in entries:
+        if "density_kg_per_l" not in entry:
+            continue
+        aliases = tuple(str(alias) for alias in entry.get("aliases", []))
+        value = (str(entry["name"]), float(entry["density_kg_per_l"]), aliases)
+        for key in (entry["name"], *aliases):
+            catalog.setdefault(_normalize_stock_name(str(key)), value)
+    return catalog
+
+
+RECIPE_CATALOG = _recipe_catalog()
+
+
+@dataclass(frozen=True)
+class MixPart:
+    name: str
+    parts: float
+    density_kg_per_l: float
+    aliases: tuple[str, ...] = ()
+
+
+def mix_part(name: str, parts: float) -> MixPart:
+    known = RECIPE_CATALOG.get(_normalize_stock_name(name))
+    if known is None:
+        return MixPart(name=name.strip(), parts=parts, density_kg_per_l=DEFAULT_DENSITY_KG_PER_L)
+    canonical, density, aliases = known
+    return MixPart(name=canonical, parts=parts, density_kg_per_l=density, aliases=(name.strip(), *aliases))
+
+
+def parse_mix_text(text: str) -> list[tuple[str, float]]:
+    """«Кукуруза 3,5» per line (or separated by ;) -> [(name, parts)]."""
+    result: list[tuple[str, float]] = []
+    for raw in re.split(r"[\n;]+", text or ""):
+        line = raw.strip().strip("-•").strip()
+        if not line:
+            continue
+        match = re.match(r"^(.*?)[\s:=-]+(\d+(?:[.,]\d+)?)\s*(?:кр\w*|ч\w*)?$", line, flags=re.IGNORECASE)
+        if not match or not match.group(1).strip():
+            raise ValueError(f"Не понял строку «{line}». Пишите так: Кукуруза 3,5")
+        parts = float(match.group(2).replace(",", "."))
+        if parts <= 0 or parts > 50:
+            raise ValueError(f"«{line}»: число кружек должно быть от 0,1 до 50.")
+        result.append((match.group(1).strip()[:60], parts))
+    if not result:
+        raise ValueError("Состав пустой. Пришлите хотя бы один ингредиент, например: Кукуруза 3,5")
+    if len(result) > 15:
+        raise ValueError("Слишком много ингредиентов: не больше 15.")
+    return result
+
+
+def parse_cups(text: str) -> float:
+    cleaned = (text or "").strip().lower().replace(",", ".")
+    cleaned = re.sub(r"\s*(кружк\w*|кр\.?)$", "", cleaned).strip()
+    try:
+        value = float(cleaned)
+    except ValueError as exc:
+        raise ValueError("Нужно число кружек, например 3,5.") from exc
+    if not 0 < value <= MAX_CUPS:
+        raise ValueError(f"Число кружек должно быть от 0,5 до {MAX_CUPS}.")
+    return round(value, 2)
+
+
+@dataclass(frozen=True)
+class GivenIngredient:
+    name: str
+    kg: float
+    in_stock: bool
+    remaining_kg: float | None = None
 
 
 @dataclass(frozen=True)
@@ -35,6 +135,7 @@ class FeedingResult:
     event: FeedingEvent
     duplicate: bool
     feedings_today: int
+    ingredients: tuple[GivenIngredient, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -42,6 +143,7 @@ class FeedingWeek:
     fed_days: int
     days: int
     estimated_kg: float
+    measured_days: int = 0
 
 
 class FeedingService:
@@ -50,11 +152,51 @@ class FeedingService:
         feeding: FeedingRepository,
         feeds: FeedRepository,
         *,
+        stock: StockService | None = None,
         timezone_name: str = "Europe/Moscow",
     ) -> None:
         self.feeding = feeding
         self.feeds = feeds
+        self.stock = stock
         self.timezone_name = timezone_name
+
+    # --- my mix ------------------------------------------------------------
+
+    def get_mix(self, user_id: int) -> list[MixPart]:
+        saved = self.feeding.get_settings(user_id).mix
+        return [mix_part(name, parts) for name, parts in (saved or DEFAULT_MIX)]
+
+    def set_mix(self, user_id: int, parts: list[tuple[str, float]]) -> list[MixPart]:
+        if not parts:
+            raise ValueError("Состав пустой.")
+        self.feeding.save_settings(user_id, mix=[(name, float(value)) for name, value in parts])
+        return self.get_mix(user_id)
+
+    def cup_liters(self, user_id: int) -> float:
+        return self.feeding.get_settings(user_id).cup_liters
+
+    def set_cup_liters(self, user_id: int, liters: float) -> None:
+        if not 0.05 <= liters <= 5:
+            raise ValueError("Объём кружки должен быть от 0,05 до 5 литров.")
+        self.feeding.save_settings(user_id, cup_liters=liters)
+
+    def last_cups(self, user_id: int) -> float | None:
+        return self.feeding.get_settings(user_id).last_cups
+
+    def split_cups(self, user_id: int, cups: float) -> list[tuple[MixPart, float]]:
+        """Cups of the ready mix -> kilograms of each ingredient."""
+        mix = self.get_mix(user_id)
+        total_parts = sum(part.parts for part in mix)
+        liters = cups * self.cup_liters(user_id)
+        if total_parts <= 0:
+            return []
+        return [
+            (part, round(liters * part.parts / total_parts * part.density_kg_per_l, 3))
+            for part in mix
+        ]
+
+    def mix_kg_per_cup(self, user_id: int) -> float:
+        return round(sum(kg for _, kg in self.split_cups(user_id, 1)), 3)
 
     # --- norms -----------------------------------------------------------
 
@@ -80,24 +222,100 @@ class FeedingService:
 
     # --- actions ---------------------------------------------------------
 
-    def record(self, user_id: int, *, now: datetime | None = None) -> FeedingResult:
+    def record(
+        self,
+        user_id: int,
+        *,
+        cups: float | None = None,
+        now: datetime | None = None,
+    ) -> FeedingResult:
         moment = self._utc(now)
         local_date = self._local(moment).date()
         last = self.feeding.last(user_id)
         if last is not None and timedelta(0) <= moment - last.fed_at < DUPLICATE_WINDOW:
-            return FeedingResult(last, True, len(self.events_on(user_id, local_date)))
+            return FeedingResult(
+                last,
+                True,
+                len(self.events_on(user_id, local_date)),
+                self._given_from_items(user_id, last.id),
+            )
+        if cups is not None and not 0 < cups <= MAX_CUPS:
+            raise ValueError(f"Число кружек должно быть от 0,5 до {MAX_CUPS}.")
         norm = self.daily_norm(user_id, on_date=local_date)
+        split = self.split_cups(user_id, cups) if cups else []
         event = self.feeding.add(
             user_id=user_id,
             fed_at=moment,
             fed_date=local_date,
             bird_count=norm.bird_count,
             daily_norm_kg=norm.daily_kg,
+            cups=cups,
+            mix_kg=round(sum(kg for _, kg in split), 3) if split else None,
         )
-        return FeedingResult(event, False, len(self.events_on(user_id, local_date)))
+        given: list[GivenIngredient] = []
+        note = f"Покормил {self._local(moment):%d.%m %H:%M}"
+        for part, kg in split:
+            item = transaction = remaining = None
+            if self.stock is not None:
+                item, transaction, remaining = self.stock.feeding_write_off(
+                    user_id=user_id,
+                    names=(part.name, *part.aliases),
+                    amount_kg=kg,
+                    note=note,
+                    now=moment,
+                )
+            self.feeding.add_item(
+                event_id=event.id,
+                user_id=user_id,
+                name=part.name,
+                kg=kg,
+                stock_item_id=item.id if transaction is not None else None,
+                stock_transaction_id=transaction.id if transaction is not None else None,
+            )
+            given.append(GivenIngredient(part.name, kg, transaction is not None, remaining))
+        if cups:
+            self.feeding.save_settings(user_id, last_cups=cups)
+        return FeedingResult(event, False, len(self.events_on(user_id, local_date)), tuple(given))
 
     def undo(self, user_id: int, event_id: int) -> bool:
+        event = self.feeding.get(event_id, user_id)
+        if event is None:
+            return False
+        if self.stock is not None:
+            for item in self.feeding.items(event_id, user_id):
+                if item.stock_item_id is not None and item.stock_transaction_id is not None:
+                    self.stock.feeding_restore(
+                        user_id=user_id,
+                        stock_item_id=item.stock_item_id,
+                        amount_kg=item.kg,
+                        note=f"Отмена отметки «Покормил» {self.format_time(event)}",
+                    )
         return self.feeding.delete(event_id, user_id)
+
+    def _given_from_items(self, user_id: int, event_id: int) -> tuple[GivenIngredient, ...]:
+        return tuple(
+            GivenIngredient(item.name, item.kg, item.stock_transaction_id is not None)
+            for item in self.feeding.items(event_id, user_id)
+        )
+
+    def ingredients_week(self, user_id: int, *, today: date | None = None, days: int = 7) -> list[dict]:
+        """Ingredient totals over the last days and how long the stock lasts at that pace."""
+        current = today or self.local_now().date()
+        totals = self.feeding.item_totals_between(
+            user_id, start_date=current - timedelta(days=days - 1), end_date=current
+        )
+        rows = []
+        for part in self.get_mix(user_id):
+            used = round(totals.get(part.name, 0.0), 3)
+            remaining = days_left = None
+            if self.stock is not None:
+                item = self.stock._find_stock_item_by_names(user_id=user_id, names=(part.name, *part.aliases))
+                if item is not None:
+                    remaining = round(self.stock.estimate_item(item).remaining_kg, 2)
+                    per_day = used / days
+                    days_left = int(remaining // per_day) if per_day > 0 else None
+            rows.append({"name": part.name, "used_kg": used, "remaining_kg": remaining, "days_left": days_left})
+        return rows
 
     # --- reading ---------------------------------------------------------
 
@@ -112,13 +330,19 @@ class FeedingService:
         events = self.feeding.between(
             user_id, start_date=current - timedelta(days=days - 1), end_date=current
         )
+        # A day with amounts counts what was given; a day of plain taps counts the norm.
         norm_by_day: dict[date, float] = {}
+        given_by_day: dict[date, float] = {}
         for event in events:
             norm_by_day[event.fed_date] = max(norm_by_day.get(event.fed_date, 0.0), event.daily_norm_kg)
+            if event.mix_kg is not None:
+                given_by_day[event.fed_date] = given_by_day.get(event.fed_date, 0.0) + event.mix_kg
+        total = sum(given_by_day.get(day, norm) for day, norm in norm_by_day.items())
         return FeedingWeek(
             fed_days=len(norm_by_day),
             days=days,
-            estimated_kg=round(sum(norm_by_day.values()), 2),
+            estimated_kg=round(total, 2),
+            measured_days=len(given_by_day),
         )
 
     def needs_evening_reminder(self, user_id: int, *, now: datetime | None = None) -> bool:
@@ -162,3 +386,14 @@ def format_feeding_status(service: FeedingService, user_id: int, *, now: datetim
         return "Кормление сегодня: ещё не отмечено."
     times = ", ".join(service.format_time(event) for event in events)
     return f"Кормление сегодня: ✅ {times}."
+
+
+def format_kg(value: float) -> str:
+    if value < 1:
+        return f"{value * 1000:.0f} г"
+    return f"{value:.2f}".rstrip("0").rstrip(".").replace(".", ",") + " кг"
+
+
+def format_cups(value: float) -> str:
+    text = f"{value:g}".replace(".", ",")
+    return f"{text} кр."

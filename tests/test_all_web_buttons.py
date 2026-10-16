@@ -39,6 +39,11 @@ class _PageParser(HTMLParser):
         self.forms: list[dict] = []
         self._form: dict | None = None
         self._select: dict | None = None
+        self._textarea: dict | None = None
+
+    def handle_data(self, data):
+        if self._textarea is not None:
+            self._textarea["value"] += data
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
@@ -60,9 +65,14 @@ class _PageParser(HTMLParser):
                 self._select["value"] = attrs.get("value", "")
         elif self._form is not None and tag == "button":
             self._form["buttons"].append(attrs)
+        elif self._form is not None and tag == "textarea":
+            self._textarea = {"name": attrs.get("name"), "type": "textarea", "value": ""}
 
     def handle_endtag(self, tag):
-        if tag == "select" and self._select is not None and self._form is not None:
+        if tag == "textarea" and self._textarea is not None and self._form is not None:
+            self._form["fields"].append(self._textarea)
+            self._textarea = None
+        elif tag == "select" and self._select is not None and self._form is not None:
             self._form["fields"].append(
                 {"name": self._select["name"], "type": "select", "value": self._select["value"] or ""}
             )
