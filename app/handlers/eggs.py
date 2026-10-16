@@ -171,9 +171,13 @@ async def eggs_multi_day_total(message: Message, state: FSMContext) -> None:
     try:
         total = _parse_whole_number(message.text)
         if total <= 0:
-            raise ValueError
-    except ValueError:
-        await message.answer("Введите целое количество яиц больше нуля.", reply_markup=eggs_cancel_keyboard())
+            raise ValueError("Введите целое количество яиц больше нуля.")
+        EggService._validate_collection_size(total)
+    except ValueError as exc:
+        await message.answer(
+            str(exc) or "Введите целое количество яиц больше нуля.",
+            reply_markup=eggs_cancel_keyboard(),
+        )
         return
     await state.update_data(multi_day_total=total)
     await message.answer(
@@ -208,7 +212,11 @@ async def eggs_multi_day_auto(callback: CallbackQuery, state: FSMContext, egg_se
             today=collection_date,
             use_empty_days=True,
         )
-    except (KeyError, ValueError) as exc:
+    except KeyError:
+        await state.clear()
+        await callback.answer(MULTI_DAY_LOST_TEXT, show_alert=True)
+        return
+    except ValueError as exc:
         await state.set_state(EggMultiDayFlow.days_count)
         await callback.message.answer(
             f"{exc}\n\nВведите количество дней вручную.",
@@ -219,7 +227,13 @@ async def eggs_multi_day_auto(callback: CallbackQuery, state: FSMContext, egg_se
     await _store_multi_day_distribution(state, distribution, auto_period=True)
     await state.set_state(EggMultiDayFlow.confirm)
     await callback.message.answer(
-        _format_multi_day_preview(total, distribution, auto_period=True, collection_date=collection_date),
+        _format_multi_day_preview(
+            total,
+            distribution,
+            auto_period=True,
+            collection_date=collection_date,
+            already_recorded=egg_service.already_recorded(callback.from_user.id, [d for d, _ in distribution]),
+        ),
         reply_markup=egg_multi_day_confirm_keyboard(),
     )
     await callback.answer()
@@ -238,13 +252,23 @@ async def eggs_multi_day_days(message: Message, state: FSMContext, egg_service: 
             days=days,
             today=collection_date,
         )
-    except (KeyError, ValueError) as exc:
+    except KeyError:
+        await state.clear()
+        await message.answer(MULTI_DAY_LOST_TEXT, reply_markup=eggs_menu_keyboard())
+        return
+    except ValueError as exc:
         await message.answer(str(exc), reply_markup=eggs_cancel_keyboard())
         return
     await _store_multi_day_distribution(state, distribution, auto_period=False)
     await state.set_state(EggMultiDayFlow.confirm)
     await message.answer(
-        _format_multi_day_preview(total, distribution, auto_period=False, collection_date=collection_date),
+        _format_multi_day_preview(
+            total,
+            distribution,
+            auto_period=False,
+            collection_date=collection_date,
+            already_recorded=egg_service.already_recorded(message.from_user.id, [d for d, _ in distribution]),
+        ),
         reply_markup=egg_multi_day_confirm_keyboard(),
     )
 
@@ -261,7 +285,12 @@ async def eggs_multi_day_confirm(callback: CallbackQuery, state: FSMContext, egg
             distribution,
             auto_period=bool(data.get("multi_day_auto")),
         )
-    except (KeyError, ValueError) as exc:
+    except KeyError:
+        # Flow already finished (second tap on «Записать») or lost after a restart.
+        await state.clear()
+        await callback.answer(MULTI_DAY_LOST_TEXT, show_alert=True)
+        return
+    except ValueError as exc:
         await callback.message.answer(str(exc), reply_markup=eggs_menu_keyboard())
         await callback.answer()
         return
@@ -590,7 +619,10 @@ def _parse_egg_manual_date(value: str, *, egg_service: EggService) -> date:
         return egg_service.current_date()
     if cleaned in {"вчера", "yesterday"}:
         return egg_service.current_date() - timedelta(days=1)
-    return parse_user_date(value)
+    parsed = parse_user_date(value)
+    if parsed > egg_service.current_date():
+        raise ValueError("Дата сбора не может быть в будущем.")
+    return parsed
 
 
 async def _set_multi_day_collection_date(message: Message, state: FSMContext, collection_date: date) -> None:
@@ -639,6 +671,7 @@ def _format_multi_day_preview(
     *,
     auto_period: bool,
     collection_date: date,
+    already_recorded: dict[date, int] | None = None,
 ) -> str:
     lines = [
         f"Сбор от {collection_date.isoformat()}: распределить {total} яиц за {len(distribution)} дн.:",
@@ -646,7 +679,11 @@ def _format_multi_day_preview(
     ]
     lines.extend(f"{entry_date.isoformat()}: {eggs_count} шт." for entry_date, eggs_count in distribution)
     if auto_period:
-        lines.extend(["", "Период рассчитан по средней яйценоскости и ближайшим пустым дням."])
+        lines.extend(["", "Период рассчитан по средней яйценоскости за последние 30 дней и ближайшим пустым дням."])
+    if already_recorded:
+        lines.extend(["", "⚠️ За эти дни уже есть записи, новые яйца добавятся к ним:"])
+        lines.extend(f"{day.isoformat()}: уже записано {count} шт." for day, count in already_recorded.items())
+        lines.append("Если эти яйца уже учтены, нажмите «Отмена» и укажите меньше дней.")
     lines.extend(["", "Проверьте распределение перед записью."])
     return "\n".join(lines)
 
@@ -788,6 +825,9 @@ def _format_exclusion(exclusion: HenLayingExclusion) -> str:
 
 def _safe_stats(egg_service: EggService, user_id: int) -> EggStats:
     return egg_service.stats(user_id, refresh_weather=False)
+
+
+MULTI_DAY_LOST_TEXT = "Ввод сбора прервался (бот перезапускался или сбор уже записан). Начните заново: Яйца → Добавить яйца."
 
 
 def _parse_whole_number(text: str | None) -> int:

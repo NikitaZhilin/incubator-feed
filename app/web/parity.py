@@ -179,7 +179,18 @@ def register_parity_routes(app: FastAPI, require_web_access) -> None:
             if key in {"user_id", "total_eggs", "collection_date", "days", "mode"}
         )
         period = "рассчитан автоматически по пустым дням" if auto else f"{len(distribution)} дн."
+        existing = service.already_recorded(user_id, [day for day, _ in distribution])
+        warning = ""
+        if existing:
+            items = "".join(
+                f"<li>{escape(day.isoformat())}: уже записано {count} шт.</li>" for day, count in existing.items()
+            )
+            warning = (
+                '<div class="message error">За эти дни уже есть записи, новые яйца добавятся к ним:'
+                f"<ul>{items}</ul>Если эти яйца уже учтены, нажмите «Отмена» и укажите меньше дней.</div>"
+            )
         body = f"""
+  {warning}
   <p>Сбор {total} шт. будет разложен по дням ({escape(period)}):</p>
   <table>
     <thead><tr><th>Дата</th><th>Яиц</th></tr></thead>
