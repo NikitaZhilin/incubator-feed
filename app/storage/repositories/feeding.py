@@ -36,6 +36,7 @@ class FeedingSettings:
     cup_liters: float = 1.0
     mix: tuple[tuple[str, float], ...] | None = None
     last_cups: float | None = None
+    cup_kg: float | None = None
 
 
 class FeedingRepository:
@@ -204,7 +205,7 @@ class FeedingRepository:
     def get_settings(self, user_id: int) -> FeedingSettings:
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT user_id, cup_liters, mix_json, last_cups FROM feeding_settings WHERE user_id = ?",
+                "SELECT user_id, cup_liters, mix_json, last_cups, cup_kg FROM feeding_settings WHERE user_id = ?",
                 (user_id,),
             ).fetchone()
         if row is None:
@@ -220,6 +221,7 @@ class FeedingRepository:
             cup_liters=float(row["cup_liters"] or 1.0),
             mix=mix,
             last_cups=float(row["last_cups"]) if row["last_cups"] is not None else None,
+            cup_kg=float(row["cup_kg"]) if row["cup_kg"] is not None else None,
         )
 
     def save_settings(
@@ -229,20 +231,23 @@ class FeedingRepository:
         cup_liters: float | None = None,
         mix: list[tuple[str, float]] | None = None,
         last_cups: float | None = None,
+        cup_kg: float | None | object = ...,
     ) -> FeedingSettings:
         current = self.get_settings(user_id)
+        next_cup_kg = current.cup_kg if cup_kg is ... else cup_kg
         next_cup = cup_liters if cup_liters is not None else current.cup_liters
         next_mix = mix if mix is not None else (list(current.mix) if current.mix else None)
         next_last = last_cups if last_cups is not None else current.last_cups
         with self.database.connect() as connection:
             connection.execute(
                 """
-                INSERT INTO feeding_settings (user_id, cup_liters, mix_json, last_cups, updated_at)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO feeding_settings (user_id, cup_liters, mix_json, last_cups, cup_kg, updated_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(user_id) DO UPDATE SET
                     cup_liters = excluded.cup_liters,
                     mix_json = excluded.mix_json,
                     last_cups = excluded.last_cups,
+                    cup_kg = excluded.cup_kg,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -250,6 +255,7 @@ class FeedingRepository:
                     next_cup,
                     json.dumps(next_mix, ensure_ascii=False) if next_mix is not None else None,
                     next_last,
+                    next_cup_kg,
                 ),
             )
         return self.get_settings(user_id)

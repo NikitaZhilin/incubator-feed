@@ -256,6 +256,17 @@ class EggRepository:
             ).fetchall()
         return [self._exclusion_from_row(row) for row in rows]
 
+    def set_exclusion_until(self, *, exclusion_id: int, user_id: int, expected_until: date) -> bool:
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE hen_laying_exclusions SET expected_until = ?, updated_at = ?
+                WHERE id = ? AND user_id = ? AND is_active = 1 AND actual_ended_at IS NULL
+                """,
+                (expected_until.isoformat(), datetime.now(timezone.utc).isoformat(), exclusion_id, user_id),
+            )
+        return cursor.rowcount > 0
+
     def finish_exclusion(self, *, exclusion_id: int, user_id: int, ended_at: date) -> bool:
         now = datetime.now(timezone.utc).isoformat()
         with self.database.connect() as connection:

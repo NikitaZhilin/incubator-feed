@@ -11,9 +11,29 @@
 - `app/storage/migrations/*` - последовательные миграции через `schema_migrations`;
 - `app/domain.py` - dataclass-модели домена;
 - `app/content/incubation.json` - версионированный справочный контент инкубации и рецепт смеси;
-- `app/content/help/*.md` - файловые инструкции для кнопок `FAQ`, индексируются в `app/services/help_content.py`.
+- `app/content/help/*.md` - файловые инструкции для кнопок `FAQ`, индексируются в `app/services/help_content.py`;
+- `app/web/*` - сайт на FastAPI: `main.py` (основные страницы), `parity.py` (функции, повторяющие бота), `ledger_pages.py` (потери, продажи, цены), `farm_tools.py` (уход, цыплята, Excel, итоги инкубации), `charts.py` (графики).
 
-В `app/main.py` создаются repositories и services, затем services передаются в aiogram dispatcher через dependency injection.
+В `app/main.py` создаются repositories и services, затем services передаются в aiogram dispatcher через dependency injection (`dispatcher["feeding_service"]`, `["ledger_service"]`, `["care_service"]` и т. д.). Роутеры подключаются в `app/handlers/__init__.py`; `fallback` всегда последний.
+
+Сайт не импортирует aiogram и создаёт сервисы сам на каждый запрос (`feeding_service_for`, `ledger_service_for`), поэтому бот и сайт считают одинаково.
+
+## Модули по функциям
+
+| Функция | Сервис | Хранилище | Бот | Сайт |
+| --- | --- | --- | --- | --- |
+| «✅ Покормил», моя смесь, дни запаса, «Пора докупить» | `services/feeding.py` (`FeedingService.record`, `pace`, `pace_lines`, `buy_reminder_stage`) | `feeding_events`, `feeding_event_items`, `feeding_settings`; списание — `stock_transactions` | `handlers/feeding.py` | `parity.fed_block`, `feeding_mix_form`, `pace_tile` |
+| Потери, продажи яиц, цены, себестоимость | `services/ledger.py` (`LedgerService`) | `bird_losses`, `egg_outflows`, `stock_transactions.price_rub` | `handlers/ledger.py` | `web/ledger_pages.py` |
+| Итоги недели | `services/weekly_report.py` | — | `report:week` в `handlers/ledger.py` | блок на `/advisor` |
+| Падение яйценоскости, свет, подросшие цыплята | `services/insights.py` | — | `handlers/farm_tools.py`, `PoultryAdvisorService` | `/advisor`, `/livestock` |
+| Календарь ухода | `services/care.py` (`CareService`) | `care_tasks` | `handlers/farm_tools.py` | `web/farm_tools.care_block` |
+| Сбор яиц в одно нажатие, заметка к сбору, возраст стада, итоги и причины потерь инкубации | `services/farm_overview.py` | `batch_losses` | `handlers/quick.py`, `handlers/incubation.py` | `/advisor`, `/incubation`, `POST /incubation/losses` |
+| «Не несутся»: группа, «Снова несутся?» | `EggService.create_exclusion`, `stale_exclusions`, `extend_exclusion` | `hen_laying_exclusions` | `handlers/eggs.py` | `/eggs` |
+| Выгрузка в Excel | `services/export.py` (openpyxl) | все таблицы пользователя | `export:xlsx` | `/export.xlsx` |
+| Копии базы | `services/backups.py` (`DailyBackupLoop`) | файлы в `BACKUP_DIR` | `/backup`, `admin:backup` | — |
+| Напоминания и сводка | `services/reminders.py` (`ReminderRunner`) | `notification_log` | — | — |
+
+Все автоматические сообщения перечислены в [NOTIFICATIONS.md](NOTIFICATIONS.md).
 
 ## Notification settings
 
@@ -25,6 +45,9 @@
 - `notify_feed`;
 - `notify_eggs`;
 - `notify_post_hatch_care`;
+- `notify_poultry_advisor`;
+- `notify_daily_summary`;
+- `notify_feeding`;
 - `notify_service`;
 - `is_active`.
 
@@ -62,7 +85,25 @@ MVP использует JSON-источник `app/content/incubation.json`, р
 - `зерносмесь` может заменить пшеницу в зерновой основе;
 - `комбикорм щигровский` считается коммерческим комбикормом.
 
-Выбор пшеница/зерносмесь делается по текущим остаткам склада и максимальному числу полных замесов. Цена и качество ингредиента пока не учитываются.
+Выбор пшеница/зерносмесь делается по текущим остаткам склада и максимальному числу полных замесов. Цена ингредиента на выбор основы не влияет; она используется только в себестоимости.
+
+## Feeding by cups
+
+`FeedingService.record(cups=...)` переводит кружки в килограммы по составу «Моей смеси» (`feeding_settings.mix_json`, плотность каждого ингредиента в кг/л) и объёму кружки. Для ингредиентов, найденных на складе (`StockService._find_stock_item_by_names`, готовая смесь исключается), создаётся `write_off`, отмена отметки возвращает `manual_adjustment`. Списание помечается моментом записи, а не временем кормления, иначе оно попало бы раньше покупки.
+
+Если владелец взвесил кружку (`feeding_settings.cup_kg`, миграция `021_refinements`), `split_cups` масштабирует все ингредиенты так, чтобы кружка весила ровно столько. Смена объёма кружки или состава сбрасывает вес.
+
+`FeedingService.pace()` возвращает фактический расход: если за 14 дней были отметки с кружками, средний расход в день считается за фактические дни с первой отметки (не больше 7), и по каждому ингредиенту — дни до конца остатка. Если `pace()` не `None`, сводка, «Птицевод» и главная страница сайта показывают дни запаса вместо «готовой смеси» и не требуют назначенных стадам смесей.
+
+## Ledger: losses, eggs out, prices
+
+- `LedgerService.record_loss` уменьшает `bird_groups.bird_count` через `FeedService.update_bird_group` (с фиксацией расхода склада); если выбыли все, группа архивируется. `undo_loss` возвращает количество или возвращает группу из архива.
+- `egg_outflows` — продажа/раздача/съели/в инкубатор. Остаток дома считается с первой записи: собрано (`egg_entries`) минус ушло.
+- `price_rub` в `stock_transactions` — цена за всю покупку. Цена за кг по ингредиенту — сумма цен трёх последних покупок, делённая на их вес. Стоимость корма считается по `feeding_event_items`.
+
+## Care calendar
+
+`care_tasks` создаются по умолчанию при первом обращении (`ensure_defaults`, `INSERT OR IGNORE` по `(user_id, code)`) со сроком «сегодня». `mark_done` ставит `next_due = today + interval_days`; `due_for_reminder` возвращает просроченные задачи, по которым не напоминали последние 3 дня.
 
 ## Eggs
 
@@ -77,7 +118,9 @@ MVP использует JSON-источник `app/content/incubation.json`, р
 
 Сбор за несколько дней реализован без новой таблицы: `EggService.preview_multi_day_distribution()` строит распределение по датам, а `record_multi_day_collection()` создает несколько обычных строк `egg_entries`. Ручной период использует указанные `2..30` дней назад от даты фактического сбора, автоматический режим `Не помню период` берет среднее по дням с записями через `average_daily_total()`, считает период как `ceil(total / average)` и выбирает ближайшие пустые дни через `entry_dates_between()` назад от даты фактического сбора.
 
-В Telegram обычный сбор записывает `Сегодня` или `Вчера`, а история позволяет исправить количество и дату записи. Web-слой дополнительно умеет добавить запись за конкретную `entry_date`, отредактировать и удалить ошибочную запись.
+В Telegram обычный сбор записывает `Сегодня` или `Вчера` (кнопки с обычным числом — медиана за 14 дней ±1, `farm_overview.usual_egg_counts`), а история позволяет исправить количество и дату записи.
+
+Падение яйценоскости (`insights.detect_egg_drop`) сравнивает 3 последних полных дня с 14 днями до них только по дням с записями: забытая запись не считается падением. Web-слой дополнительно умеет добавить запись за конкретную `entry_date`, отредактировать и удалить ошибочную запись.
 
 Погодный API подключен через `OpenMeteoWeatherClient` без отдельного ключа. Бот геокодирует город через Open-Meteo, сохраняет координаты, загружает дневную температуру, осадки, состояние погоды, разрез `день/ночь` и краткий прогноз на завтра. Если прогноз Open-Meteo не ответил, бот пробует fallback `wttr.in` по координатам.
 
@@ -87,7 +130,7 @@ MVP использует JSON-источник `app/content/incubation.json`, р
 
 ## Release notices
 
-Обычный деплой не должен слать пользователям сообщение. Решение принимает администратор: после старта бот присылает ему список изменений (`RELEASE_NOTES`) с кнопками `Разослать пользователям` / `Изменить текст` / `Не рассылать` (`app/handlers/admin.py`, `app/keyboards/admin.py`). Ниже описан старый автоматический режим, который остался для ручных деплоев. Текущая версия, документация и changelog доступны в `Настройки -> О боте`. Ссылка на документацию задается через `DOCS_URL` и по умолчанию ведет на каталог `docs/` в GitHub-репозитории.
+Обычный деплой не должен слать пользователям сообщение. Решение принимает администратор: после старта бот присылает ему список изменений (`RELEASE_NOTES`) с кнопками `Разослать пользователям` / `Изменить текст` / `Не рассылать` (`app/handlers/admin.py`, `app/keyboards/admin.py`). Workflow собирает `RELEASE_NOTES` из строк `- ...`, добавленных в `docs/CHANGELOG.md` с прошлого деплоя (коммит прошлого деплоя хранится в `RELEASE_COMMIT` в `.env.prod`). Ниже описан старый автоматический режим, который остался для ручных деплоев. Текущая версия, документация и changelog доступны в `Настройки -> О боте`. Ссылка на документацию задается через `DOCS_URL` и по умолчанию ведет на каталог `docs/` в GitHub-репозитории.
 
 Release notice отправляется только если:
 

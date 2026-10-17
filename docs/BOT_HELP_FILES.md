@@ -8,7 +8,8 @@
 - Для каждой темы задан `title`, кнопка возврата и имя файла.
 - `app/handlers/common.py` вызывает `format_help_topic(topic_key)`.
 - Файл читается из `app/content/help/<filename>` в UTF-8.
-- Если тема добавлена в индекс, но файл отсутствует или пустой, тесты должны это поймать.
+- Если тема добавлена в индекс, но файл отсутствует или пустой, тесты это ловят.
+- Те же тексты показывает сайт на странице `/help`.
 
 ## Текущие темы
 
@@ -17,21 +18,25 @@
 | `faq:main` | `main.md` | главное меню |
 | `faq:poultry_advisor` | `poultry_advisor.md` | раздел `Птицевод` |
 | `faq:incubation` | `incubation.md` | инкубация |
-| `faq:feeds` | `feeds.md` | корма |
+| `faq:feeds` | `feeds.md` | корма, «Покормил», дни запаса, «Пора докупить» |
 | `faq:stock` | `stock.md` | склад |
 | `faq:mix` | `mix.md` | смесь и режимы замеса |
 | `faq:stock_history` | `stock_history.md` | история склада |
-| `faq:livestock` | `livestock.md` | поголовье и стада |
+| `faq:livestock` | `livestock.md` | поголовье, роли, стада, падёж, уход |
 | `faq:bird_groups` | `bird_groups.md` | группы поголовья |
 | `faq:flocks` | `flocks.md` | стада |
 | `faq:flock_card` | `flock_card.md` | карточка стада |
 | `faq:feed_card` | `feed_card.md` | старая карточка корма |
 | `faq:feed_history` | `feed_history.md` | история старой карточки корма |
 | `faq:feed_stats` | `feed_stats.md` | расчеты кормов |
-| `faq:eggs` | `eggs.md` | яйца |
+| `faq:eggs` | `eggs.md` | яйца, сбор в одно нажатие, продажи, итоги недели |
 | `faq:egg_history` | `egg_history.md` | история яиц |
 | `faq:egg_exclusions` | `egg_exclusions.md` | временно не несущиеся куры |
 | `faq:egg_weather` | `egg_weather.md` | город и погода |
+| `faq:care` | `care.md` | календарь ухода |
+| `faq:egg_sales` | `egg_sales.md` | продажа и раздача яиц |
+| `faq:cost` | `cost.md` | себестоимость |
+| `faq:losses` | `losses.md` | падёж и выбраковка |
 | `faq:settings` | `settings.md` | настройки |
 | `faq:settings_sections` | `settings_sections.md` | разделы и уведомления |
 
@@ -41,7 +46,8 @@
 2. Добавить тему в `HELP_TOPICS` в `app/services/help_content.py`.
 3. Добавить кнопку `FAQ` или callback `faq:<topic>` в нужную клавиатуру.
 4. Обновить эту таблицу.
-5. Запустить `python -B -m pytest tests/test_handlers_helpers.py -q`.
+5. Если тема про новую функцию — обновить `main.md` и связанные темы, `docs/USER_COMMANDS.md` и, если появились уведомления, `docs/NOTIFICATIONS.md`.
+6. Запустить `python -B -m pytest tests/test_handlers_helpers.py -q`.
 
 ## Правила текста
 

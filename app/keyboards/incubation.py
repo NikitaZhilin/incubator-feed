@@ -93,6 +93,7 @@ def batch_actions_keyboard(batch_id: int, is_active: bool = True) -> InlineKeybo
         ]
     else:
         rows = [
+            [InlineKeyboardButton(text="📝 Почему не вывелись", callback_data=f"batch_losses:{batch_id}")],
             [InlineKeyboardButton(text="Вернуть в активные", callback_data=f"batch_reopen:{batch_id}")],
             [InlineKeyboardButton(text="⬅️ К инкубации", callback_data="menu:incubation")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],

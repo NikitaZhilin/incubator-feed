@@ -116,6 +116,7 @@ class ReminderRunner:
         await self._send_grown_chick_alerts(now)
         await self._send_care_reminders(now)
         await self._send_egg_entry_reminders(now)
+        await self._send_exclusion_checks(now)
 
     async def _send_incubation_reminders(self, now: datetime) -> None:
         due_by_user = defaultdict(list)
@@ -397,6 +398,53 @@ class ReminderRunner:
                 user_id=user_id, event_key=event_key, kind="egg_drop", local_now=local_now,
                 text=text, markup=egg_drop_keyboard(), now=now,
             )
+
+    async def _send_exclusion_checks(self, now: datetime) -> None:
+        """«Не несутся» whose end passed (or a month without an end): ask if the hens lay again."""
+        if self.users is None or self.egg_service is None:
+            return
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+        from app.services.eggs import EXCLUSION_REASON_LABELS
+
+        for settings in self.users.list_users_with_settings():
+            user_id = int(settings["user_id"])
+            if not _settings_allow_notification(settings, "notify_eggs", now):
+                continue
+            local_now = _local_now_for_settings(settings, now)
+            today = local_now.date()
+            try:
+                stale = self.egg_service.stale_exclusions(user_id, today=today)
+            except Exception:
+                logger.exception("Failed to check exclusions for user %s", user_id)
+                continue
+            year, week, _ = today.isocalendar()
+            for item in stale:
+                reason = EXCLUSION_REASON_LABELS.get(item.reason, item.reason)
+                group = f" из «{item.bird_group_name}»" if item.bird_group_name else ""
+                when = (
+                    f"срок {item.expected_until.strftime('%d.%m')} прошёл"
+                    if item.expected_until
+                    else f"с {item.started_at.strftime('%d.%m')} без даты окончания"
+                )
+                markup = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="✅ Снова несутся", callback_data=f"eggs:exclude_finish:{item.id}")],
+                        [InlineKeyboardButton(text="⏳ Ещё нет, +7 дн.", callback_data=f"eggs:exclude_extend:{item.id}")],
+                    ]
+                )
+                await self._send_simple(
+                    user_id=user_id,
+                    event_key=f"exclusion_check:{item.id}:{year}-W{week:02d}",
+                    kind="eggs",
+                    local_now=local_now,
+                    text=(
+                        f"🐔 {item.hens_count} кур{group} не учитываются в яйцах ({reason}), {when}.\n"
+                        "Они снова несутся?"
+                    ),
+                    markup=markup,
+                    now=now,
+                )
 
     async def _send_egg_entry_reminders(self, now: datetime) -> None:
         """20:00: today's collection is not recorded yet; one tap records the usual number."""

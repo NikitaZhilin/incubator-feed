@@ -1145,9 +1145,12 @@ async def _send_stats(callback: CallbackQuery, incubation_service: IncubationSer
     )
     from app.services.farm_overview import incubation_results_lines
 
+    from app.services.farm_overview import load_batch_losses
+
     details = incubation_results_lines(
         incubation_service.batches.list_all_for_user(callback.from_user.id),
         {code: profile.title for code, profile in PROFILES.items()},
+        load_batch_losses(incubation_service.batches.database, callback.from_user.id),
     )
     await _answer_callback_message(
         callback,

@@ -2,8 +2,8 @@
 
 This project supports two deployment paths:
 
-- automatic GitHub Actions deployment on every push to `main`;
-- manual deployment from this workstation with `scripts/deploy-vps.ps1`.
+- automatic GitHub Actions deployment on every push to `main` (normally a merged pull request);
+- manual deployment from a workstation with `scripts/deploy-vps.ps1`.
 
 Secrets must never be committed. Keep the Telegram token only in GitHub
 Secrets and/or in the VPS `.env.prod` file.
@@ -147,18 +147,33 @@ docker run --rm --env-file .env.prod \
 
 ## What reaches users after deploy
 
-Regular push to `main` deploys code to the VPS but should not distract users.
-The bot updates `Настройки -> О боте` with version, GitHub/documentation/changelog links,
-deploy time and release notes. The documentation link is controlled by `DOCS_URL`.
+Nothing is sent to users automatically. After the bot starts, every admin from
+`ADMIN_IDS` gets the list of changes with three buttons:
 
-Use a user-visible release notice only for changes that users should see
-immediately:
+- `Разослать пользователям` — shows a preview with the number of recipients, then sends;
+- `Изменить текст` — edit the list before sending;
+- `Не рассылать` — keep the update silent.
 
-- `medium` - short "bot was updated and restarted" message plus main menu;
-- `major` - detailed release notes plus main menu;
-- `critical` - urgent detailed notice plus main menu.
+The list is built by the workflow from the `- ...` lines added to
+`docs/CHANGELOG.md` since the previously deployed commit (`RELEASE_COMMIT` in
+`.env.prod` on the VPS). If the changelog was not touched, commit subjects are
+used. A manual workflow run can override the text with the `release_notes` input.
+So every user-visible change should add a short line in plain Russian to the top
+section of `docs/CHANGELOG.md`.
 
-Minor changes should stay available only inside `Настройки -> О боте`.
+The version, deploy time and notes are always visible in `Настройки -> О боте`.
+
+## Pipeline
+
+- Pull request to `main`: tests only (`test` job). Failed tests are printed as
+  `::error::` annotations; the button crawlers' report (`button_report.txt`) is
+  printed as a `::notice::` annotation with the number of bot buttons pressed and
+  site forms submitted.
+- Push to `main` (a merged PR): tests, then `deploy` — update the code on the VPS,
+  pre-deploy backup, migrations, Docker image build, web container, Caddy (HTTPS)
+  or ngrok fallback, bot container. The deploy also stops and removes old systemd
+  services from the pre-Docker setup if they are still installed and reports it as
+  a `::notice::` annotation (`Old systemd units removed: ...`).
 
 ## Admin startup notice
 

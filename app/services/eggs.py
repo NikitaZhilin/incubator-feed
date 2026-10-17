@@ -308,6 +308,7 @@ class EggService:
         reason: str,
         started_at: date | None = None,
         expected_until: date | None = None,
+        bird_group_id: int | None = None,
     ) -> HenLayingExclusion:
         if hens_count <= 0:
             raise ValueError("Количество кур должно быть больше нуля.")
@@ -319,13 +320,50 @@ class EggService:
             raise ValueError(f"В поголовье сейчас {total_hens} несушек. Укажите число не больше этого.")
         if expected_until is not None and expected_until < current_date:
             raise ValueError("Дата окончания не может быть раньше начала.")
+        if bird_group_id is None:
+            groups = self.laying_groups(user_id)
+            if len(groups) == 1:
+                bird_group_id = groups[0].id
+        if bird_group_id is not None:
+            group = self.feeds.get_bird_group(bird_group_id, user_id)
+            if group is None or not group.is_active or group.role != "hens":
+                raise ValueError("Группа несушек не найдена.")
+            if hens_count > group.bird_count:
+                raise ValueError(f"В группе «{group.name}» {group.bird_count} несушек.")
         return self.eggs.create_exclusion(
             user_id=user_id,
             hens_count=hens_count,
             reason=reason,
             started_at=current_date,
             expected_until=expected_until,
+            bird_group_id=bird_group_id,
         )
+
+    def laying_groups(self, user_id: int) -> list:
+        return [
+            group
+            for group in self.feeds.list_bird_groups(user_id)
+            if group.is_active and group.group_kind == "adult" and group.role == "hens"
+        ]
+
+    def extend_exclusion(self, *, user_id: int, exclusion_id: int, days: int = 7) -> HenLayingExclusion | None:
+        """«Ещё не несутся»: move the expected end a week ahead of today."""
+        current = next((item for item in self.list_open_exclusions(user_id) if item.id == exclusion_id), None)
+        if current is None:
+            return None
+        self.eggs.set_exclusion_until(
+            exclusion_id=exclusion_id, user_id=user_id, expected_until=self.current_date() + timedelta(days=days)
+        )
+        return next((item for item in self.list_open_exclusions(user_id) if item.id == exclusion_id), None)
+
+    def stale_exclusions(self, user_id: int, *, today: date, undated_after_days: int = 30) -> list[HenLayingExclusion]:
+        """Open exclusions whose end has passed, or without an end for a month: ask if the hens lay again."""
+        return [
+            item
+            for item in self.list_open_exclusions(user_id)
+            if (item.expected_until is not None and item.expected_until < today)
+            or (item.expected_until is None and (today - item.started_at).days >= undated_after_days)
+        ]
 
     def list_open_exclusions(self, user_id: int) -> list[HenLayingExclusion]:
         return self.eggs.list_open_exclusions(user_id)

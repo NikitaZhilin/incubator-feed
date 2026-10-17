@@ -138,9 +138,18 @@ def _sheets(database: Database, user_id: int, zone: ZoneInfo) -> list[tuple[str,
                 r["hatched_count"],
                 (r["hatched_count"] / r["eggs_count"]) if r["hatched_count"] is not None and r["eggs_count"] else None,
                 "идёт" if r["is_active"] else "завершена",
+                r["infertile"],
+                r["dead_embryo"],
+                r["not_hatched"],
                 r["note"] or "",
             ]
-            for r in rows("SELECT * FROM incubation_batches WHERE user_id = ? ORDER BY start_date, id")
+            for r in rows(
+                """
+                SELECT b.*, l.infertile, l.dead_embryo, l.not_hatched
+                FROM incubation_batches AS b LEFT JOIN batch_losses AS l ON l.batch_id = b.id
+                WHERE b.user_id = ? ORDER BY b.start_date, b.id
+                """
+            )
         ]
         care = [
             [r["title"], r["interval_days"], _day(r["last_done"]), _day(r["next_due"]), "да" if r["is_active"] else "нет"]
@@ -160,7 +169,8 @@ def _sheets(database: Database, user_id: int, zone: ZoneInfo) -> list[tuple[str,
         ("Поголовье", ["Группа", "Роль", "Птиц", "Вид", "Дата вывода", "Дата подсадки", "Активна"], groups),
         (
             "Инкубация",
-            ["Партия", "Вид", "Яиц заложено", "Дата закладки", "Вывелось", "Выводимость", "Статус", "Комментарий"],
+            ["Партия", "Вид", "Яиц заложено", "Дата закладки", "Вывелось", "Выводимость", "Статус",
+             "Неоплод", "Замершие", "Не вылупились", "Комментарий"],
             batches,
         ),
         ("Уход", ["Задача", "Каждые, дн.", "Последний раз", "Следующий раз", "Включено"], care),

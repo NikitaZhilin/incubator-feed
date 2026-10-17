@@ -116,15 +116,16 @@ class HandlerHelpersTest(unittest.TestCase):
         main_text = format_faq("main")
         main_callbacks = _keyboard_callbacks(faq_keyboard("main"))
 
-        self.assertIn("Корма - раздел для учета склада", main_text)
-        self.assertIn("Яйца - раздел для ежедневного учета", main_text)
+        self.assertIn("✅ Покормил", main_text)
+        self.assertIn("🥚 Собрал яйца", main_text)
+        self.assertIn("Корма — склад", main_text)
         self.assertEqual(main_callbacks.count("menu:home"), 1)
 
         feeds_text = format_faq("feeds")
-        self.assertIn("что сейчас лежит на складе", feeds_text)
+        self.assertIn("что лежит на складе", feeds_text)
         self.assertIn("Добавить корм", feeds_text)
-        self.assertIn("добавляет покупку в складские остатки", feeds_text)
-        self.assertIn("сначала добавляются группы птиц", feeds_text)
+        self.assertIn("Пора докупить", feeds_text)
+        self.assertIn("Себестоимость", feeds_text)
         self.assertNotIn("Раздел объединяет склад", feeds_text)
 
         text = format_faq("mix")
@@ -157,9 +158,17 @@ class HandlerHelpersTest(unittest.TestCase):
         self.assertIn("общий итог за этот день", egg_history_text)
 
         livestock_text = format_faq("livestock")
-        self.assertIn("Поголовье - это отдельные группы птиц", livestock_text)
-        self.assertIn("Стада - это наборы групп поголовья", livestock_text)
-        self.assertIn("сначала создайте поголовье", livestock_text)
+        self.assertIn("Поголовье — группы птиц", livestock_text)
+        self.assertIn("Стада — группы, которые едят одну готовую смесь", livestock_text)
+        self.assertIn("Падёж", livestock_text)
+
+        for topic, phrase in (
+            ("care", "Сделал"),
+            ("egg_sales", "Продал"),
+            ("cost", "трём последним покупкам"),
+            ("losses", "Падёж"),
+        ):
+            self.assertIn(phrase, format_faq(topic))
 
         flocks_text = format_faq("flocks")
         self.assertIn("назначьте стаду готовую", flocks_text)

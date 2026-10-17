@@ -125,7 +125,7 @@ async def eggs_count(message: Message, state: FSMContext, egg_service: EggServic
         f"Дата: {entry.entry_date.isoformat()}\n"
         f"Яиц: {entry.eggs_count}\n"
         f"Несушек в расчете: {entry.active_hens_count} из {entry.total_hens_count}",
-        reply_markup=eggs_menu_keyboard(),
+        reply_markup=_recorded_keyboard(entry.id),
     )
 
 
@@ -451,18 +451,43 @@ async def eggs_exclude_start(callback: CallbackQuery, state: FSMContext) -> None
 
 
 @router.callback_query(F.data.startswith("eggs:exclude_reason:"))
-async def eggs_exclude_reason(callback: CallbackQuery, state: FSMContext) -> None:
+async def eggs_exclude_reason(callback: CallbackQuery, state: FSMContext, egg_service: EggService) -> None:
     reason = str(callback.data).split(":", 2)[2]
     if reason not in EXCLUSION_REASON_LABELS:
         await callback.answer("Причина не найдена", show_alert=True)
         return
-    await state.update_data(reason=reason)
-    await state.set_state(EggExclusionFlow.count)
-    await callback.message.answer(
-        "Сколько несушек временно не несется?",
-        reply_markup=eggs_cancel_keyboard(),
-    )
+    await state.update_data(reason=reason, bird_group_id=None)
+    groups = egg_service.laying_groups(callback.from_user.id)
     await callback.answer()
+    if len(groups) > 1:
+        rows = [
+            [InlineKeyboardButton(text=f"{group.name[:28]} ({group.bird_count})", callback_data=f"eggs:exclude_group:{group.id}")]
+            for group in groups
+        ]
+        rows.append([InlineKeyboardButton(text="Не важно из какой", callback_data="eggs:exclude_group:any")])
+        rows.append([InlineKeyboardButton(text="Отмена", callback_data="eggs:menu")])
+        await callback.message.answer("Из какой группы эти куры?", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+        return
+    if groups:
+        await state.update_data(bird_group_id=groups[0].id)
+    await _ask_exclusion_count(callback.message, state)
+
+
+async def _ask_exclusion_count(target: Message, state: FSMContext) -> None:
+    await state.set_state(EggExclusionFlow.count)
+    await target.answer("Сколько несушек временно не несется?", reply_markup=eggs_cancel_keyboard())
+
+
+@router.callback_query(F.data.startswith("eggs:exclude_group:"))
+async def eggs_exclude_group(callback: CallbackQuery, state: FSMContext) -> None:
+    raw = str(callback.data).rsplit(":", 1)[1]
+    data = await state.get_data()
+    if "reason" not in data:
+        await callback.answer("Начните заново: «Не несутся» → «Добавить».", show_alert=True)
+        return
+    await state.update_data(bird_group_id=int(raw) if raw.isdigit() else None)
+    await callback.answer()
+    await _ask_exclusion_count(callback.message, state)
 
 
 @router.message(EggExclusionFlow.count)
@@ -476,10 +501,43 @@ async def eggs_exclude_count(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(hens_count=count)
     await state.set_state(EggExclusionFlow.expected_until)
+    quick = [
+        InlineKeyboardButton(text="2 недели", callback_data="eggs:exclude_until:14"),
+        InlineKeyboardButton(text="Месяц", callback_data="eggs:exclude_until:30"),
+        InlineKeyboardButton(text="Не знаю", callback_data="eggs:exclude_until:none"),
+    ]
     await message.answer(
         "До какой даты не учитывать их в яйценоскости?\n\n"
-        f"Формат: {DATE_FORMAT_HINT}. Если дата пока неизвестна, отправьте 0.",
-        reply_markup=eggs_cancel_keyboard(),
+        f"Нажмите вариант или напишите дату ({DATE_FORMAT_HINT}). Когда срок пройдёт, бот спросит, несутся ли они снова.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[quick, *eggs_cancel_keyboard().inline_keyboard]),
+    )
+
+
+@router.callback_query(EggExclusionFlow.expected_until, F.data.startswith("eggs:exclude_until:"))
+async def eggs_exclude_until_button(callback: CallbackQuery, state: FSMContext, egg_service: EggService) -> None:
+    raw = str(callback.data).rsplit(":", 1)[1]
+    expected_until = egg_service.current_date() + timedelta(days=int(raw)) if raw.isdigit() else None
+    await callback.answer()
+    await _create_exclusion(callback.message, state, egg_service, callback.from_user.id, expected_until)
+
+
+async def _create_exclusion(target: Message, state: FSMContext, egg_service: EggService, user_id: int, expected_until) -> None:
+    data = await state.get_data()
+    try:
+        exclusion = egg_service.create_exclusion(
+            user_id=user_id,
+            hens_count=int(data["hens_count"]),
+            reason=str(data["reason"]),
+            expected_until=expected_until,
+            bird_group_id=data.get("bird_group_id"),
+        )
+    except (KeyError, ValueError) as exc:
+        await target.answer(str(exc) or "Начните заново.", reply_markup=eggs_cancel_keyboard())
+        return
+    await state.clear()
+    await target.answer(
+        "Исключение добавлено.\n\n" + _format_exclusion(exclusion),
+        reply_markup=exclusions_keyboard(egg_service.list_open_exclusions(user_id)),
     )
 
 
@@ -488,20 +546,23 @@ async def eggs_exclude_until(message: Message, state: FSMContext, egg_service: E
     raw = (message.text or "").strip()
     try:
         expected_until = None if raw in {"0", "-", "нет", "не знаю"} else parse_user_date(raw)
-        data = await state.get_data()
-        exclusion = egg_service.create_exclusion(
-            user_id=message.from_user.id,
-            hens_count=int(data["hens_count"]),
-            reason=str(data["reason"]),
-            expected_until=expected_until,
-        )
     except ValueError as exc:
         await message.answer(str(exc), reply_markup=eggs_cancel_keyboard())
         return
-    await state.clear()
-    await message.answer(
-        "Исключение добавлено.\n\n" + _format_exclusion(exclusion),
-        reply_markup=exclusions_keyboard(egg_service.list_open_exclusions(message.from_user.id)),
+    await _create_exclusion(message, state, egg_service, message.from_user.id, expected_until)
+
+
+@router.callback_query(F.data.startswith("eggs:exclude_extend:"))
+async def eggs_exclude_extend(callback: CallbackQuery, egg_service: EggService) -> None:
+    raw = str(callback.data).rsplit(":", 1)[1]
+    exclusion = egg_service.extend_exclusion(user_id=callback.from_user.id, exclusion_id=int(raw)) if raw.isdigit() else None
+    if exclusion is None:
+        await callback.answer("Исключение уже закрыто.", show_alert=True)
+        return
+    await callback.answer("Продлено на неделю")
+    await callback.message.answer(
+        "Хорошо, ещё неделю не учитываю их в яйценоскости.\n\n" + _format_exclusion(exclusion),
+        reply_markup=exclusions_keyboard(egg_service.list_open_exclusions(callback.from_user.id)),
     )
 
 
@@ -825,10 +886,17 @@ def _round_forecast(value: float) -> int:
     return int(value + 0.5)
 
 
+def _recorded_keyboard(entry_id: int):
+    from app.handlers.quick import recorded_keyboard
+
+    return recorded_keyboard(entry_id)
+
+
 def _format_exclusion(exclusion: HenLayingExclusion) -> str:
     reason = EXCLUSION_REASON_LABELS.get(exclusion.reason, exclusion.reason)
-    until = f" до {exclusion.expected_until.isoformat()}" if exclusion.expected_until else " без даты окончания"
-    return f"#{exclusion.id}: {exclusion.hens_count} кур., {reason}{until}"
+    until = f" до {exclusion.expected_until.strftime('%d.%m.%Y')}" if exclusion.expected_until else " без даты окончания"
+    group = f" («{exclusion.bird_group_name}»)" if exclusion.bird_group_name else ""
+    return f"#{exclusion.id}: {exclusion.hens_count} кур.{group}, {reason}{until}"
 
 
 def _safe_stats(egg_service: EggService, user_id: int) -> EggStats:
