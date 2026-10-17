@@ -320,6 +320,10 @@ class EggService:
             raise ValueError(f"В поголовье сейчас {total_hens} несушек. Укажите число не больше этого.")
         if expected_until is not None and expected_until < current_date:
             raise ValueError("Дата окончания не может быть раньше начала.")
+        if bird_group_id is None:
+            groups = self.laying_groups(user_id)
+            if len(groups) == 1:
+                bird_group_id = groups[0].id
         if bird_group_id is not None:
             group = self.feeds.get_bird_group(bird_group_id, user_id)
             if group is None or not group.is_active or group.role != "hens":
