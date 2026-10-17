@@ -54,7 +54,7 @@ HOME = ("🏠 Главное меню", "menu:home")
 def livestock_back_keyboard(undo: str | None = None) -> InlineKeyboardMarkup:
     rows = [[("↩️ Отменить запись", undo)]] if undo else []
     rows += [
-        [("📉 Потери", "ledger:losses")],
+        [("📉 Потери", "ledger:losses"), ("❓ FAQ", "faq:losses")],
         [("⬅️ Поголовье и стада", "feeds:livestock")],
         [HOME],
     ]
@@ -65,7 +65,7 @@ def eggs_out_back_keyboard(undo: str | None = None) -> InlineKeyboardMarkup:
     rows = [[("↩️ Отменить запись", undo)]] if undo else []
     rows += [
         [("📤 Ещё запись", "ledger:out"), ("💰 Продажи", "ledger:out_list")],
-        [("⬅️ К яйцам", "eggs:menu")],
+        [("❓ FAQ", "faq:egg_sales"), ("⬅️ К яйцам", "eggs:menu")],
         [HOME],
     ]
     return _kb(rows)
@@ -218,7 +218,7 @@ async def losses_list(callback: CallbackQuery, state: FSMContext, ledger_service
         )
     rows = [[("➖ Падёж / выбыло", "ledger:loss")]]
     rows += [[(f"↩️ Отменить {loss.occurred_on.strftime('%d.%m')} −{loss.count}", f"ledger:loss_undo:{loss.id}")] for loss in recent[:3]]
-    rows += [[("⬅️ Поголовье и стада", "feeds:livestock")], [HOME]]
+    rows += [[("❓ FAQ", "faq:losses")], [("⬅️ Поголовье и стада", "feeds:livestock")], [HOME]]
     await callback.message.answer("\n".join(lines), reply_markup=_kb(rows))
 
 
@@ -462,5 +462,7 @@ async def cost_view(callback: CallbackQuery, state: FSMContext, ledger_service: 
     lines.extend(["", "Цену можно указать сразу после внесения покупки — кнопка «💰 Указать цену»."])
     await callback.message.answer(
         "\n".join(lines),
-        reply_markup=_kb([[("➕ Добавить покупку", "stock:purchase")], [("⬅️ К кормам", "feeds:menu")], [HOME]]),
+        reply_markup=_kb(
+            [[("➕ Добавить покупку", "stock:purchase")], [("❓ FAQ", "faq:cost"), ("⬅️ К кормам", "feeds:menu")], [HOME]]
+        ),
     )

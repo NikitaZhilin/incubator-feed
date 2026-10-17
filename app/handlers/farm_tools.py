@@ -61,6 +61,7 @@ def care_keyboard(tasks, *, settings: bool = False) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(text="⬅️ К уходу", callback_data="care:menu")])
     else:
         rows.append([InlineKeyboardButton(text="⚙️ Сроки и включение", callback_data="care:settings")])
+        rows.append([InlineKeyboardButton(text="❓ FAQ", callback_data="faq:care")])
         rows.append([InlineKeyboardButton(text="⬅️ К птицеводу", callback_data="advisor:menu")])
     rows.append(HOME)
     return InlineKeyboardMarkup(inline_keyboard=rows)

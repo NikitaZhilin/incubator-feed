@@ -32,6 +32,10 @@ HELP_TOPICS: dict[str, HelpTopic] = {
     "egg_history": HelpTopic("FAQ: история яиц", "К яйцам", "eggs:menu", "egg_history.md"),
     "egg_exclusions": HelpTopic("FAQ: не несутся", "К яйцам", "eggs:exclusions", "egg_exclusions.md"),
     "egg_weather": HelpTopic("FAQ: город и погода", "К погоде", "eggs:weather", "egg_weather.md"),
+    "care": HelpTopic("FAQ: уход за птицей", "К уходу", "care:menu", "care.md"),
+    "egg_sales": HelpTopic("FAQ: продажа и раздача яиц", "К продажам", "ledger:out_list", "egg_sales.md"),
+    "cost": HelpTopic("FAQ: себестоимость", "К себестоимости", "ledger:cost", "cost.md"),
+    "losses": HelpTopic("FAQ: падёж и выбраковка", "К потерям", "ledger:losses", "losses.md"),
     "settings": HelpTopic("FAQ: настройки", "Настройки", "settings:menu", "settings.md"),
     "settings_sections": HelpTopic(
         "FAQ: разделы и уведомления",

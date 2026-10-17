@@ -38,6 +38,12 @@ docker compose logs -f --tail=100 bot
 7. `Яйца`: добавить сбор, открыть расчеты, историю, добавить и завершить исключение несушки.
 8. `Настройки -> Разделы и уведомления`: выключить/включить раздел и проверить главное меню.
 9. `Настройки -> О боте`: версия, последний запуск, последний деплой, GitHub, документация и changelog.
+10. Главное меню: `✅ Покормил` (кружки, отмена), `🥚 Собрал яйца` (кнопка с числом), `📤 Продал / отдал`, `🗓 Уход` (`✅`, `⏰ +3 дн.`).
+11. `Корма -> 💰 Себестоимость`, `Поголовье и стада -> ➖ Падёж / выбыло` и отмена, `🏷 Роль`, `📅 Год вывода`.
+12. `Птицевод`: `💡 Свет зимой`, `🐔 Возраст стада и замена`, `Мало яиц`.
+13. `Настройки -> 📥 Выгрузить всё в Excel` и `/backup` (администратор).
+
+Автоматически это делает CI: `tests/test_all_buttons.py` нажимает все кнопки бота на заполненной базе, `tests/test_all_web_buttons.py` открывает все ссылки и отправляет все формы сайта. Итог виден в аннотациях проверки `test` на GitHub.
 
 ## Disk monitoring
 
@@ -131,47 +137,35 @@ python -B scripts/web_app.py
 Для активного Telegram-бота после получения ngrok URL нужно прописать его в
 `WEB_PUBLIC_URL` и перезапустить bot-процесс.
 
-Публичный endpoint:
+Публичный адрес без токена: `GET /health`.
 
-- `GET /health`
+Остальные адреса требуют `?auth=<WEB_LINK_TOKEN>` (так открывают кнопки бота) или заголовок `Authorization: Bearer <WEB_ADMIN_TOKEN>` / `X-Web-Token: <WEB_ADMIN_TOKEN>`. Если не задан ни один токен, страницы возвращают `503`. Формы отправляют `POST` и после действия перенаправляют обратно с сообщением `notice` или `error`.
 
-Закрытые endpoints требуют `Authorization: Bearer <WEB_ADMIN_TOKEN>` или
-`X-Web-Token: <WEB_ADMIN_TOKEN>`:
+Страницы (`GET`):
 
-- `GET /` - HTML-сводка;
-- `GET /feeds` - HTML-страница кормов и склада;
-- `GET /feeds/data` - JSON для страницы кормов и склада;
-- `POST /stock/purchases` - добавление покупки на склад;
-- `GET /mix` - HTML-страница формулы смеси, доступных замесов и истории готовой смеси;
-- `GET /mix/data` - JSON для страницы смеси;
-- `GET /mix/confirm` - HTML-подтверждение замеса перед списанием ингредиентов;
-- `POST /feeds/mixes` - создание замеса, списание ингредиентов и добавление готовой смеси;
-- `GET /livestock` - HTML-страница поголовья, стад, состава стад и назначенной смеси;
-- `GET /livestock/data` - JSON для страницы поголовья и стад;
-- `POST /bird-groups` - добавление группы поголовья;
-- `PATCH /bird-groups/{id}` - редактирование группы поголовья;
-- `POST /flocks` - создание стада из групп поголовья;
-- `PATCH /flocks/{id}` - редактирование стада и его состава;
-- `POST /flock-feed-assignments` - назначение готовой смеси стаду;
-- `GET /eggs` - HTML-страница учета яиц, прогноза, исключений несушек и погоды;
-- `GET /eggs/data` - JSON для страницы яиц;
-- `POST /eggs/entries` - добавление одиночной записи сбора яиц за сегодня, вчера или выбранную дату;
-- `POST /settings/weather` - изменение города погоды;
-- `GET /incubation` - HTML-страница активных и завершенных партий инкубации;
-- `GET /incubation/data` - JSON для страницы инкубации;
-- `GET /about` - HTML-страница версии, деплоя, ссылок, настроек и runtime-статуса;
-- `GET /about/data` - JSON для страницы `О боте`;
-- `GET /status` - JSON-статус на базе read-only status probe;
-- `GET /summary` - JSON-сводка хозяйства: яйца, корма, стада, инкубация;
-- `GET /version` - версия, окружение, commit и ссылки;
-- `PATCH /settings/sections` - включение и выключение разделов Telegram-бота.
+- `/` — сводка, «✅ Покормил» с отменой, плитки хозяйства;
+- `/feeds` — корма и склад, «Кормление моей смесью», себестоимость и цены покупок;
+- `/mix`, `/mix/confirm` — смесь и подтверждение замеса;
+- `/livestock` — поголовье, стада, цыплята → взрослые, падёж и выбраковка, календарь ухода;
+- `/eggs`, `/eggs/multi-day` — яйца, сбор за несколько дней (предпросмотр), продажа и раздача;
+- `/incubation` — партии, история, итоги инкубации, справочник;
+- `/charts?days=30|90` — графики яиц, расхода смеси и продаж;
+- `/advisor` — птицевод: план, итоги недели, свет зимой, возраст стада и др.;
+- `/help?topic=...` — FAQ (те же тексты, что в боте);
+- `/about` — версия, настройки хозяйства и разделов, выгрузка в Excel;
+- `/export.xlsx` — файл со всеми данными;
+- JSON: `/feeds/data`, `/mix/data`, `/livestock/data`, `/eggs/data`, `/incubation/data`, `/about/data`, `/summary`, `/status`, `/version`.
 
-Если не задан ни `WEB_ADMIN_TOKEN`, ни `WEB_LINK_TOKEN`, обычные закрытые
-web-страницы возвращают `503`.
-Для обычных web-страниц заготовлена авторизация по ссылке: если задан
-`WEB_LINK_TOKEN`, страницы `/`, `/feeds`, `/feeds/data`, `/mix`, `/mix/data`,
-`/summary`, `/status`, `/livestock`, `/livestock/data`, `/bird-groups`, `/flocks`, `/flock-feed-assignments`, `/eggs`, `/eggs/data`,
-`/settings/weather`, `/settings/sections`, `/incubation`, `/incubation/data`, `/about`, `/about/data` и `/version` можно открыть с `?auth=<WEB_LINK_TOKEN>`.
+Действия (`POST`):
+
+- кормление: `/feeding`, `/feeding/{id}/undo`, `/feeding/mix`;
+- склад и смесь: `/stock/purchases` (с необязательной `price_rub`), `/stock/items/{id}/adjust`, `/feeds/mixes`, `/feeds/mixes/already-fed`, `/ledger/purchases/{id}/price`;
+- поголовье и стада: `/bird-groups`, `/bird-groups/{id}`, `/bird-groups/{id}/archive`, `/bird-groups/{id}/grow`, `/flocks`, `/flocks/{id}`, `/flocks/{id}/archive`, `/flock-feed-assignments`, `/feeding-assignments`;
+- потери: `/ledger/losses`, `/ledger/losses/{id}/undo`;
+- уход: `/care/{id}/done|snooze|toggle|interval`;
+- яйца: `/eggs/entries`, `/eggs/entries/{id}`, `/eggs/entries/{id}/delete`, `/eggs/multi-day`, `/eggs/exclusions`, `/eggs/exclusions/{id}/finish`, `/eggs/weather/refresh`, `/ledger/eggs-out`, `/ledger/eggs-out/{id}/undo`;
+- инкубация: `/incubation/batches`, `/incubation/batches/{id}/edit`, `/incubation/batches/{id}/complete`, `/incubation/batches/{id}/reopen`;
+- настройки: `/settings/profile`, `/settings/sections`, `/settings/weather`.
 
 ## Rollback
 
@@ -180,6 +174,10 @@ web-страницы возвращают `503`.
 3. Восстановить БД из бэкапа, если новая версия успела изменить данные некорректно.
 4. Запустить `smoke_start.py`.
 5. Запустить сервис и проверить логи.
+
+## Backups
+
+Копия базы делается раз в сутки и раз в неделю отправляется администраторам в Telegram (`.db.gz`). Свежая копия — `/backup`. Подробно: [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
 
 ## Admin failure notification
 
