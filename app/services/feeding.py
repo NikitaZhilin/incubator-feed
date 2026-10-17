@@ -206,7 +206,11 @@ class FeedingService:
     def set_mix(self, user_id: int, parts: list[tuple[str, float]]) -> list[MixPart]:
         if not parts:
             raise ValueError("Состав пустой.")
-        self.feeding.save_settings(user_id, mix=[(name, float(value)) for name, value in parts])
+        new_mix = [(name, float(value)) for name, value in parts]
+        current = self.feeding.get_settings(user_id).mix
+        if current is None or list(current) != new_mix:
+            # A weighed cup belongs to the old composition.
+            self.feeding.save_settings(user_id, mix=new_mix, cup_kg=None)
         return self.get_mix(user_id)
 
     def cup_liters(self, user_id: int) -> float:
@@ -215,13 +219,41 @@ class FeedingService:
     def set_cup_liters(self, user_id: int, liters: float) -> None:
         if not 0.05 <= liters <= 5:
             raise ValueError("Объём кружки должен быть от 0,05 до 5 литров.")
-        self.feeding.save_settings(user_id, cup_liters=liters)
+        if abs(liters - self.cup_liters(user_id)) > 1e-9:
+            # Another cup: its weight has to be measured again.
+            self.feeding.save_settings(user_id, cup_liters=liters, cup_kg=None)
+
+    def cup_kg(self, user_id: int) -> float | None:
+        """Weighed cup of the ready mix, if the owner set it."""
+        return self.feeding.get_settings(user_id).cup_kg
+
+    def set_cup_kg(self, user_id: int, kg: float | None) -> None:
+        """Weight of one cup of the ready mix, from the kitchen scale; None returns to the estimate."""
+        if kg is not None and not 0.05 <= kg <= 5:
+            raise ValueError("Вес кружки должен быть от 0,05 до 5 кг.")
+        self.feeding.save_settings(user_id, cup_kg=kg)
+
+    def estimated_cup_kg(self, user_id: int) -> float:
+        return round(sum(kg for _, kg in self._split_by_density(user_id, 1)), 3)
 
     def last_cups(self, user_id: int) -> float | None:
         return self.feeding.get_settings(user_id).last_cups
 
     def split_cups(self, user_id: int, cups: float) -> list[tuple[MixPart, float]]:
-        """Cups of the ready mix -> kilograms of each ingredient."""
+        """Cups of the ready mix -> kilograms of each ingredient.
+
+        Volumes come from the composition; if the owner weighed a cup, every
+        ingredient is scaled so that one cup weighs exactly that.
+        """
+        split = self._split_by_density(user_id, cups)
+        weighed = self.cup_kg(user_id)
+        estimate = sum(kg for _, kg in self._split_by_density(user_id, 1))
+        if not weighed or estimate <= 0:
+            return split
+        factor = weighed / estimate
+        return [(part, round(kg * factor, 3)) for part, kg in split]
+
+    def _split_by_density(self, user_id: int, cups: float) -> list[tuple[MixPart, float]]:
         mix = self.get_mix(user_id)
         total_parts = sum(part.parts for part in mix)
         liters = cups * self.cup_liters(user_id)
@@ -526,3 +558,22 @@ def format_buy_reminder(items: list[IngredientPace], pace: FeedPace, today: date
         "После покупки внесите её на склад — напоминание сбросится.",
     ])
     return "\n".join(lines)
+
+
+def parse_cup_weight(text: str) -> float | None:
+    """'780 г', '0,78', '0.78 кг' -> kg; '0' or 'сброс' -> None (back to the estimate)."""
+    raw = (text or "").strip().lower().replace(",", ".")
+    if raw in {"0", "сброс", "сбросить", "нет"}:
+        return None
+    kilograms = raw.endswith("кг")
+    grams = not kilograms and raw.endswith(("г", "гр", "грамм"))
+    number = raw.replace("кг", "").replace("грамм", "").replace("гр", "").replace("г", "").strip()
+    try:
+        value = float(number)
+    except ValueError:
+        raise ValueError("Напишите вес кружки, например 780 г или 0,78 кг.") from None
+    if grams or (not kilograms and value > 5):
+        value = value / 1000
+    if not 0.05 <= value <= 5:
+        raise ValueError("Вес кружки должен быть от 50 г до 5 кг.")
+    return round(value, 3)

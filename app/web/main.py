@@ -2487,7 +2487,7 @@ def _render_eggs_page(config: WebConfig, payload: dict, *, auth_token: str = "")
     </label>
     <button type="submit">Добавить запись</button>
   </form>
-  {eggs_extra_forms(selected_user=selected_user, auth_token=auth_token, today_value=today_value)}
+  {eggs_extra_forms(selected_user=selected_user, auth_token=auth_token, today_value=today_value, db_path=config.db_path)}
   {eggs_out_block(config.db_path, selected_user=selected_user, auth_token=auth_token, timezone_name=config.timezone_name)}
 
   <h2>Погода</h2>
@@ -2616,7 +2616,7 @@ def _render_incubation_page(config: WebConfig, payload: dict, *, auth_token: str
     </thead>
     <tbody>{completed_rows}</tbody>
   </table>
-  {incubation_results_block(config.db_path, selected_user=selected_user)}
+  {incubation_results_block(config.db_path, selected_user=selected_user, auth_token=auth_token)}
 
   {incubation_reference()}
 </main>

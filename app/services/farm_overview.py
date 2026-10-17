@@ -125,7 +125,86 @@ def batch_results(batches) -> list[BatchResult]:
     ]
 
 
-def incubation_results_lines(batches, species_titles: dict[str, str]) -> list[str]:
+# --- why eggs did not hatch ---------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BatchLosses:
+    infertile: int
+    dead_embryo: int
+    not_hatched: int
+
+    @property
+    def total(self) -> int:
+        return self.infertile + self.dead_embryo + self.not_hatched
+
+
+def parse_batch_losses(text: str) -> BatchLosses:
+    numbers = [part for part in (text or "").replace(",", " ").replace(";", " ").split() if part]
+    if len(numbers) != 3 or not all(part.isdigit() for part in numbers):
+        raise ValueError("Нужно три числа через пробел: неоплод, замершие, не вылупились. Например: 3 2 1")
+    return BatchLosses(*(int(part) for part in numbers))
+
+
+def save_batch_losses(database, *, user_id: int, batch, losses: BatchLosses) -> None:
+    if batch.is_active or batch.hatched_count is None:
+        raise ValueError("Сначала завершите вывод и укажите, сколько вывелось.")
+    left = batch.eggs_count - batch.hatched_count
+    if losses.total > left:
+        raise ValueError(f"Не вывелось {left} из {batch.eggs_count}: сумма не может быть больше.")
+    with database.connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO batch_losses (batch_id, user_id, infertile, dead_embryo, not_hatched, updated_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(batch_id) DO UPDATE SET
+                infertile = excluded.infertile,
+                dead_embryo = excluded.dead_embryo,
+                not_hatched = excluded.not_hatched,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (batch.id, user_id, losses.infertile, losses.dead_embryo, losses.not_hatched),
+        )
+
+
+def load_batch_losses(database, user_id: int) -> dict[int, BatchLosses]:
+    with database.connect() as connection:
+        rows = connection.execute(
+            "SELECT batch_id, infertile, dead_embryo, not_hatched FROM batch_losses WHERE user_id = ?", (user_id,)
+        ).fetchall()
+    return {int(r["batch_id"]): BatchLosses(int(r["infertile"]), int(r["dead_embryo"]), int(r["not_hatched"])) for r in rows}
+
+
+LOSS_ADVICE = (
+    ("infertile", "неоплод", "больше всего неоплода: проверьте петуха (возраст, активность, 1 петух на 8–12 кур) и свежесть яиц"),
+    ("dead_embryo", "замершие", "больше всего замерших: проверьте точность термометра, перепады температуры, переворот и хранение яиц до закладки"),
+    ("not_hatched", "не вылупились", "больше всего не вылупившихся: обычно мала влажность на выводе или не хватает вентиляции в последние 3 дня"),
+)
+
+
+def losses_lines(batches, losses: dict[int, BatchLosses]) -> list[str]:
+    rows = [(b, losses[b.id]) for b in batches if b.id in losses]
+    if not rows:
+        return []
+    eggs = sum(b.eggs_count for b, _ in rows)
+    totals = {
+        "infertile": sum(l.infertile for _, l in rows),
+        "dead_embryo": sum(l.dead_embryo for _, l in rows),
+        "not_hatched": sum(l.not_hatched for _, l in rows),
+    }
+    lines = [
+        "",
+        f"Почему не вывелись (по {len(rows)} парт., {eggs} яиц): "
+        f"неоплод {totals['infertile']}, замершие {totals['dead_embryo']}, не вылупились {totals['not_hatched']}.",
+    ]
+    if sum(totals.values()):
+        key = max(totals, key=totals.get)
+        advice = next(text for code, _, text in LOSS_ADVICE if code == key)
+        lines.append(f"Главная потеря — {advice}.")
+    return lines
+
+
+def incubation_results_lines(batches, species_titles: dict[str, str], losses: dict[int, BatchLosses] | None = None) -> list[str]:
     results = batch_results(batches)
     if not results:
         return ["Завершённых партий с числом выведенных пока нет: при завершении партии укажите, сколько вывелось."]
@@ -152,6 +231,9 @@ def incubation_results_lines(batches, species_titles: dict[str, str]) -> list[st
                     "Сравните их: свежесть яиц, температура и влажность, переворот, сезон.",
                 ]
             )
+    lines.extend(losses_lines(batches, losses or {}))
+    if not losses:
+        lines.extend(["", "Укажите у завершённых партий, почему не вывелись («📝 Почему не вывелись») — бот подскажет, что проверить."])
     lines.extend(
         [
             "",

@@ -24,6 +24,7 @@ class FeedingFlow(StatesGroup):
     cups = State()
     mix = State()
     cup_size = State()
+    cup_weight = State()
 
 
 def cups_keyboard(last_cups: float | None) -> InlineKeyboardMarkup:
@@ -53,7 +54,10 @@ def mix_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="✏️ Изменить состав", callback_data="feeding:mix_edit")],
-            [InlineKeyboardButton(text="📏 Объём кружки", callback_data="feeding:cup_size")],
+            [
+                InlineKeyboardButton(text="📏 Объём кружки", callback_data="feeding:cup_size"),
+                InlineKeyboardButton(text="⚖️ Вес кружки", callback_data="feeding:cup_weight"),
+            ],
             [InlineKeyboardButton(text="✅ Покормил", callback_data="feeding:done")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
         ]
@@ -73,7 +77,12 @@ def format_mix(service: FeedingService, user_id: int) -> str:
         [
             "",
             f"Всего в замесе: {_num(total)} кр.",
-            f"1 кружка готовой смеси ≈ {format_kg(service.mix_kg_per_cup(user_id))}.",
+            (
+                f"1 кружка готовой смеси = {format_kg(service.mix_kg_per_cup(user_id))} (взвешено)."
+                if service.cup_kg(user_id)
+                else f"1 кружка готовой смеси ≈ {format_kg(service.mix_kg_per_cup(user_id))} (расчёт по составу). "
+                "Для точности взвесьте одну кружку — «⚖️ Вес кружки»."
+            ),
         ]
     )
     return "\n".join(lines)
@@ -239,3 +248,34 @@ async def feeding_cup_size_text(message: Message, state: FSMContext, feeding_ser
         "Объём кружки сохранён.\n\n" + format_mix(feeding_service, message.from_user.id),
         reply_markup=mix_keyboard(),
     )
+
+
+@router.callback_query(F.data == "feeding:cup_weight")
+async def feeding_cup_weight(callback: CallbackQuery, state: FSMContext, feeding_service: FeedingService) -> None:
+    await state.set_state(FeedingFlow.cup_weight)
+    await callback.answer()
+    estimate = format_kg(feeding_service.estimated_cup_kg(callback.from_user.id))
+    await callback.message.answer(
+        "Насыпьте полную кружку готовой смеси и взвесьте (без кружки). Сколько получилось? "
+        f"Например 780 г или 0,78.\n\nСейчас по расчёту ≈ {estimate}. Чтобы вернуться к расчёту, отправьте 0.\n\n"
+        "Отмена: /cancel"
+    )
+
+
+@router.message(FeedingFlow.cup_weight)
+async def feeding_cup_weight_text(message: Message, state: FSMContext, feeding_service: FeedingService) -> None:
+    from app.services.feeding import parse_cup_weight
+
+    try:
+        kg = parse_cup_weight(message.text or "")
+        feeding_service.set_cup_kg(message.from_user.id, kg)
+    except ValueError as exc:
+        await message.answer(f"{exc}\n\nОтмена: /cancel")
+        return
+    await state.clear()
+    head = (
+        "Вес кружки сохранён: теперь кружки пересчитываются в килограммы по нему — и списание, и дни запаса, и себестоимость."
+        if kg
+        else "Вернул расчёт веса кружки по составу смеси."
+    )
+    await message.answer(head + "\n\n" + format_mix(feeding_service, message.from_user.id), reply_markup=mix_keyboard())

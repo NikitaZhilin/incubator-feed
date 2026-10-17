@@ -348,8 +348,25 @@ def _format_admin_stats(admin_service: AdminService) -> str:
         f"- {row['created_at']} {row['source']}: {row['message']}"
         for row in stats.recent_errors
     ) or "- нет"
+    config = getattr(admin_service, "config", None)
+    release = ""
+    if config is not None and getattr(config, "release_version", ""):
+        release = (
+            f"Версия: {config.release_version}"
+            + (f", commit {config.release_commit[:12]}" if getattr(config, "release_commit", "") else "")
+            + (f", деплой {config.release_deployed_at}" if getattr(config, "release_deployed_at", "") else "")
+            + "\n"
+        )
+    records = "\n".join(
+        f"- {label}: {'—' if value is None else value}" for label, value in (stats.records_30d or {}).items()
+    ) or "- нет данных"
+    top = "\n".join(f"- {name}: {count}" for name, count in (stats.top_events_7d or [])) or "- нет"
     return (
         "Админ-панель\n\n"
+        + release
+        + f"Последняя копия базы: {stats.last_backup or 'нет'}\n\n"
+        f"Записано за 30 дней:\n{records}\n\n"
+        f"Частые действия за 7 дней:\n{top}\n\n"
         f"Пользователей: {stats.total_users}\n"
         f"Активных пользователей: {stats.active_users}\n"
         f"Активных партий: {stats.active_batches}\n"
@@ -358,5 +375,5 @@ def _format_admin_stats(admin_service: AdminService) -> str:
         f"Свободно на диске: {stats.free_disk_mb} МБ\n\n"
         f"Последние регистрации:\n{recent_users}\n\n"
         f"Последние критические ошибки:\n{recent_errors}\n\n"
-        "Команды: /admin_export, /admin_broadcast текст"
+        "Команды: /backup, /admin_export, /admin_broadcast текст"
     )

@@ -101,6 +101,31 @@ def register_farm_tool_routes(app: FastAPI, require_web_access) -> None:
             notice="Цыплята переведены во взрослых: " + ", ".join(f"{g.name} — {g.bird_count}" for g in created) + ".",
         )
 
+    @app.post("/incubation/losses", dependencies=access)
+    async def save_losses(request: Request, auth: str | None = Query(default=None)):
+        from app.services.farm_overview import BatchLosses, save_batch_losses
+        from app.storage.repositories.batches import BatchRepository
+
+        form, _, user_id, failed = await _context(request, auth, "Сохранение")
+        base = web._link("/incubation", auth or "")
+        if failed:
+            return failed
+        database = Database(app.state.web_config.db_path)
+        try:
+            values = []
+            for field in ("batch_id", "infertile", "dead_embryo", "not_hatched"):
+                raw = form.get(field, "0").strip() or "0"
+                if not raw.isdigit():
+                    raise ValueError("Нужны целые числа от нуля.")
+                values.append(int(raw))
+            batch = BatchRepository(database).get(values[0], user_id)
+            if batch is None:
+                raise ValueError("Партия не найдена.")
+            save_batch_losses(database, user_id=user_id, batch=batch, losses=BatchLosses(*values[1:]))
+        except ValueError as exc:
+            return web._redirect_with_message(base, error=str(exc))
+        return web._redirect_with_message(base, notice=f"Сохранено для «{batch.title}».")
+
     @app.get("/export.xlsx", dependencies=access)
     async def export_xlsx(auth: str | None = Query(default=None), user_id: int | None = Query(default=None)):
         from app.services.export import build_farm_workbook, export_filename
@@ -193,23 +218,44 @@ def chick_grow_forms(db_path, *, selected_user, auth_token: str, timezone_name: 
     return "\n  <h2>Цыплята → взрослые</h2>\n  <p class=\"small\">С 16 недель молодняк ест и живёт как взрослые: переведите группу, и учёт яиц с нормой корма станут точными.</p>" + "".join(forms)
 
 
-def incubation_results_block(db_path, *, selected_user) -> str:
+def incubation_results_block(db_path, *, selected_user, auth_token: str = "") -> str:
     """Hatch rate by species and the batch-to-batch comparison, like «Статистика» in the bot."""
     from app.domain import PROFILES
-    from app.services.farm_overview import incubation_results_lines
+    from app.services.farm_overview import incubation_results_lines, load_batch_losses
     from app.storage.repositories.batches import BatchRepository
+    from app.web.main import _link
 
     if selected_user is None or not db_path.exists():
         return ""
-    lines = incubation_results_lines(
-        BatchRepository(Database(db_path)).list_all_for_user(int(selected_user)),
-        {code: profile.title for code, profile in PROFILES.items()},
-    )
+    database = Database(db_path)
+    batches = BatchRepository(database).list_all_for_user(int(selected_user))
+    losses = load_batch_losses(database, int(selected_user))
+    lines = incubation_results_lines(batches, {code: profile.title for code, profile in PROFILES.items()}, losses)
     items = "".join(
         f"<li>{escape(line.removeprefix('- '))}</li>" if line.startswith("- ") else
         (f"<p class=\"small\">{escape(line)}</p>" if line else "")
         for line in lines
     )
+    finished = [b for b in batches if not b.is_active and b.hatched_count is not None]
+    form = ""
+    if finished:
+        options = "".join(
+            f'<option value="{b.id}">{escape(b.title)} — не вывелось {b.eggs_count - b.hatched_count}'
+            f'{" (заполнено)" if b.id in losses else ""}</option>'
+            for b in sorted(finished, key=lambda b: b.start_date, reverse=True)
+        )
+        form = f"""
+  <details>
+    <summary>Почему не вывелись</summary>
+    <form class="note" method="post" action="{escape(_link('/incubation/losses', auth_token))}">
+      {_hidden_user(selected_user)}
+      <label><span class="label">Партия</span><select name="batch_id">{options}</select></label>
+      <label><span class="label">Неоплод</span><input name="infertile" type="number" min="0" step="1" value="0"></label>
+      <label><span class="label">Замершие</span><input name="dead_embryo" type="number" min="0" step="1" value="0"></label>
+      <label><span class="label">Не вылупились</span><input name="not_hatched" type="number" min="0" step="1" value="0"></label>
+      <button type="submit">Сохранить</button>
+    </form>
+  </details>"""
     return f"""
   <h2>Итоги инкубации</h2>
-  <div class="note"><ul class="note">{items}</ul></div>"""
+  <div class="note"><ul class="note">{items}</ul></div>{form}"""

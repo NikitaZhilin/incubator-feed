@@ -26,6 +26,7 @@ MIGRATIONS = (
     "018_feeding_amounts",
     "019_farm_ledger",
     "020_care_tasks",
+    "021_refinements",
 )
 
 

@@ -109,6 +109,7 @@ def register_parity_routes(app: FastAPI, require_web_access) -> None:
             hens_count = _parse_int(form.get("hens_count", ""), "Количество кур")
             started_at = _optional_date(form.get("started_at", ""), "Дата начала")
             expected_until = _optional_date(form.get("expected_until", ""), "Ожидаемая дата окончания")
+            raw_group = form.get("bird_group_id", "").strip()
             service = _egg_service(Database(app.state.web_config.db_path))
             service.create_exclusion(
                 user_id=user_id,
@@ -116,6 +117,7 @@ def register_parity_routes(app: FastAPI, require_web_access) -> None:
                 reason=form.get("reason", "other"),
                 started_at=started_at,
                 expected_until=expected_until,
+                bird_group_id=int(raw_group) if raw_group.isdigit() else None,
             )
         except ValueError as exc:
             return web._redirect_with_message(redirect_base, error=str(exc))
@@ -396,6 +398,11 @@ def register_parity_routes(app: FastAPI, require_web_access) -> None:
             raw_cup = form.get("cup_liters", "").strip().replace(",", ".")
             if raw_cup:
                 service.set_cup_liters(user_id, float(raw_cup))
+            if "cup_weight" in form:
+                from app.services.feeding import parse_cup_weight
+
+                raw_weight = form.get("cup_weight", "").strip()
+                service.set_cup_kg(user_id, parse_cup_weight(raw_weight) if raw_weight else None)
         except ValueError as exc:
             return web._redirect_with_message(redirect_base, error=str(exc))
         return web._redirect_with_message(redirect_base, notice="Состав смеси для «Покормил» сохранён.")
@@ -553,7 +560,25 @@ def _weekly_report_text(database: Database, user_id: int, timezone_name: str) ->
     )
 
 
-def eggs_extra_forms(*, selected_user, auth_token: str, today_value: str) -> str:
+def _laying_group_select(db_path, selected_user) -> str:
+    """Group choice for «не несутся» when the farm has more than one laying group."""
+    if db_path is None or selected_user is None or not db_path.exists():
+        return ""
+    groups = [
+        group
+        for group in FeedService(FeedRepository(Database(db_path))).list_bird_groups(int(selected_user))
+        if group.is_active and group.group_kind == "adult" and group.role == "hens"
+    ]
+    if len(groups) < 2:
+        value = groups[0].id if groups else ""
+        return f'<input type="hidden" name="bird_group_id" value="{value}">'
+    options = '<option value="">не важно</option>' + "".join(
+        f'<option value="{group.id}">{escape(group.name)} ({group.bird_count})</option>' for group in groups
+    )
+    return f'<label><span class="label">Группа</span><select name="bird_group_id">{options}</select></label>'
+
+
+def eggs_extra_forms(*, selected_user, auth_token: str, today_value: str, db_path=None) -> str:
     from app.web.main import _link
 
     user = escape(str(selected_user or ""))
@@ -588,6 +613,7 @@ def eggs_extra_forms(*, selected_user, auth_token: str, today_value: str) -> str
       <label><span class="label">Сколько кур</span>
         <input name="hens_count" type="number" min="1" step="1" required></label>
       <label><span class="label">Причина</span><select name="reason">{reason_options}</select></label>
+      {_laying_group_select(db_path, selected_user)}
       <label><span class="label">С какого дня</span>
         <input name="started_at" type="date" value="{escape(today_value)}"></label>
       <label><span class="label">Ожидаемо до</span>
@@ -920,13 +946,15 @@ def feeding_mix_form(db_path, *, selected_user, auth_token: str, timezone_name: 
     <tbody>{week_rows}</tbody>
   </table>
   <details>
-    <summary>Состав смеси для «Покормил» (1 кружка ≈ {escape(format_kg(service.mix_kg_per_cup(user)))})</summary>
+    <summary>Состав смеси для «Покормил» (1 кружка {"=" if service.cup_kg(user) else "≈"} {escape(format_kg(service.mix_kg_per_cup(user)))}{" — взвешено" if service.cup_kg(user) else ""})</summary>
     <form class="note" method="post" action="{escape(_link('/feeding/mix', auth_token))}">
       <input type="hidden" name="user_id" value="{escape(str(selected_user))}">
       <label class="form-wide"><span class="label">Ингредиент и кружек в замесе, каждый с новой строки</span>
         <textarea name="mix_text" rows="7" required>{escape(text)}</textarea></label>
       <label><span class="label">Объём кружки, л</span>
         <input name="cup_liters" type="number" min="0.05" max="5" step="0.05" value="{service.cup_liters(user):g}"></label>
+      <label><span class="label">Вес полной кружки смеси, г (пусто — расчёт ≈ {round(service.estimated_cup_kg(user) * 1000)} г)</span>
+        <input name="cup_weight" type="text" inputmode="decimal" maxlength="12" value="{'' if not service.cup_kg(user) else f'{round(service.cup_kg(user) * 1000)} г'}" placeholder="например 780 г"></label>
       <button type="submit">Сохранить состав</button>
     </form>
   </details>"""

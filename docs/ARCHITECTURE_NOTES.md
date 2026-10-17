@@ -27,7 +27,8 @@
 | Итоги недели | `services/weekly_report.py` | — | `report:week` в `handlers/ledger.py` | блок на `/advisor` |
 | Падение яйценоскости, свет, подросшие цыплята | `services/insights.py` | — | `handlers/farm_tools.py`, `PoultryAdvisorService` | `/advisor`, `/livestock` |
 | Календарь ухода | `services/care.py` (`CareService`) | `care_tasks` | `handlers/farm_tools.py` | `web/farm_tools.care_block` |
-| Сбор яиц в одно нажатие, возраст стада, итоги инкубации | `services/farm_overview.py` | — | `handlers/quick.py`, `handlers/incubation.py` | `/advisor`, `/incubation` |
+| Сбор яиц в одно нажатие, заметка к сбору, возраст стада, итоги и причины потерь инкубации | `services/farm_overview.py` | `batch_losses` | `handlers/quick.py`, `handlers/incubation.py` | `/advisor`, `/incubation`, `POST /incubation/losses` |
+| «Не несутся»: группа, «Снова несутся?» | `EggService.create_exclusion`, `stale_exclusions`, `extend_exclusion` | `hen_laying_exclusions` | `handlers/eggs.py` | `/eggs` |
 | Выгрузка в Excel | `services/export.py` (openpyxl) | все таблицы пользователя | `export:xlsx` | `/export.xlsx` |
 | Копии базы | `services/backups.py` (`DailyBackupLoop`) | файлы в `BACKUP_DIR` | `/backup`, `admin:backup` | — |
 | Напоминания и сводка | `services/reminders.py` (`ReminderRunner`) | `notification_log` | — | — |
@@ -89,6 +90,8 @@ MVP использует JSON-источник `app/content/incubation.json`, р
 ## Feeding by cups
 
 `FeedingService.record(cups=...)` переводит кружки в килограммы по составу «Моей смеси» (`feeding_settings.mix_json`, плотность каждого ингредиента в кг/л) и объёму кружки. Для ингредиентов, найденных на складе (`StockService._find_stock_item_by_names`, готовая смесь исключается), создаётся `write_off`, отмена отметки возвращает `manual_adjustment`. Списание помечается моментом записи, а не временем кормления, иначе оно попало бы раньше покупки.
+
+Если владелец взвесил кружку (`feeding_settings.cup_kg`, миграция `021_refinements`), `split_cups` масштабирует все ингредиенты так, чтобы кружка весила ровно столько. Смена объёма кружки или состава сбрасывает вес.
 
 `FeedingService.pace()` возвращает фактический расход: если за 14 дней были отметки с кружками, средний расход в день считается за фактические дни с первой отметки (не больше 7), и по каждому ингредиенту — дни до конца остатка. Если `pace()` не `None`, сводка, «Птицевод» и главная страница сайта показывают дни запаса вместо «готовой смеси» и не требуют назначенных стадам смесей.
 

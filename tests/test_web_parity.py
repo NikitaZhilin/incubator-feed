@@ -364,6 +364,32 @@ class WebParityTest(unittest.TestCase):
         self.assertIn("Свет зимой", advisor)
         self.assertEqual(self.client.get("/export.xlsx").status_code, 401)
 
+    def test_cup_weight_losses_and_exclusion_group_on_site(self) -> None:
+        from app.services.feeding import FeedingService
+        from app.storage.repositories.feeding import FeedingRepository
+
+        saved = self._post("/feeding/mix", {"mix_text": "Кукуруза 4\nКомбикорм 2", "cup_liters": "1", "cup_weight": "800 г"})
+        feeding = FeedingService(FeedingRepository(self.database), FeedRepository(self.database))
+        self.assertIn("notice=", saved.headers["location"])
+        self.assertAlmostEqual(feeding.mix_kg_per_cup(1), 0.8, places=2)
+        self.assertIn("взвешено", self.client.get(f"/feeds{AUTH}").text)
+
+        service = IncubationService(BatchRepository(self.database))
+        batch = service.create_batch(user_id=1, species="chicken", eggs_count=20, start_date=self.today - timedelta(days=22))
+        service.complete_batch(batch_id=batch.id, user_id=1, hatched_count=15, completed_at=self.today)
+        page = self.client.get(f"/incubation{AUTH}").text
+        ok = self._post("/incubation/losses", {"batch_id": str(batch.id), "infertile": "3", "dead_embryo": "1", "not_hatched": "1"})
+        too_many = self._post("/incubation/losses", {"batch_id": str(batch.id), "infertile": "9", "dead_embryo": "0", "not_hatched": "0"})
+
+        self.assertIn("Почему не вывелись", page)
+        self.assertIn("notice=", ok.headers["location"])
+        self.assertIn("error=", too_many.headers["location"])
+        self.assertIn("неоплод 3", self.client.get(f"/incubation{AUTH}").text)
+
+        exclusion = self._post("/eggs/exclusions", {"hens_count": "2", "reason": "molting", "started_at": self.today.isoformat()})
+        self.assertIn("notice=", exclusion.headers["location"])
+        self.assertEqual(EggRepository(self.database).list_open_exclusions(1)[0].bird_group_id, self.hens.id)
+
     def test_new_pages_require_token(self) -> None:
         self.assertEqual(self.client.get("/advisor").status_code, 401)
         self.assertEqual(self.client.get("/help").status_code, 401)
