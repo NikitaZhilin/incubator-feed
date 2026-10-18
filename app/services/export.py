@@ -151,6 +151,17 @@ def _sheets(database: Database, user_id: int, zone: ZoneInfo) -> list[tuple[str,
                 """
             )
         ]
+        storage = [
+            [r["name"], _day(r["laid_on"]), r["count"]]
+            for r in rows(
+                """
+                SELECT p.name, l.laid_on, l.count FROM egg_lots AS l
+                JOIN egg_places AS p ON p.id = l.place_id
+                WHERE l.user_id = ? AND l.count > 0 AND p.is_active = 1
+                ORDER BY p.priority, l.laid_on
+                """
+            )
+        ]
         care = [
             [r["title"], r["interval_days"], _day(r["last_done"]), _day(r["next_due"]), "да" if r["is_active"] else "нет"]
             for r in rows("SELECT * FROM care_tasks WHERE user_id = ? ORDER BY id")
@@ -174,6 +185,7 @@ def _sheets(database: Database, user_id: int, zone: ZoneInfo) -> list[tuple[str,
             batches,
         ),
         ("Уход", ["Задача", "Каждые, дн.", "Последний раз", "Следующий раз", "Включено"], care),
+        ("Хранение яиц", ["Место", "Дата сбора", "Яиц"], storage),
     ]
 
 

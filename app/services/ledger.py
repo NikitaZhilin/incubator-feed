@@ -94,6 +94,7 @@ class EggBalance:
     since: date
     collected: int
     gone: int
+    from_storage: bool = False
 
     @property
     def at_home(self) -> int:
@@ -130,6 +131,9 @@ class LedgerService:
         self.database = database
         self.ledger = LedgerRepository(database)
         self.eggs = EggRepository(database)
+        from app.services.egg_storage import EggStorage
+
+        self.storage = EggStorage(database)
         self.feed_service = feed_service
         self.feeding_service = feeding_service
         self.stock_service = stock_service
@@ -217,6 +221,7 @@ class LedgerService:
         amount_rub: float | None,
         occurred_on: date,
         note: str = "",
+        place_id: int | None = None,
     ) -> EggOutflow:
         if kind not in OUTFLOW_KINDS:
             raise ValueError("Выберите, куда ушли яйца.")
@@ -224,7 +229,7 @@ class LedgerService:
             raise ValueError("Нужно число яиц больше нуля.")
         if kind != "sold":
             amount_rub = None
-        return self.ledger.add_outflow(
+        outflow = self.ledger.add_outflow(
             user_id=user_id,
             kind=kind,
             eggs_count=eggs_count,
@@ -232,11 +237,15 @@ class LedgerService:
             occurred_on=occurred_on,
             note=note,
         )
+        # Eggs leave storage, oldest first.
+        self.storage.take(user_id, eggs_count, place_id=place_id, outflow_id=outflow.id)
+        return outflow
 
     def undo_outflow(self, user_id: int, outflow_id: int) -> EggOutflow | None:
         outflow = self.ledger.get_outflow(outflow_id, user_id)
         if outflow is None or not self.ledger.delete_outflow(outflow_id, user_id):
             return None
+        self.storage.give_back(user_id, outflow_id)
         return outflow
 
     def recent_outflows(self, user_id: int, *, today: date, days: int = 30) -> list[EggOutflow]:
@@ -259,7 +268,9 @@ class LedgerService:
         )
 
     def egg_balance(self, user_id: int, *, today: date) -> EggBalance | None:
-        """Eggs at home, counted from the first record of eggs leaving the house."""
+        """Eggs at home: from storage if it is kept, else counted from the first «eggs out» record."""
+        if self.storage.enabled(user_id):
+            return EggBalance(since=today, collected=self.storage.total(user_id), gone=0, from_storage=True)
         since = self.ledger.first_outflow_date(user_id)
         if since is None:
             return None

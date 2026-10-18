@@ -390,6 +390,28 @@ class WebParityTest(unittest.TestCase):
         self.assertIn("notice=", exclusion.headers["location"])
         self.assertEqual(EggRepository(self.database).list_open_exclusions(1)[0].bird_group_id, self.hens.id)
 
+    def test_egg_storage_on_site(self) -> None:
+        from app.services.egg_storage import EggStorage
+
+        start = self.client.get(f"/eggs{AUTH}").text
+        self._post("/storage/setup", {})
+        storage = EggStorage(self.database)
+        door, trays = storage.places(1)
+        self._post("/storage/recount", {"place_id": str(door.id), "count": "20", "age": "fresh"})
+        self._post("/storage/recount", {"place_id": str(trays.id), "count": "30", "age": "week2"})
+        self._post("/eggs/entries", {"entry_date": self.today.isoformat(), "eggs_count": "10"})
+        self.assertEqual([s.total for s in storage.contents(1)], [24, 36])
+
+        sold = self._post("/ledger/eggs-out", {"kind": "sold", "eggs_count": "30", "amount_rub": "450", "place_id": str(trays.id)})
+        moved = self._post("/storage/move", {"from_place": str(trays.id), "to_place": str(door.id), "count": "6"})
+        page = self.client.get(f"/eggs{AUTH}").text
+
+        self.assertIn("Хранение яиц", start)
+        self.assertIn("notice=", sold.headers["location"])
+        self.assertIn("notice=", moved.headers["location"])
+        self.assertEqual([s.total for s in storage.contents(1)], [30, 0])
+        self.assertIn("Дверца холодильника", page)
+
     def test_new_pages_require_token(self) -> None:
         self.assertEqual(self.client.get("/advisor").status_code, 401)
         self.assertEqual(self.client.get("/help").status_code, 401)

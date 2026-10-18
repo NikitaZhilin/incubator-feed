@@ -35,6 +35,9 @@ class EggService:
         self.feeds = feeds
         self.weather_client = weather_client
         self.timezone_name = timezone_name
+        from app.services.egg_storage import EggStorage
+
+        self.storage = EggStorage(eggs.database)
 
     def record_today(self, user_id: int, eggs_count: int, *, today: date | None = None, note: str = "") -> EggEntry:
         current_date = today or self.current_date()
@@ -43,7 +46,7 @@ class EggService:
         total_hens = self.total_laying_hens(user_id)
         excluded = self.excluded_hens_count(user_id, on_date=current_date, total_hens_count=total_hens)
         active_hens = max(total_hens - excluded, 0)
-        return self.eggs.create_entry(
+        entry = self.eggs.create_entry(
             user_id=user_id,
             entry_date=current_date,
             eggs_count=eggs_count,
@@ -52,6 +55,9 @@ class EggService:
             excluded_hens_count=excluded,
             note=note,
         )
+        # Collected eggs go to storage: the fridge door first, then trays.
+        self.storage.put(user_id, laid_on=current_date, count=eggs_count, entry_id=entry.id)
+        return entry
 
     def record_entry(
         self,
@@ -232,10 +238,21 @@ class EggService:
         )
         if updated is None:
             raise ValueError("Запись по яйцам не найдена.")
+        delta = next_count - current.eggs_count
+        if delta > 0:
+            self.storage.put(user_id, laid_on=next_date, count=delta, entry_id=entry_id)
+        elif delta < 0:
+            self.storage.remove_entry_eggs(user_id, entry_id, -delta)
+        if next_date != current.entry_date:
+            self.storage.redate_entry(user_id, entry_id, next_date)
         return updated
 
     def delete_entry(self, *, user_id: int, entry_id: int) -> bool:
-        return self.eggs.delete_entry(entry_id=entry_id, user_id=user_id)
+        current = self.eggs.get_entry(entry_id, user_id)
+        deleted = self.eggs.delete_entry(entry_id=entry_id, user_id=user_id)
+        if deleted and current is not None:
+            self.storage.remove_entry_eggs(user_id, entry_id, current.eggs_count)
+        return deleted
 
     def stats(
         self,

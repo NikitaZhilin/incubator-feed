@@ -180,7 +180,7 @@ class FarmInsightsTest(unittest.TestCase):
         self.assertEqual(
             book.sheetnames,
             ["Яйца", "Кормления", "Кормления по ингредиентам", "Склад", "Продажа и расход яиц", "Потери",
-             "Поголовье", "Инкубация", "Уход"],
+             "Поголовье", "Инкубация", "Уход", "Хранение яиц"],
         )
         self.assertEqual(book["Яйца"]["B2"].value, 9)
         self.assertEqual(book["Склад"]["B2"].value, "Кукуруза")
