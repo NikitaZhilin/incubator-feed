@@ -124,7 +124,8 @@ async def eggs_count(message: Message, state: FSMContext, egg_service: EggServic
         "Запись добавлена.\n\n"
         f"Дата: {entry.entry_date.isoformat()}\n"
         f"Яиц: {entry.eggs_count}\n"
-        f"Несушек в расчете: {entry.active_hens_count} из {entry.total_hens_count}",
+        f"Несушек в расчете: {entry.active_hens_count} из {entry.total_hens_count}"
+        + _storage_tail(egg_service, message.from_user.id),
         reply_markup=_recorded_keyboard(entry.id),
     )
 
@@ -884,6 +885,13 @@ def _format_exclusions(exclusions: list[HenLayingExclusion]) -> str:
 
 def _round_forecast(value: float) -> int:
     return int(value + 0.5)
+
+
+def _storage_tail(egg_service: EggService, user_id: int) -> str:
+    from app.services.egg_storage import storage_lines
+
+    lines = storage_lines(egg_service.storage, user_id, today=egg_service.current_date())
+    return ("\n\n" + "\n".join(lines)) if lines else ""
 
 
 def _recorded_keyboard(entry_id: int):

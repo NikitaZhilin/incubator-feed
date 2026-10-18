@@ -107,6 +107,10 @@ async def eggs_quick(callback: CallbackQuery, state: FSMContext, egg_service: Eg
     total = egg_service.eggs.sum_between(callback.from_user.id, start_date=day, end_date=day)
     when = "сегодня" if day == today else day.strftime("%d.%m")
     tail = f" Всего за {when}: {total}." if total != entry.eggs_count else ""
+    from app.services.egg_storage import storage_lines
+
+    stored = storage_lines(egg_service.storage, callback.from_user.id, today=today)
+    tail += ("\n" + "\n".join(stored)) if stored else ""
     await callback.message.answer(
         f"🥚 Записано {when}: {entry.eggs_count} яиц.{tail}\n"
         f"Несушек в расчёте: {entry.active_hens_count} из {entry.total_hens_count}.",

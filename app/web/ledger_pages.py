@@ -118,6 +118,7 @@ def register_ledger_routes(app: FastAPI, require_web_access) -> None:
             return failed
         try:
             raw_amount = form.get("amount_rub", "").strip()
+            raw_place = form.get("place_id", "").strip()
             outflow = service.record_outflow(
                 user_id=user_id,
                 kind=form.get("kind", ""),
@@ -125,6 +126,7 @@ def register_ledger_routes(app: FastAPI, require_web_access) -> None:
                 amount_rub=(parse_rub(raw_amount) or None) if raw_amount else None,
                 occurred_on=_date_or_today(form.get("occurred_on", ""), app.state.web_config.timezone_name),
                 note=form.get("note", "").strip(),
+                place_id=int(raw_place) if raw_place.isdigit() else None,
             )
         except ValueError as exc:
             return web._redirect_with_message(base, error=str(exc))
@@ -132,6 +134,73 @@ def register_ledger_routes(app: FastAPI, require_web_access) -> None:
         return web._redirect_with_message(
             base, notice=f"Записано: {OUTFLOW_KINDS[outflow.kind].lower()} {outflow.eggs_count} яиц{money}."
         )
+
+    # --- egg storage -------------------------------------------------------------
+
+    @app.post("/storage/setup", dependencies=access)
+    async def storage_setup(request: Request, auth: str | None = Query(default=None)):
+        _, base, user_id, service, failed = await _context(request, "/eggs", auth, "Настройка хранения")
+        if failed:
+            return failed
+        service.storage.setup_default(user_id)
+        return web._redirect_with_message(base, notice="Места хранения созданы. Внесите, сколько яиц лежит сейчас.")
+
+    @app.post("/storage/recount", dependencies=access)
+    async def storage_recount(request: Request, auth: str | None = Query(default=None)):
+        form, base, user_id, service, failed = await _context(request, "/eggs", auth, "Пересчёт")
+        if failed:
+            return failed
+        try:
+            raw_place, raw_count = form.get("place_id", ""), form.get("count", "").strip()
+            if not raw_place.isdigit() or not raw_count.isdigit():
+                raise ValueError("Выберите место и укажите число яиц.")
+            diff = service.storage.recount(
+                user_id, int(raw_place), int(raw_count),
+                today=_today(app.state.web_config.timezone_name), age=form.get("age", "fresh"),
+            )
+        except ValueError as exc:
+            return web._redirect_with_message(base, error=str(exc))
+        text = "Совпало с учётом." if diff == 0 else (f"Убрано {-diff} самых старых." if diff < 0 else f"Добавлено {diff}.")
+        return web._redirect_with_message(base, notice=f"Пересчитано. {text}")
+
+    @app.post("/storage/move", dependencies=access)
+    async def storage_move(request: Request, auth: str | None = Query(default=None)):
+        form, base, user_id, service, failed = await _context(request, "/eggs", auth, "Перенос")
+        if failed:
+            return failed
+        try:
+            values = [form.get(name, "").strip() for name in ("from_place", "to_place", "count")]
+            if not all(value.isdigit() for value in values):
+                raise ValueError("Выберите места и укажите число яиц.")
+            moved = service.storage.move(user_id, int(values[0]), int(values[1]), int(values[2]))
+        except ValueError as exc:
+            return web._redirect_with_message(base, error=str(exc))
+        return web._redirect_with_message(base, notice=f"Перенесено {moved} яиц.")
+
+    @app.post("/storage/places", dependencies=access)
+    async def storage_add_place(request: Request, auth: str | None = Query(default=None)):
+        form, base, user_id, service, failed = await _context(request, "/eggs", auth, "Добавление места")
+        if failed:
+            return failed
+        try:
+            raw_capacity = form.get("capacity", "").strip()
+            if raw_capacity and not raw_capacity.isdigit():
+                raise ValueError("Вместимость — целое число или пусто.")
+            place = service.storage.add_place(user_id, form.get("name", ""), int(raw_capacity) if raw_capacity and int(raw_capacity) else None)
+        except ValueError as exc:
+            return web._redirect_with_message(base, error=str(exc))
+        return web._redirect_with_message(base, notice=f"Место «{place.name}» добавлено.")
+
+    @app.post("/storage/places/{place_id}/remove", dependencies=access)
+    async def storage_remove_place(place_id: int, request: Request, auth: str | None = Query(default=None)):
+        _, base, user_id, service, failed = await _context(request, "/eggs", auth, "Удаление места")
+        if failed:
+            return failed
+        try:
+            removed = service.storage.remove_place(user_id, place_id)
+        except ValueError as exc:
+            return web._redirect_with_message(base, error=str(exc))
+        return web._redirect_with_message(base, notice="Место удалено." if removed else "Место не найдено.")
 
     @app.post("/ledger/eggs-out/{outflow_id}/undo", dependencies=access)
     async def undo_eggs_out(outflow_id: int, request: Request, auth: str | None = Query(default=None)):
@@ -254,12 +323,25 @@ def eggs_out_block(db_path, *, selected_user, auth_token: str, timezone_name: st
     if balance is None:
         stats = "Записей пока нет: отмечайте, когда яйца продаёте, отдаёте или кладёте в инкубатор."
     else:
+        home = (
+            f"В хранении {balance.at_home} яиц."
+            if balance.from_storage
+            else f"Дома примерно {balance.at_home} яиц (собрано {balance.collected}, ушло {balance.gone} "
+            f"с {balance.since.strftime('%d.%m')})."
+        )
         stats = (
-            f"Дома примерно {balance.at_home} яиц (собрано {balance.collected}, ушло {balance.gone} "
-            f"с {balance.since.strftime('%d.%m')}). За 30 дней продано {month.sold} на {format_rub(month.revenue_rub)}, "
+            f"{home} За 30 дней продано {month.sold} на {format_rub(month.revenue_rub)}, "
             f"отдано {month.given}, съели {month.eaten}, в инкубатор {month.incubated}."
         )
-    return f"""
+    stocks = service.storage.contents(user)
+    place_select = (
+        '<label><span class="label">Откуда</span><select name="place_id"><option value="">самые старые, откуда угодно</option>'
+        + "".join(f'<option value="{st.place.id}">{escape(st.place.name)} ({st.total})</option>' for st in stocks)
+        + "</select></label>"
+        if len(stocks) > 1
+        else ""
+    )
+    return storage_block(service, user, selected_user=selected_user, auth_token=auth_token, today=today) + f"""
   <h2>Продажа и раздача яиц</h2>
   <p class="small">{escape(stats)}</p>
   <form class="note" method="post" action="{escape(_link('/ledger/eggs-out', auth_token))}">
@@ -268,6 +350,7 @@ def eggs_out_block(db_path, *, selected_user, auth_token: str, timezone_name: st
     <label><span class="label">Яиц</span><input name="eggs_count" type="number" min="1" step="1" required></label>
     <label><span class="label">Сумма, ₽ (только для продажи)</span><input name="amount_rub" type="text" inputmode="decimal" maxlength="20" placeholder="необязательно"></label>
     <label><span class="label">Дата</span><input name="occurred_on" type="date" value="{today.isoformat()}" max="{today.isoformat()}"></label>
+    {place_select}
     <button type="submit">📤 Записать</button>
   </form>
   <table>
@@ -309,4 +392,74 @@ def cost_block(db_path, *, selected_user, auth_token: str, timezone_name: str) -
       <thead><tr><th>Дата</th><th>Позиция</th><th>Количество</th><th>Цена за всю покупку</th></tr></thead>
       <tbody>{rows}</tbody>
     </table>
+  </details>"""
+
+
+def storage_block(service, user: int, *, selected_user, auth_token: str, today) -> str:
+    """🧺 Хранение: places, counts and ages, recount, move, add place."""
+    from app.services.egg_storage import AGE_CHOICES, DEFAULT_PLACES, USE_FIRST_DAYS, age_text
+    from app.web.main import _link
+
+    stocks = service.storage.contents(user)
+    if not stocks:
+        default = " + ".join(f"{name} ({cap})" if cap else name for name, cap in DEFAULT_PLACES)
+        return f"""
+  <h2>Хранение яиц</h2>
+  <p class="small">Бот будет знать, сколько яиц в каждом месте и сколько им дней. Новый сбор раскладывается сам, продажа берёт самые старые.</p>
+  <form class="quiet" method="post" action="{escape(_link('/storage/setup', auth_token))}">
+    {_hidden_user(selected_user)}<button type="submit">🧺 Начать: {escape(default)}</button>
+  </form>"""
+    rows = []
+    for stock in stocks:
+        oldest = stock.oldest()
+        old = sum(lot.count for lot in stock.lots if (today - lot.laid_on).days > USE_FIRST_DAYS)
+        remove = (
+            f'<form class="quiet" method="post" action="{escape(_link(f"/storage/places/{stock.place.id}/remove", auth_token))}">'
+            f'{_hidden_user(selected_user)}<button type="submit" class="secondary">🗑</button></form>'
+            if stock.total == 0
+            else ""
+        )
+        rows.append(
+            "<tr>"
+            f"<td>{escape(stock.place.name)}</td>"
+            f"<td>{stock.total}{f' из {stock.place.capacity}' if stock.place.capacity else ''}</td>"
+            f"<td>{escape(age_text((today - oldest).days)) if oldest else '—'}</td>"
+            f"<td>{old or '—'}</td><td>{remove}</td>"
+            "</tr>"
+        )
+    options = "".join(f'<option value="{s.place.id}">{escape(s.place.name)} ({s.total})</option>' for s in stocks)
+    age_options = "".join(f'<option value="{code}">{escape(label)}</option>' for code, (label, _) in AGE_CHOICES.items())
+    move = ""
+    if len(stocks) > 1:
+        to_options = "".join(f'<option value="{s.place.id}">{escape(s.place.name)}</option>' for s in reversed(stocks))
+        move = f"""
+    <form class="note" method="post" action="{escape(_link('/storage/move', auth_token))}">
+      {_hidden_user(selected_user)}
+      <label><span class="label">Откуда</span><select name="from_place">{options}</select></label>
+      <label><span class="label">Куда</span><select name="to_place">{to_options}</select></label>
+      <label><span class="label">Сколько яиц</span><input name="count" type="number" min="1" step="1" value="30"></label>
+      <button type="submit">↔️ Перенести</button>
+    </form>"""
+    return f"""
+  <h2>Хранение яиц</h2>
+  <p class="small">Всего {sum(s.total for s in stocks)} яиц. Новый сбор заполняет места сверху вниз до вместимости; продажа и «съели» берут самые старые.</p>
+  <table>
+    <thead><tr><th>Место</th><th>Яиц</th><th>Самые старые</th><th>Старше 3 недель</th><th></th></tr></thead>
+    <tbody>{''.join(rows)}</tbody>
+  </table>
+  <details>
+    <summary>Пересчитать, перенести, добавить место</summary>
+    <form class="note" method="post" action="{escape(_link('/storage/recount', auth_token))}">
+      {_hidden_user(selected_user)}
+      <label><span class="label">Место</span><select name="place_id">{options}</select></label>
+      <label><span class="label">Сколько лежит на самом деле</span><input name="count" type="number" min="0" step="1" required></label>
+      <label><span class="label">Возраст, если яиц больше, чем в учёте</span><select name="age">{age_options}</select></label>
+      <button type="submit">🔢 Пересчитать</button>
+    </form>{move}
+    <form class="note" method="post" action="{escape(_link('/storage/places', auth_token))}">
+      {_hidden_user(selected_user)}
+      <label><span class="label">Новое место</span><input name="name" type="text" maxlength="60" required placeholder="например, Полка в кладовке"></label>
+      <label><span class="label">Вместимость (пусто — без ограничения)</span><input name="capacity" type="number" min="1" step="1"></label>
+      <button type="submit">➕ Добавить место</button>
+    </form>
   </details>"""

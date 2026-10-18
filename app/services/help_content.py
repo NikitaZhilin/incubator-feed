@@ -34,6 +34,7 @@ HELP_TOPICS: dict[str, HelpTopic] = {
     "egg_weather": HelpTopic("FAQ: город и погода", "К погоде", "eggs:weather", "egg_weather.md"),
     "care": HelpTopic("FAQ: уход за птицей", "К уходу", "care:menu", "care.md"),
     "egg_sales": HelpTopic("FAQ: продажа и раздача яиц", "К продажам", "ledger:out_list", "egg_sales.md"),
+    "egg_storage": HelpTopic("FAQ: хранение яиц", "К хранению", "storage:menu", "egg_storage.md"),
     "cost": HelpTopic("FAQ: себестоимость", "К себестоимости", "ledger:cost", "cost.md"),
     "losses": HelpTopic("FAQ: падёж и выбраковка", "К потерям", "ledger:losses", "losses.md"),
     "settings": HelpTopic("FAQ: настройки", "Настройки", "settings:menu", "settings.md"),

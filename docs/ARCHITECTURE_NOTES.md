@@ -29,6 +29,7 @@
 | Календарь ухода | `services/care.py` (`CareService`) | `care_tasks` | `handlers/farm_tools.py` | `web/farm_tools.care_block` |
 | Сбор яиц в одно нажатие, заметка к сбору, возраст стада, итоги и причины потерь инкубации | `services/farm_overview.py` | `batch_losses` | `handlers/quick.py`, `handlers/incubation.py` | `/advisor`, `/incubation`, `POST /incubation/losses` |
 | «Не несутся»: группа, «Снова несутся?» | `EggService.create_exclusion`, `stale_exclusions`, `extend_exclusion` | `hen_laying_exclusions` | `handlers/eggs.py` | `/eggs` |
+| Хранение яиц: места, партии по дате, раскладка сбора, списание с самых старых | `services/egg_storage.py` (`EggStorage`, создаётся внутри `EggService` и `LedgerService`) | `egg_places`, `egg_lots`, `egg_takes` | `handlers/egg_storage.py`, «откуда» в `handlers/ledger.py` | блок на `/eggs`, `/storage/*` |
 | Выгрузка в Excel | `services/export.py` (openpyxl) | все таблицы пользователя | `export:xlsx` | `/export.xlsx` |
 | Копии базы | `services/backups.py` (`DailyBackupLoop`) | файлы в `BACKUP_DIR` | `/backup`, `admin:backup` | — |
 | Напоминания и сводка | `services/reminders.py` (`ReminderRunner`) | `notification_log` | — | — |
@@ -100,6 +101,10 @@ MVP использует JSON-источник `app/content/incubation.json`, р
 - `LedgerService.record_loss` уменьшает `bird_groups.bird_count` через `FeedService.update_bird_group` (с фиксацией расхода склада); если выбыли все, группа архивируется. `undo_loss` возвращает количество или возвращает группу из архива.
 - `egg_outflows` — продажа/раздача/съели/в инкубатор. Остаток дома считается с первой записи: собрано (`egg_entries`) минус ушло.
 - `price_rub` в `stock_transactions` — цена за всю покупку. Цена за кг по ингредиенту — сумма цен трёх последних покупок, делённая на их вес. Стоимость корма считается по `feeding_event_items`.
+
+## Egg storage
+
+Хранение включается, когда у пользователя есть хоть одно место (`egg_places`). `EggService.record_today` после записи сбора вызывает `EggStorage.put`: места перебираются по `priority`, каждое заполняется до `capacity`, остаток ложится в последнее. Правка и удаление записи сбора убирают яйца этой записи (`egg_lots.entry_id`), затем самые новые. `LedgerService.record_outflow` вызывает `take` — самые старые партии из выбранного места или из всех — и пишет `egg_takes`, чтобы `undo_outflow` вернул яйца с прежней датой. Пересчёт при недостаче убирает самые старые, при излишке добавляет партию с выбранным возрастом.
 
 ## Care calendar
 

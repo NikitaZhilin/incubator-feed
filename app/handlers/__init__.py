@@ -11,6 +11,7 @@ from app.handlers.incubation import router as incubation_router
 from app.handlers.ledger import router as ledger_router
 from app.handlers.farm_tools import router as farm_tools_router
 from app.handlers.quick import router as quick_router
+from app.handlers.egg_storage import router as egg_storage_router
 from app.handlers.poultry_advisor import router as poultry_advisor_router
 from app.handlers.settings import router as settings_router
 
@@ -22,6 +23,7 @@ def register_handlers(dispatcher: Dispatcher) -> None:
     dispatcher.include_router(ledger_router)
     dispatcher.include_router(farm_tools_router)
     dispatcher.include_router(quick_router)
+    dispatcher.include_router(egg_storage_router)
     dispatcher.include_router(settings_router)
     dispatcher.include_router(admin_router)
     dispatcher.include_router(poultry_advisor_router)

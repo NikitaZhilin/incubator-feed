@@ -695,9 +695,15 @@ class ReminderRunner:
                     "Яйца:",
                     f"- Сегодня записано: {stats.today_eggs} шт.",
                     f"- За 7 дней: {stats.week_eggs} шт.; среднее: {stats.week_average:.1f} шт./день.",
-                    "",
                 ]
             )
+            try:
+                from app.services.egg_storage import storage_lines
+
+                lines.extend(f"- {line}" for line in storage_lines(self.egg_service.storage, user_id, today=local_now.date()))
+            except Exception:
+                logger.exception("Failed to read egg storage for user %s", user_id)
+            lines.append("")
 
         pace = self._feed_pace(user_id, local_now)
         if sections.get("notify_feed", True) and pace is not None:

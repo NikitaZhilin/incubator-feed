@@ -34,6 +34,7 @@
 | `faq:egg_exclusions` | `egg_exclusions.md` | временно не несущиеся куры |
 | `faq:egg_weather` | `egg_weather.md` | город и погода |
 | `faq:care` | `care.md` | календарь ухода |
+| `faq:egg_storage` | `egg_storage.md` | хранение яиц |
 | `faq:egg_sales` | `egg_sales.md` | продажа и раздача яиц |
 | `faq:cost` | `cost.md` | себестоимость |
 | `faq:losses` | `losses.md` | падёж и выбраковка |

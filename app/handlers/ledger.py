@@ -35,6 +35,7 @@ class LossFlow(StatesGroup):
 class OutFlow(StatesGroup):
     count = State()
     amount = State()
+    place = State()
 
 
 class PriceFlow(StatesGroup):
@@ -265,9 +266,26 @@ async def _after_count(target: Message, state: FSMContext, ledger_service: Ledge
 
 
 async def _record_outflow(
-    target: Message, state: FSMContext, ledger_service: LedgerService, user_id: int, *, amount: float | None
+    target: Message,
+    state: FSMContext,
+    ledger_service: LedgerService,
+    user_id: int,
+    *,
+    amount: float | None,
+    place_id: int | None = None,
+    place_chosen: bool = False,
 ) -> None:
     data = await state.get_data()
+    stocks = [s for s in ledger_service.storage.contents(user_id) if s.total > 0]
+    if not place_chosen and len(stocks) > 1:
+        # Several places hold eggs: ask where they were taken from.
+        await state.update_data(out_amount=amount)
+        await state.set_state(OutFlow.place)
+        rows = [[(f"{s.place.name} ({s.total})", f"ledger:out_place:{s.place.id}")] for s in stocks]
+        rows.append([("Самые старые, откуда угодно", "ledger:out_place:any")])
+        rows.append([CANCEL])
+        await target.answer("Откуда взяли яйца?", reply_markup=_kb(rows))
+        return
     try:
         outflow = ledger_service.record_outflow(
             user_id=user_id,
@@ -275,6 +293,7 @@ async def _record_outflow(
             eggs_count=int(data.get("out_count") or 0),
             amount_rub=amount,
             occurred_on=_today(),
+            place_id=place_id,
         )
     except ValueError as exc:
         await state.clear()
@@ -286,9 +305,29 @@ async def _record_outflow(
         line += f" за {format_rub(outflow.amount_rub)} ({format_rub(outflow.amount_rub / outflow.eggs_count * 10)} за десяток)"
     lines = [line + "."]
     balance = ledger_service.egg_balance(user_id, today=_today())
-    if balance is not None:
+    if balance is not None and balance.from_storage:
+        from app.services.egg_storage import storage_lines
+
+        lines.extend(storage_lines(ledger_service.storage, user_id, today=_today()))
+    elif balance is not None:
         lines.append(f"Дома примерно {balance.at_home} яиц (считаю с {balance.since.strftime('%d.%m')}).")
     await target.answer("\n".join(lines), reply_markup=eggs_out_back_keyboard(f"ledger:out_undo:{outflow.id}"))
+
+
+@router.callback_query(OutFlow.place, F.data.startswith("ledger:out_place:"))
+async def out_place(callback: CallbackQuery, state: FSMContext, ledger_service: LedgerService) -> None:
+    raw = str(callback.data).rsplit(":", 1)[1]
+    data = await state.get_data()
+    await callback.answer()
+    await _record_outflow(
+        callback.message,
+        state,
+        ledger_service,
+        callback.from_user.id,
+        amount=data.get("out_amount"),
+        place_id=int(raw) if raw.isdigit() else None,
+        place_chosen=True,
+    )
 
 
 @router.callback_query(OutFlow.count, F.data.startswith("ledger:out_n:"))
@@ -347,10 +386,15 @@ def format_outflow_overview(ledger_service: LedgerService, user_id: int) -> str:
     if balance is None:
         lines.append("Записей пока нет. Нажмите «📤 Продал / отдал», когда яйца уходят из дома.")
         return "\n".join(lines)
-    lines.append(
-        f"Дома примерно {balance.at_home} яиц: собрано {balance.collected}, ушло {balance.gone} "
-        f"(с {balance.since.strftime('%d.%m')})."
-    )
+    if balance.from_storage:
+        from app.services.egg_storage import storage_lines
+
+        lines.extend(storage_lines(ledger_service.storage, user_id, today=today))
+    else:
+        lines.append(
+            f"Дома примерно {balance.at_home} яиц: собрано {balance.collected}, ушло {balance.gone} "
+            f"(с {balance.since.strftime('%d.%m')})."
+        )
     for title, summary in (("За 7 дней", week), ("За 30 дней", month)):
         parts = []
         if summary.sold:
